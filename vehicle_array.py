@@ -1,13 +1,10 @@
-from typing import Iterable, List
+from typing import List
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from constants import lane_width
 from vehicle_handler import BaseVehicle
-
-
-_lane_width = 4
 
 
 class VehicleArray:
@@ -82,7 +79,7 @@ class VehicleArray:
         :param v0: initial speed. Only used if speed is one of the model states
         :return:
         """
-        y0 = [-2 + _lane_width * i for i in range(len(self.n_per_lane))]
+        y0 = [-2 + lane_width * i for i in range(len(self.n_per_lane))]
 
         state0 = []
         for i in range(len(self.n_per_lane)):
@@ -117,15 +114,45 @@ class VehicleArray:
                 y0 = self.initial_state[starting_idx
                                         + self.vehicle_class.state_idx['y']]
                 x = v_ff * tf + x0
-                y = y0 + (-1)**i*_lane_width
+                y = y0 + (-1) ** i * lane_width
                 state_vector = self.vehicle_class.create_state_vector(
                     x, y, 0, v_ff)
                 state_final.append(state_vector)
             n_previous += n
         return np.concatenate(state_final)
 
+    def update(self, states, inputs, params):
+        """
+        Computes the states derivatives
+        :param states: Current states of all vehicles
+        :param inputs: Current inputs of all vehicles
+        :param params:
+        :return:
+        """
+        dxdt = np.zeros(len(states))
+        n_states = self.vehicle_class.n_states
+        n_inputs = self.vehicle_class.n_inputs
+        for i in range(self.n_vehs):
+            states_idx = [j for j in range(i * n_states, (i + 1) * n_states)]
+            inputs_idx = [j for j in range(i * n_inputs, (i + 1) * n_inputs)]
+            ego_states = states[states_idx]
+            leader_states = self.vehicle_class.get_leader_states(ego_states,
+                                                                 states)
+            dxdt[states_idx] = self.vehicle_class.dynamics(
+                ego_states, inputs[inputs_idx], leader_states)
+        return dxdt
+
     def to_dataframe(self, time: np.ndarray,
                      states: np.ndarray, inputs: np.ndarray) -> pd.DataFrame:
+        """
+
+        :param time: Array with all simulation time points
+        :param states: Matrix of states where each column contains the full
+         system state at one time point
+        :param inputs: Matrix of inputs where each column contains all the
+         system's inputs at one time point
+        :return:
+        """
         all_data = []
         for i in range(self.n_vehs):
             vehicle_data = self.vehicle_class.to_dataframe(
@@ -134,32 +161,3 @@ class VehicleArray:
             vehicle_data['id'] = i
             all_data.append(vehicle_data)
         return pd.concat(all_data)
-
-    # def plot_state_vs_time(
-    #         self, time: Iterable[float], state_name: str,
-    #         states: np.ndarray, inputs: np.array, ax: plt.axes = None):
-    #     will_show = ax is None
-    #     if will_show:
-    #         fig, ax = plt.subplots()
-    #     for i in range(self.n_vehs):
-    #         line = self.vehicle_class.plot_variable_vs_time(
-    #             time, state_name, self.select_single_vehicle_states(states,
-    #             i),
-    #             self.select_single_vehicle_inputs(inputs, i), ax)
-    #         line.set_label(str(i))
-    #     ax.legend()
-    #
-    #     if will_show:
-    #         plt.tight_layout()
-    #         plt.show()
-    #
-    # def plot_multi_states_vs_time(
-    #         self, time: Iterable[float], states_to_plot: List[str],
-    #         states: np.ndarray, inputs: np.array):
-    #     n_plots = len(states_to_plot)
-    #     fig, ax = plt.subplots(n_plots)
-    #     for i in range(n_plots):
-    #         self.plot_state_vs_time(time, states_to_plot[i], states, inputs,
-    #                                 ax[i])
-    #     fig.tight_layout()
-    #     fig.show()
