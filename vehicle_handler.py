@@ -9,25 +9,36 @@ from constants import lane_width
 
 class BaseVehicle(ABC):
 
-    def __init__(self, state_names: List[str], input_names: List[str],
-                 free_flow_speed: float):
-        self.n_states = len(state_names)
-        self.state_names = state_names
-        self.n_inputs = len(input_names)
-        self.input_names = input_names
-        self.state_idx = {state_names[i]: i for i in range(self.n_states)}
-        self.input_idx = {input_names[i]: i for i in range(self.n_inputs)}
+    _counter = 0
+
+    def __init__(self, free_flow_speed):
+        """
+
+        :param free_flow_speed: Desired speed if there's no vehicle ahead
+        """
+        self.state_names, self.n_states = None, None
+        self.input_names, self.n_inputs = None, None
+        self.state_idx, self.input_idx = None, None
+        self.initial_state = None
 
         # Some parameters
+        self.id = BaseVehicle._counter
+        BaseVehicle._counter += 1
+        self.free_flow_speed = free_flow_speed
         self.lr = 2  # dist from C.G. to rear wheel
         self.lf = 1  # dist from C.G. to front wheel
         self.wheelbase = self.lr + self.lf
         self.phi_max = 0.1  # max steering wheel angle
-        self.free_flow_speed = free_flow_speed
 
-        # Initial states
-        # self.initial_state = None
+    def __repr__(self):
+        return self.__class__.__name__
 
+    @staticmethod
+    def reset_vehicle_counter():
+        BaseVehicle._counter = 0
+
+    # TODO: maybe most of these methods could be class methods since they don't
+    #  depend on any 'internal' value of the instance
     def get_state(self, states: List, state_name: str) -> float:
         return states[self.state_idx[state_name]]
 
@@ -83,13 +94,17 @@ class BaseVehicle(ABC):
         derivatives[self.state_idx['theta']] = (vel * np.tan(phi)
                                                 / self.wheelbase)
 
+    def set_initial_state(self, x: float, y: float, theta: float,
+                          v: float = None):
+        self.initial_state = self.create_state_vector(x, y, theta, v)
+
     def create_state_vector(self, x: float, y: float, theta: float,
-                            v0: float = None):
+                            v: float = None):
         state_vector = np.zeros(self.n_states)
         state_vector[self.state_idx['x']] = x
         state_vector[self.state_idx['y']] = y
         state_vector[self.state_idx['theta']] = theta
-        self.set_speed(v0, state_vector)
+        self.set_speed(v, state_vector)
         return state_vector
 
     def to_dataframe(self, time: np.ndarray,
@@ -136,71 +151,20 @@ class BaseVehicle(ABC):
     def compute_acceleration(self, ego_states, inputs, leader_states):
         pass
 
-    # def plot_variable_vs_time(
-    #         self, time: Iterable[float], variable_name: str,
-    #         states: np.ndarray, inputs: np.ndarray, ax: plt.axes = None):
-    #     # self.plot_multi_states_vs_time(time, states, [state_name])
-    #     will_show = ax is None
-    #     if will_show:
-    #         _, ax = plt.subplots()
-    #
-    #     if variable_name in self.state_names:
-    #         variable = states[self.state_idx[variable_name]]
-    #     elif variable_name in self.input_names:
-    #         variable = inputs[self.input_idx[variable_name]]
-    #     else:
-    #         raise ValueError("Requested variable is neither a state nor an "
-    #                          "input of this model")
-    #
-    #     line, = ax.plot(time, variable)
-    #     ax.set_xlabel("t [sec]")
-    #     ax.set_ylabel(variable_name + ' [' + self._units[variable_name] + ']')
-    #     if will_show:
-    #         plt.tight_layout()
-    #         plt.show()
-    #     return line
-    #
-    # def plot_multi_states_vs_time(
-    #         self, time: Iterable[float], states: np.ndarray,
-    #         inputs: np.ndarray, states_to_plot: List[str]):
-    #     n_plots = len(states_to_plot)
-    #     fig, ax = plt.subplots(n_plots)
-    #     for i in range(n_plots):
-    #         self.plot_variable_vs_time(time, states_to_plot[i],
-    #                                    states, inputs, ax[i])
-    #     fig.tight_layout()
-    #     fig.show()
-    #
-    # def plot_lane_change_and_inputs(self, time, states, inputs, n_vehs):
-    #
-    #     plt.subplot(3, 1, 1)
-    #     for i in range(n_vehs):
-    #         x_idx_per_veh = i * self.n_states + self.state_idx['x']
-    #         y_idx_per_veh = i * self.n_states + self.state_idx['y']
-    #         plt.plot(states[x_idx_per_veh, :], states[y_idx_per_veh],
-    #                  label=str(i))
-    #     plt.grid(True)
-    #     plt.xlabel("x [m]")
-    #     plt.ylabel("y [m]")
-    #
-    #     plt.subplot(3, 1, 2)
-    #     for i in range(n_vehs):
-    #         v_idx_per_veh = i * self.n_states + self.state_idx['v']
-    #         plt.plot(time, states[v_idx_per_veh], label=str(i))
-    #     plt.grid(True)
-    #     plt.xlabel("t [sec]")
-    #     plt.ylabel("v [m/s]")
-    #
-    #     plt.subplot(3, 1, 3)
-    #     for i in range(n_vehs):
-    #         plt.plot(time, inputs[i], label=str(i))
-    #     plt.grid(True)
-    #     plt.xlabel("t [sec]")
-    #     plt.ylabel("phi [rad]")
-    #
-    #     plt.legend()
-    #     plt.tight_layout()
-    #     plt.show()
+    def _set_model(self, state_names: List[str], input_names: List[str]):
+        """
+        Must be called in the constructor of every derived class to set the
+        variables that define which vehicle model is implemented.
+        :param state_names: Names of the state variables
+        :param input_names: Names of the input variables
+        :return:
+        """
+        self.n_states = len(state_names)
+        self.state_names = state_names
+        self.n_inputs = len(input_names)
+        self.input_names = input_names
+        self.state_idx = {state_names[i]: i for i in range(self.n_states)}
+        self.input_idx = {input_names[i]: i for i in range(self.n_inputs)}
 
 
 class ThreeStateVehicle(BaseVehicle, ABC):
@@ -209,7 +173,8 @@ class ThreeStateVehicle(BaseVehicle, ABC):
     _input_names = ['v', 'phi']
 
     def __init__(self, free_flow_speed: float):
-        super().__init__(self._state_names, self._input_names, free_flow_speed)
+        super().__init__(free_flow_speed)
+        self._set_model(self._state_names, self._input_names)
 
     def set_speed(self, v0, state):
         # Does nothing because velocity is an input for this model
@@ -259,7 +224,8 @@ class FourStateVehicle(BaseVehicle):
     _input_names = ['a', 'phi']
 
     def __init__(self, free_flow_speed: float):
-        super().__init__(self._state_names, self._input_names, free_flow_speed)
+        super().__init__(free_flow_speed)
+        self._set_model(self._state_names, self._input_names)
         self.brake_max = -4
         self.accel_max = 2
 
@@ -289,8 +255,9 @@ class FourStateVehicleAccelFB(FourStateVehicle):
     """ States: [x, y, theta, v], inputs: [phi], centered at the C.G.
      and accel is computed by a feedback law"""
 
+    _input_names = ['phi']
+
     def __init__(self, free_flow_speed: float):
-        self._input_names = ['phi']
         super().__init__(free_flow_speed)
 
         # Controller parameters

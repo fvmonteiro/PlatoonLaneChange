@@ -11,15 +11,6 @@ def vehicle_update(t, states, inputs, params):
     """
     vehicle_array = params['vehicle_array']
 
-    if params['test']:
-        print('------ once? ------')
-        params['test'] = False
-
-    # TODO: save vehicle_array instead of vehicle_class in the params dict.
-    #  Create and call a method 'compute_internal_inputs' which will set the
-    #  accelerations. The dynamics will be the same for all vehicle with the
-    #  same states
-
     return vehicle_array.update(states, inputs, params)
 
 
