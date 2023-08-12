@@ -4,8 +4,6 @@ from typing import List
 import numpy as np
 import pandas as pd
 
-from constants import lane_width
-
 
 class BaseVehicle(ABC):
 
@@ -18,8 +16,9 @@ class BaseVehicle(ABC):
         """
         self.state_names, self.n_states = None, None
         self.input_names, self.n_inputs = None, None
-        self.state_idx, self.input_idx = None, None
+        self.state_idx, self.input_idx = {}, {}
         self.initial_state = None
+        self.leader_id = -1
 
         # Some parameters
         self.id = BaseVehicle._counter
@@ -45,38 +44,22 @@ class BaseVehicle(ABC):
     def get_input(self, inputs: List, input_name: str) -> float:
         return inputs[self.input_idx[input_name]]
 
-    def get_leader_states(self, ego_states, all_states):
-        """
-        Figures out which vehicle on the same lane is the closest ahead of the
-        ego vehicle. First implementation not optimized - possibly slow!
-        :param ego_states:
-        :param all_states:
-        :return:
-        """
-        ego_x = ego_states[self.state_idx['x']]
-        ego_y = ego_states[self.state_idx['y']]
-        leader_x = float('inf')
-        leader_states = None
-        for i in range(0, len(all_states), self.n_states):
-            other_x = all_states[i + self.state_idx['x']]
-            other_y = all_states[i + self.state_idx['y']]
-            if (np.abs(other_y - ego_y) < lane_width / 2  # same lane
-                    and ego_x < other_x < leader_x):  # ahead and close
-                leader_x = other_x
-                leader_states = all_states[i: i + self.n_states]
-        return leader_states
+    def has_leader(self):
+        return self.leader_id >= 0
+
+    def compute_safe_gap(self, v_ego):
+        return 0  # we ignore safety for vehicles without accel feedback
 
     def dynamics(self, ego_states, inputs, leader_states):
         theta = self.get_state(ego_states, 'theta')
-        # phi = np.clip(self.get_input(inputs, 'phi'),
-        #               -5, 5)
         phi = self.get_input(inputs, 'phi')
         vel = self.get_vel(ego_states, inputs)
 
         accel = self.compute_acceleration(ego_states, inputs, leader_states)
         dxdt = np.zeros(self.n_states)
-        self.compute_derivatives(vel, theta, float(phi), accel, dxdt)
+        self.compute_derivatives(vel, theta, phi, accel, dxdt)
         return dxdt
+        # return self.compute_derivatives(ego_states, inputs, leader_states)
 
     def position_update_cg(self, vel: float, theta: float, phi: float,
                            derivatives: np.ndarray) -> None:
@@ -114,6 +97,12 @@ class BaseVehicle(ABC):
                    + [i for i in self.input_names])
         return pd.DataFrame(data=np.transpose(data), columns=columns)
 
+    def get_vel(self, states, inputs):
+        try:
+            return states[self.state_idx['v']]
+        except KeyError:
+            return inputs[self.input_idx['v']]
+
     @abstractmethod
     def set_speed(self, v0, state):
         """
@@ -122,10 +111,6 @@ class BaseVehicle(ABC):
         :param state: state vector being modified
         :return: nothing, modifies the state array
         """
-        pass
-
-    @abstractmethod
-    def get_vel(self, states, inputs):
         pass
 
     @abstractmethod
@@ -141,8 +126,7 @@ class BaseVehicle(ABC):
         pass
 
     @abstractmethod
-    def compute_derivatives(self, vel: float, theta: float, phi: float,
-                            accel: float, derivatives: np.ndarray) -> None:
+    def compute_derivatives(self, vel, theta, phi, accel, derivatives):
         """ Computes the derivatives of x, y, and theta, and stores them in the
          derivatives array """
         pass
@@ -184,8 +168,8 @@ class ThreeStateVehicle(BaseVehicle, ABC):
         # Does nothing because velocity is an input for this model
         pass
 
-    def get_vel(self, states, inputs):
-        return self.get_input(inputs, 'v')
+    # def get_vel(self, states, inputs):
+    #     return self.get_input(inputs, 'v')
 
     def get_desired_input(self) -> List[float]:
         return [self.free_flow_speed, 0]
@@ -201,8 +185,7 @@ class ThreeStateVehicleRearWheel(ThreeStateVehicle):
     def __init__(self, free_flow_speed: float):
         super().__init__(free_flow_speed)
 
-    def compute_derivatives(self, vel: float, theta: float, phi: float,
-                            accel: float, derivatives: np.ndarray) -> None:
+    def compute_derivatives(self, vel, theta, phi, accel, derivatives):
         self.position_update_rear_wheels(vel, theta, phi, derivatives)
 
 
@@ -212,8 +195,7 @@ class ThreeStateVehicleCG(ThreeStateVehicle):
     def __init__(self, free_flow_speed: float):
         super().__init__(free_flow_speed)
 
-    def compute_derivatives(self, vel: float, theta: float, phi: float,
-                            accel: float, derivatives: np.ndarray) -> None:
+    def compute_derivatives(self, vel, theta, phi, accel, derivatives):
         self.position_update_cg(vel, theta, phi, derivatives)
 
 
@@ -231,18 +213,14 @@ class FourStateVehicle(BaseVehicle):
 
     def set_speed(self, v0, state):
         state[self.state_idx['v']] = v0
-        pass
 
-    def compute_derivatives(self, vel: float, theta: float, phi: float,
-                            accel: float, derivatives: np.ndarray) -> None:
+    def compute_derivatives(self, vel, theta, phi, accel, derivatives):
         self.position_update_cg(vel, theta, phi, derivatives)
         derivatives[self.state_idx['v']] = accel
+        return derivatives
 
     def compute_acceleration(self, ego_states, inputs, leader_states):
         return self.get_input(inputs, 'a')
-
-    def get_vel(self, states, inputs):
-        return self.get_state(states, 'v')
 
     def get_desired_input(self) -> List[float]:
         return [0] * self.n_inputs
@@ -263,20 +241,19 @@ class FourStateVehicleAccelFB(FourStateVehicle):
         # Controller parameters
         self.h = 1.0  # time headway [s]
         self.c = 1.0  # standstill distance [m]
-        self.kg = 0.1
+        self.kg = 0.5
         self.kv = 0.5
 
     def compute_acceleration(self, ego_states, inputs, leader_states) -> float:
         """
         Computes acceleration for the ego vehicle following a leader
         """
-        if leader_states is None:
-            accel = self.kv * (self.free_flow_speed
-                               - self.get_vel(ego_states, None))
+        v_ego = self.get_state(ego_states, 'v')
+        if leader_states is None or len(leader_states) == 0:
+            accel = self.kv * (self.free_flow_speed - v_ego)
         else:
             gap = (self.get_state(leader_states, 'x')
                    - self.get_state(ego_states, 'x'))
-            v_ego = self.get_state(ego_states, 'v')
             v_leader = self.get_state(leader_states, 'v')
             accel = (self.kg * (gap - self.h * v_ego - self.c)
                      + self.kv * (v_leader - v_ego))
@@ -284,3 +261,26 @@ class FourStateVehicleAccelFB(FourStateVehicle):
 
     def get_input_limits(self) -> (List[float], List[float]):
         return [-self.phi_max], [self.phi_max]
+
+    def compute_safe_gap(self, v_ego):
+        return self.h * v_ego - self.c
+
+
+class LongitudinalVehicle(FourStateVehicleAccelFB):
+    """ Vehicle that does not perform lane change and computes its own
+    acceleration """
+
+    _input_names = []
+
+    def __init__(self, free_flow_speed: float):
+        super().__init__(free_flow_speed)
+        self._set_model(self._state_names, self._input_names)
+
+    def get_input(self, inputs: List, input_name: str) -> float:
+        return 0.0  # all inputs are computed internally
+
+    def get_desired_input(self) -> List[float]:
+        return []
+
+    def get_input_limits(self) -> (List[float], List[float]):
+        return [], []

@@ -4,10 +4,8 @@ from typing import List, Type
 
 import control as ct
 import control.optimal as opt
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import seaborn as sns
+
 from scipy.optimize import LinearConstraint, NonlinearConstraint
 
 import vehicle_handler
@@ -17,75 +15,31 @@ from vehicle_array import VehicleArray
 from vehicle_handler import BaseVehicle
 
 
-def load_simulated_scenario(pickle_file_name: str):
-    with open(pickle_file_name, 'rb') as f:
-        data = pickle.load(f)
-    return data
-
-
-def plot_lane_change(data: pd.DataFrame):
-    """
-    Plots the lane change in a y vs x plot along with speed and steering wheel
-     angle vs time
-    :param data:
-    :return:
-    """
-    sns.set_style('whitegrid')
-    x_axes = ['x', 't', 't']
-    y_axes = ['y', 'v', 'phi']
-    plot_scenario_results(x_axes, y_axes, data)
-
-
-def plot_vehicle_following(data: pd.DataFrame):
-    """
-    Plots the x and vel vs time
-    :param data:
-    :return:
-    """
-    sns.set_style('whitegrid')
-    data['gap'] = 0
-    data.loc[data['id'] == 1, 'gap'] = (data.loc[data['id'] == 0, 'x']
-                                        - data.loc[data['id'] == 1, 'x'])
-    x_axes = ['t', 't']
-    y_axes = ['gap', 'v']
-    plot_scenario_results(x_axes, y_axes, data)
-
-
-def plot_scenario_results(x_axes: List[str], y_axes: List[str],
-                          data: pd.DataFrame):
-    """
-
-    :param x_axes: Name of the variable on the x-axis for each plot
-    :param y_axes: Name of the variable on the y-axis for each plot
-    :param data:
-    :return:
-    """
-    fig, ax = plt.subplots(len(y_axes))
-    for i, (x, y) in enumerate(zip(x_axes, y_axes)):
-        sns.lineplot(data, x=x, y=y, hue='id', ax=ax[i])
-        low, high = ax[i].get_ylim()
-        if y == 'v' and high - low < 1:
-            low, high = np.floor(low - 0.5), np.ceil(high + 0.5)
-        ax[i].set(xlabel=_get_variable_with_unit(x),
-                  ylabel=_get_variable_with_unit(y),
-                  ylim=(low, high))
-    fig.tight_layout()
-    fig.show()
-
-
 class SimulationScenario(ABC):
-    def __init__(self, n_per_lane: List[int], vehicle_class: Type[BaseVehicle],
-                 free_flow_speed: float):
-        self.n_per_lane = n_per_lane
+    def __init__(self):
+        self.n_per_lane = []
         self.vehicle_array = VehicleArray()
-        self.vehicle_array.create_uniform_array(n_per_lane, vehicle_class,
-                                                free_flow_speed)
-
         vehicle_handler.BaseVehicle.reset_vehicle_counter()
         # Simulation parameters
         self.initial_state, self.tf = None, None
         # Simulation results
         self.time, self.states, self.inputs = None, None, None
+
+    def set_uniform_vehicles(
+            self, n_per_lane: List[int], vehicle_class: Type[BaseVehicle],
+            free_flow_speed: float):
+        self.n_per_lane = n_per_lane
+        self.vehicle_array.create_uniform_array(sum(n_per_lane),
+                                                vehicle_class, free_flow_speed)
+
+    def set_vehicles(self, vehicle_classes: List[List[Type[BaseVehicle]]],
+                     free_flow_speeds: List[float]):
+        for i in range(len(vehicle_classes)):
+            self.n_per_lane.append(len(vehicle_classes[i]))
+        flat_vehicle_list = [item for sublist in vehicle_classes for
+                             item in sublist]
+        self.vehicle_array.create_vehicle_array(flat_vehicle_list,
+                                                free_flow_speeds)
 
     def save_response_data(self, file_name: str) -> None:
         """
@@ -96,6 +50,32 @@ class SimulationScenario(ABC):
         with open(file_name, 'wb') as f:
             pickle.dump(self.response_to_dataframe(),
                         f, pickle.HIGHEST_PROTOCOL)
+
+    def set_uniform_initial_state(self, gap: float = None):
+        """
+        All vehicles start at the center of their respective lanes, with
+        orientation angle zero, and at the same speed, which equals their
+        desired free-flow speed. Vehicles on the same lane are 'gap' meters
+        distant from each other.
+
+        :param gap: Inter-vehicle distance for vehicles on the same lane. If
+         the value is not given, it defaults to (v_ff + 1)
+        :return:
+        """
+        v0 = [veh.free_flow_speed for veh in self.vehicle_array.vehicles]
+        if gap is None:
+            gap = v0[0] + 1
+        x0 = []
+        y0 = []
+        for lane in range(len(self.n_per_lane)):
+            lane_center = lane * lane_width
+            n = self.n_per_lane[lane]
+            y0.extend([lane_center] * n)
+            for i in range(n):
+                x0.append(gap * (n - i - 1))
+        theta0 = [0] * self.vehicle_array.n_vehs
+        self.initial_state = self.vehicle_array.create_full_state_vector(
+            x0, y0, theta0, v0)
 
     def set_boundary_conditions(self, tf: float):
         """ Sets the initial state, final time and, depending on the scenario,
@@ -128,13 +108,12 @@ class SimulationScenario(ABC):
 
 class OptimalControlScenario(SimulationScenario, ABC):
 
-    def __init__(self, n_per_lane: List[int], vehicle_class: Type[BaseVehicle],
-                 free_flow_speed: float):
-        super().__init__(n_per_lane, vehicle_class, free_flow_speed)
+    def __init__(self):
+        super().__init__()
 
         # All must be set by the derived class
         self.dynamic_system = None
-        self.xf = None, None
+        self.final_state = None, None
         self.running_cost, self.terminal_cost = None, None
         self.terminal_constraints, self.constraints = None, None
         # self.response = None
@@ -153,6 +132,30 @@ class OptimalControlScenario(SimulationScenario, ABC):
             params=params, states=n_states, name='vehicle_array',
             inputs=input_names, outputs=output_names)
 
+    def set_free_flow_all_change_lanes_final_state(self):
+        """
+        Sets the final state where all vehicles change from their initial
+        lanes while traveling at their free-flow speed.
+
+        :return:
+        """
+        v_ff = [vehicle.free_flow_speed
+                for vehicle in self.vehicle_array.vehicles]
+        delta_x = []
+        delta_y = []
+        veh_counter = 0
+        for lane in range(len(self.n_per_lane)):
+            n = self.n_per_lane[lane]
+            for i in range(n):
+                delta_x.append(v_ff[veh_counter] * self.tf)
+                delta_y.append((-1) ** lane * lane_width)
+                veh_counter += 1
+        delta_theta = [0.0] * self.vehicle_array.n_vehs
+        delta_v = [0.0] * self.vehicle_array.n_vehs
+        delta_state = self.vehicle_array.create_full_state_vector(
+            delta_x, delta_y, delta_theta, delta_v)
+        self.final_state = self.initial_state + delta_state
+
     def set_optimal_control_problem_functions(self, tf: float):
         self.set_boundary_conditions(tf)
         self.set_costs()
@@ -170,7 +173,8 @@ class OptimalControlScenario(SimulationScenario, ABC):
         u0 = self.vehicle_array.get_desired_input()
         timepts = np.linspace(0, self.tf, (self.tf + 1), endpoint=True)
         result = opt.solve_ocp(
-            self.dynamic_system, timepts, self.initial_state, cost=self.running_cost,
+            self.dynamic_system, timepts, self.initial_state,
+            cost=self.running_cost,
             trajectory_constraints=self.constraints,
             terminal_cost=self.terminal_cost,
             terminal_constraints=self.terminal_constraints,
@@ -214,49 +218,22 @@ class ExampleScenario(OptimalControlScenario):
     """
 
     def create_initial_state(self):
-        v0 = [veh.free_flow_speed for veh in self.vehicle_array.vehicles]
-        gap = v0[0] + 1
-        x0 = []
-        y0 = []
-        for lane in range(len(self.n_per_lane)):
-            lane_center = lane * lane_width
-            n = self.n_per_lane[lane]
-            y0.extend([lane_center] * n)
-            for i in range(n):
-                x0.append(gap * (n - i - 1))
-        theta0 = [0] * self.vehicle_array.n_vehs
-        self.initial_state = self.vehicle_array.create_full_state_vector(
-            x0, y0, theta0, v0)
+        self.set_uniform_initial_state()
+        self.vehicle_array.assign_leaders(self.initial_state)
         print(self.initial_state)
 
     def create_final_state(self):
-        vf = [veh.free_flow_speed for veh in self.vehicle_array.vehicles]
-        xf = []
-        yf = []
-        for lane in range(len(self.n_per_lane)):
-            lane_center = lane * lane_width + (-1) ** lane * lane_width
-            n = self.n_per_lane[lane]
-            yf.extend([lane_center] * n)
-            for i in range(n):
-                xf.append(x0 + vf * self.tf)
-        thetaf = [0] * self.vehicle_array.n_vehs
-        self.xf = self.vehicle_array.create_full_state_vector(
-            xf, yf, thetaf, vf)
-        print(self.xf)
-
-        # y_idx = self.vehicle_array.get_state_indices('y')
-        #
-        # self.xf = self.vehicle_array.create_desired_final_state(self.tf)
-        # print(self.xf)
+        self.set_free_flow_all_change_lanes_final_state()
+        print(self.final_state)
 
     def set_costs(self):
         Q, R, P = self.create_simple_weight_matrices()
         # Desired control; not final control
         uf = self.vehicle_array.get_desired_input()
         self.running_cost = opt.quadratic_cost(self.dynamic_system,
-                                               Q, R, x0=self.xf, u0=uf)
+                                               Q, R, x0=self.final_state, u0=uf)
         self.terminal_cost = opt.quadratic_cost(self.dynamic_system,
-                                                P, 0, x0=self.xf)
+                                                P, 0, x0=self.final_state)
 
     def create_simple_weight_matrices(self):
         # don't turn too sharply: matrix Q
@@ -285,36 +262,84 @@ class ExampleScenario(OptimalControlScenario):
         self.set_input_boundaries()
 
 
-class LaneChangeWithConstraints(OptimalControlScenario):
+class MinimumTimeControl(OptimalControlScenario):
     """
-    Used to figure out how to code constraints
+    Used to figure out how to get a minimum time controller
     """
-
-    def __init__(self, free_flow_speed: float):
-        super().__init__([1], vehicle_handler.FourStateVehicleAccelFB,
-                         free_flow_speed)
-        self.min_lc_x = 20
+    def __init__(self):
+        super().__init__()
+        self.set_uniform_vehicles(
+            [1], vehicle_handler.FourStateVehicle, 10)
 
     def create_initial_state(self):
-        v0 = self.vehicle_array.vehicles[0].free_flow_speed
-        gap = v0 + 1
-        self.initial_state = self.vehicle_array.set_initial_state(gap, v0)
+        self.set_uniform_initial_state()
+        self.vehicle_array.assign_leaders(self.initial_state)
         print(self.initial_state)
 
     def create_final_state(self):
-        self.xf = self.vehicle_array.create_desired_final_state(self.tf)
-        print(self.xf)
+        self.set_free_flow_all_change_lanes_final_state()
+        print(self.final_state)
+
+    def set_costs(self):
+        Q, R, P = self.create_simple_weight_matrices()
+        # Desired control; not final control
+        uf = self.vehicle_array.get_desired_input()
+        self.running_cost = opt.quadratic_cost(self.dynamic_system,
+                                               Q, R, x0=self.final_state,
+                                               u0=uf)
+        self.terminal_cost = opt.quadratic_cost(self.dynamic_system,
+                                                P, 0, x0=self.final_state)
+
+    def set_constraints(self):
+        self.set_input_boundaries()
+
+class LaneChangeWithConstraints(OptimalControlScenario):
+    """
+    Used to test how to code safety constraints
+    """
+
+    def __init__(self, n_vehs: int, v_ff: float, lane_changing_vehicle_id: int):
+        super().__init__()
+        self.lc_id = lane_changing_vehicle_id
+        veh_classes = []
+        for i in range(n_vehs):
+            if i == lane_changing_vehicle_id:
+                veh_classes.append(vehicle_handler.FourStateVehicleAccelFB)
+            else:
+                veh_classes.append(vehicle_handler.LongitudinalVehicle)
+        self.set_vehicles([veh_classes], [v_ff] * n_vehs)
+        self.min_lc_x = 20
+
+    def create_initial_state(self):
+        gap = 9
+        self.set_uniform_initial_state(gap)
+        self.vehicle_array.assign_leaders(self.initial_state)
+        print(self.initial_state)
+
+    def create_final_state(self):
+        # xf and vf are irrelevant with the accel feedback model
+        n_vehs = sum(self.n_per_lane)
+        delta_x = [100.0] * n_vehs
+        delta_y = [0.0] * n_vehs
+        delta_y[self.lc_id] = 4.0
+        delta_theta = [0.0] * n_vehs
+        delta_v = [0.0] * n_vehs
+        delta_state = self.vehicle_array.create_full_state_vector(
+            delta_x, delta_y, delta_theta, delta_v)
+        # self.set_free_flow_all_change_lanes_final_state()
+        self.final_state = self.initial_state + delta_state
+        print(self.final_state)
 
     def set_costs(self):
         # Desired control; not final control
         uf = self.vehicle_array.get_desired_input()
         Q = np.diag([0, 0, 0.1, 0] * self.vehicle_array.n_vehs)
-        R = np.diag([0.1] * self.vehicle_array.n_vehs)
+        R = np.diag([0.01] * self.vehicle_array.n_inputs)
         self.running_cost = opt.quadratic_cost(self.dynamic_system, Q, R,
-                                               self.xf, uf)
-        P = np.diag([0, 1000, 1000, 0])
+                                               self.final_state, uf)
+        P = np.diag([0, 1000, 1000, 0] * self.vehicle_array.n_vehs)
         self.terminal_cost = opt.quadratic_cost(self.dynamic_system,
-                                                P, 0, x0=self.xf)
+                                                P, 0, x0=self.final_state)
 
     def set_constraints(self):
         self.set_input_boundaries()
@@ -324,27 +349,45 @@ class LaneChangeWithConstraints(OptimalControlScenario):
         # TODO: not getting the expected result. Could try a 'less' nonlinear
         #  constraint?
 
-        epsilon = 1e-6
-        nlc = NonlinearConstraint(self.safe_constraint, -epsilon, epsilon)
-
+        epsilon = 1e-10
+        nlc = NonlinearConstraint(self.safe_constraint,
+                                  -epsilon, epsilon)
         self.constraints.append(nlc)
 
     def safe_constraint(self, states, inputs):
-        x = states[0]
-        phi = inputs[0]
-        return min(x - self.min_lc_x, 0) * phi
+        gap = self.vehicle_array.compute_gap_to_leader(self.lc_id, states)
+        lc_vehicle = self.vehicle_array.vehicles[self.lc_id]
+        lc_veh_vel = self.vehicle_array.get_a_vehicle_state_by_id(
+            self.lc_id, states, 'v')
+        safe_gap = lc_vehicle.compute_safe_gap(lc_veh_vel)
+        dist_to_safe_gap = gap - 11
+        phi = self.vehicle_array.get_a_vehicle_input_by_id(
+            self.lc_id, inputs, 'phi')
+        return min(dist_to_safe_gap, 0) * phi
 
-    def smooth_safe_constraint(self, states, inputs):
-        epsilon = 1e-5
-        x = states[0] - self.min_lc_x
-        phi = inputs[0]
+    def lane_change_starting_point_constraint(self, states, inputs):
+        lc_veh_x = self.vehicle_array.get_a_vehicle_state_by_id(
+            self.lc_id, states, 'x')
+        phi = self.vehicle_array.get_a_vehicle_input_by_id(
+            self.lc_id, inputs, 'phi')
+        dist_to_point = lc_veh_x - self.min_lc_x
+        return min(dist_to_point, 0) * phi
+
+    def smooth_lane_change_starting_point_constraint(self, states, inputs):
+        lc_veh_x = self.vehicle_array.get_a_vehicle_state_by_id(
+            self.lc_id, states, 'x')
+        phi = self.vehicle_array.get_a_vehicle_input_by_id(
+            self.lc_id, inputs, 'phi')
+        dist_to_point = lc_veh_x - self.min_lc_x
+
         # Smooth min(x, 0)
-        if x < -epsilon:
-            min_x_0 = x
-        elif x > epsilon:
+        epsilon = 1e-5
+        if dist_to_point < -epsilon:
+            min_x_0 = dist_to_point
+        elif dist_to_point > epsilon:
             min_x_0 = 0
         else:
-            min_x_0 = -(x - epsilon) ** 2 / 4 / epsilon
+            min_x_0 = -(dist_to_point - epsilon) ** 2 / 4 / epsilon
         return min_x_0 * phi
 
 
@@ -353,14 +396,17 @@ class VehicleFollowingScenario(SimulationScenario):
     Scenario to test acceleration feedback laws. No lane changes.
     """
 
-    def __init__(self, n_per_lane: List[int], free_flow_speed: float):
-        super().__init__(n_per_lane, vehicle_handler.FourStateVehicleAccelFB,
-                         free_flow_speed)
+    def __init__(self, n_per_lane: List[int], v_ff: float):
+        super().__init__()
+        self.set_uniform_vehicles(n_per_lane,
+                                  vehicle_handler.LongitudinalVehicle,
+                                  v_ff)
 
     def create_initial_state(self):
-        v0 = self.vehicle_array.vehicles[0].free_flow_speed
         gap = 2
-        self.initial_state = self.vehicle_array.set_initial_state(gap, v0)
+        self.set_uniform_initial_state(gap)
+        self.vehicle_array.assign_leaders(self.initial_state)
+        print(self.initial_state)
 
     def run(self, parameters=None):
         """
@@ -378,7 +424,3 @@ class VehicleFollowingScenario(SimulationScenario):
                                              None)
             states[:, i + 1] = states[:, i] + dxdt * (time[i + 1] - time[i])
         self.time, self.states, self.inputs = time, states, steering_angle
-
-
-def _get_variable_with_unit(variable: str):
-    return variable + ' [' + units[variable] + ']'

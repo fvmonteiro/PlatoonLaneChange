@@ -11,10 +11,15 @@ class VehicleArray:
     """ Class to help manage groups of vehicles """
 
     def __init__(self):
-        self.vehicles = None
-        self.n_per_lane = None
+        self.vehicles: List[BaseVehicle] = []
         self.n_vehs = 0
         self.n_states, self.n_inputs = 0, 0
+        # Maps the vehicle id (position in the 'vehicles' list) to the index of
+        # its states in the state vector containing all vehicles
+        self.state_idx_map = []
+        # Maps the vehicle id (position in the 'vehicles' list) to the index of
+        # its inputs in the full input vector
+        self.input_idx_map = []
         # self.initial_state = None
 
     def get_input_limits(self):
@@ -35,31 +40,61 @@ class VehicleArray:
 
     def get_state_indices(self, state_name: str) -> List[int]:
         state_indices = []
-        shift = 0
         for vehicle in self.vehicles:
-            state_indices.append(shift + vehicle.state_idx[state_name])
-            shift += vehicle.n_states
+            state_indices.append(self.state_idx_map[vehicle.id]
+                                 + vehicle.state_idx[state_name])
         return state_indices
 
-    def create_uniform_array(self, n_per_lane: List[int],
+    def get_vehicle_state_vector_by_id(self, veh_id, states):
+        start_idx = self.state_idx_map[veh_id]
+        end_idx = self.state_idx_map[veh_id] + self.vehicles[veh_id].n_states
+        return states[start_idx: end_idx]
+
+    def get_vehicle_inputs_vector_by_id(self, veh_id, inputs):
+        start_idx = self.input_idx_map[veh_id]
+        end_idx = self.input_idx_map[veh_id] + self.vehicles[veh_id].n_inputs
+        return inputs[start_idx: end_idx]
+
+    def get_a_vehicle_state_by_id(self, veh_id, states, state_name):
+        vehicle_states = self.get_vehicle_state_vector_by_id(veh_id, states)
+        vehicle = self.vehicles[veh_id]
+        return vehicle.get_state(vehicle_states, state_name)
+
+    def get_a_vehicle_input_by_id(self, veh_id, inputs, input_name):
+        vehicle_inputs = self.get_vehicle_inputs_vector_by_id(veh_id, inputs)
+        vehicle = self.vehicles[veh_id]
+        return vehicle.get_input(vehicle_inputs, input_name)
+
+    def create_vehicle_array(self, vehicle_classes: List[Type[BaseVehicle]],
+                             free_flow_speeds: List[float]):
+        """
+
+        Populates the list of vehicles following the given classes
+        :param vehicle_classes: Class of each vehicle instances
+        :param free_flow_speeds: Desired free flow speed of each vehicle
+        :return:
+        """
+        self.n_vehs = len(vehicle_classes)
+        for i in range(len(vehicle_classes)):
+            self.vehicles.append(vehicle_classes[i](free_flow_speeds[i]))
+            self.state_idx_map.append(self.n_states)
+            self.input_idx_map.append(self.n_inputs)
+            self.n_states += self.vehicles[-1].n_states
+            self.n_inputs += self.vehicles[-1].n_inputs
+
+    def create_uniform_array(self, n_vehs: int,
                              vehicle_class: Type[BaseVehicle],
                              free_flow_speed: float):
         """
         Populates a list of vehicles with instances of 'vehicle_class'. All
         vehicles have the same desired free flow speed.
-        :param n_per_lane: Number of vehicles per lane, starting by the
-         leftmost lane
+        :param n_vehs: Number of vehicles
         :param vehicle_class: Class of all vehicle instances
         :param free_flow_speed: Desired free flow speed of all vehicles
         :return:
         """
-        self.n_per_lane = n_per_lane
-        self.n_vehs = sum(n_per_lane)
-        self.vehicles = []
-        for i in range(self.n_vehs):
-            self.vehicles.append(vehicle_class(free_flow_speed))
-            self.n_states += self.vehicles[-1].n_states
-            self.n_inputs += self.vehicles[-1].n_inputs
+        self.create_vehicle_array([vehicle_class] * n_vehs,
+                                  [free_flow_speed] * n_vehs)
 
     def create_input_names(self) -> List[str]:
         input_names = []
@@ -77,45 +112,6 @@ class VehicleArray:
                                 in vehicle.state_names])
         return output_names
 
-    def set_initial_state(self, x0, y0, v0=None):
-        """
-        All vehicles start at the center of their respective lanes, at the given
-        distance of the vehicle ahead, and with their desired free flow speed.
-
-        :param x0: Longitudinal position of each vehicle
-        :param y0: Lateral position of each vehicle
-        :param v0: Initial speed of each vehicle. Only used if speed is one of
-         the model states
-        :return: The array with the initial states of all vehicles
-        """
-
-        initial_state = []
-        for i, vehicle in enumerate(self.vehicles):
-            vehicle.set_initial_state(x0[i], y0[i], 0, v0[i])
-            initial_state.extend(vehicle.initial_state)
-        return initial_state
-
-    def create_desired_final_state(self, tf):
-        """
-        Creates a vector of desired final states.
-
-        :param tf: Final time
-        :return:
-        """
-        state_final = []
-        for i, vehicle in enumerate(self.vehicles):
-            x0 = vehicle.initial_state[vehicle.state_idx['x']]
-            y0 = vehicle.initial_state[vehicle.state_idx['y']]
-            v_ff = vehicle.free_flow_speed
-            xf = x0 + v_ff * tf
-            initial_lane = y0 // 4
-            # yf = y0 + lane_change_directions[i] * lane_width
-            yf = y0 + (-1) ** initial_lane * lane_width
-            state_vector = vehicle.create_state_vector(
-                xf, yf, 0, v_ff)
-            state_final.append(state_vector)
-        return np.concatenate(state_final)
-
     def create_full_state_vector(self, x, y, theta, v=None):
         """
         Creates a single state vector
@@ -132,7 +128,48 @@ class VehicleArray:
         for i, vehicle in enumerate(self.vehicles):
             full_state.extend(vehicle.create_state_vector(
                 x[i], y[i], theta[i], v[i]))
-        return full_state
+        return np.array(full_state)
+
+    def assign_leaders(self, state):
+        """
+        Determines the leading vehicle for each vehicle, and saves the result
+        at each vehicle
+
+        :param state:
+        :return:
+        """
+
+        for ego_vehicle in self.vehicles:
+            ego_states = self.get_vehicle_state_vector_by_id(ego_vehicle.id, state)
+            ego_x = ego_vehicle.get_state(ego_states, 'x')
+            ego_y = ego_vehicle.get_state(ego_states, 'y')
+            leader_x = float('inf')
+            for other_vehicle in self.vehicles:
+                other_states = self.get_vehicle_state_vector_by_id(other_vehicle.id,
+                                                                   state)
+                other_x = other_vehicle.get_state(other_states, 'x')
+                other_y = other_vehicle.get_state(other_states, 'y')
+                if (np.abs(other_y - ego_y) < lane_width / 2  # same lane
+                        and ego_x < other_x < leader_x):  # ahead and close
+                    leader_x = other_x
+                    ego_vehicle.leader_id = other_vehicle.id
+
+    def compute_gap_to_leader(self, ego_id, states):
+        """
+        Computes the gap between the vehicle with id ego_id and its leader.
+        If ego doesn't have a leader, returns infinity
+
+        :param ego_id: ID of the ego vehicle
+        :param states: Full state vector of all vehicles
+        :return:
+        """
+        ego_vehicle = self.vehicles[ego_id]
+        if not ego_vehicle.has_leader():
+            return np.inf
+        ego_x = self.get_a_vehicle_state_by_id(ego_id, states, 'x')
+        leader_x = self.get_a_vehicle_state_by_id(ego_vehicle.leader_id,
+                                                  states, 'x')
+        return leader_x - ego_x
 
     def update(self, states, inputs, params):
         """
@@ -142,20 +179,18 @@ class VehicleArray:
         :param params:
         :return:
         """
-        dxdt = np.zeros(len(states))
-        state_init = 0
-        input_init = 0
+        dxdt = []
         for vehicle in self.vehicles:
-            state_end = state_init + vehicle.n_states
-            input_end = input_init + vehicle.n_inputs
-            ego_states = states[state_init: state_end]
-            ego_inputs = inputs[input_init: input_end]
-            leader_states = vehicle.get_leader_states(ego_states, states)
-            dxdt[state_init: state_end] = vehicle.dynamics(
-                ego_states, ego_inputs, leader_states)
-            state_init = state_end
-            input_init = input_end
-        return dxdt
+            ego_states = self.get_vehicle_state_vector_by_id(vehicle.id, states)
+            ego_inputs = self.get_vehicle_inputs_vector_by_id(
+                vehicle.id, inputs)
+            if vehicle.has_leader():
+                leader_states = self.get_vehicle_state_vector_by_id(
+                    vehicle.leader_id, states)
+            else:
+                leader_states = None
+            dxdt.extend(vehicle.dynamics(ego_states, ego_inputs, leader_states))
+        return np.array(dxdt)
 
     def to_dataframe(self, time: np.ndarray,
                      states: np.ndarray, inputs: np.ndarray) -> pd.DataFrame:
@@ -168,17 +203,12 @@ class VehicleArray:
          system's inputs at one time point
         :return:
         """
-        all_data = []
-        state_init = 0
-        input_init = 0
+        data_per_vehicle = []
         for vehicle in self.vehicles:
-            state_end = state_init + vehicle.n_states
-            input_end = input_init + vehicle.n_inputs
-            ego_states = states[state_init: state_end]
-            ego_inputs = inputs[input_init: input_end]
+            ego_states = self.get_vehicle_state_vector_by_id(vehicle.id, states)
+            ego_inputs = self.get_vehicle_inputs_vector_by_id(vehicle.id, inputs)
             vehicle_df = vehicle.to_dataframe(time, ego_states, ego_inputs)
             vehicle_df['id'] = vehicle.id
-            state_init = state_end
-            input_init = input_end
-            all_data.append(vehicle_df)
-        return pd.concat(all_data)
+            data_per_vehicle.append(vehicle_df)
+        all_data = pd.concat(data_per_vehicle)
+        return all_data.fillna(0)

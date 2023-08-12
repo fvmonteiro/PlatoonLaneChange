@@ -10,10 +10,7 @@
 *.db
 *.att
 *.trj
-NGSIM_original/*
-
-### Database password
-*password.txt
+*.pickle
 
 ####### FOR PYTHON #######
 ### Suggested from https://github.com/github/gitignore
