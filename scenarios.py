@@ -9,7 +9,7 @@ import numpy as np
 from scipy.optimize import LinearConstraint, NonlinearConstraint
 
 import vehicle_handler
-from constants import lane_width, units
+from constants import lane_width
 import dynamics
 from vehicle_array import VehicleArray
 from vehicle_handler import BaseVehicle
@@ -25,15 +25,15 @@ class SimulationScenario(ABC):
         # Simulation results
         self.time, self.states, self.inputs = None, None, None
 
-    def set_uniform_vehicles(
+    def create_uniform_vehicles(
             self, n_per_lane: List[int], vehicle_class: Type[BaseVehicle],
             free_flow_speed: float):
         self.n_per_lane = n_per_lane
         self.vehicle_array.create_uniform_array(sum(n_per_lane),
                                                 vehicle_class, free_flow_speed)
 
-    def set_vehicles(self, vehicle_classes: List[List[Type[BaseVehicle]]],
-                     free_flow_speeds: List[float]):
+    def create_vehicles(self, vehicle_classes: List[List[Type[BaseVehicle]]],
+                        free_flow_speeds: List[float]):
         for i in range(len(vehicle_classes)):
             self.n_per_lane.append(len(vehicle_classes[i]))
         flat_vehicle_list = [item for sublist in vehicle_classes for
@@ -51,7 +51,34 @@ class SimulationScenario(ABC):
             pickle.dump(self.response_to_dataframe(),
                         f, pickle.HIGHEST_PROTOCOL)
 
-    def set_uniform_initial_state(self, gap: float = None):
+    def place_vehicles(self, gaps: List[List[float]], v0: List[float]):
+        """
+        Place vehicles at the center of their respective lanes and with zero
+        orientation. Inter-vehicle distances and initial speeds for each
+        vehicle must be passed as parameters.
+
+        :param gaps: Inter-vehicle distance between consecutive vehicles on the
+         same lane. Gaps must be of size: n_lanes x (n_vehicles_on_lane - 1),
+         and the sequence is from first to last vehicle.
+        :param v0: Initial speed for each vehicle
+        :return:
+        """
+
+        x0 = []
+        y0 = []
+        for lane in range(len(self.n_per_lane)):
+            lane_center = lane * lane_width
+            n = self.n_per_lane[lane]
+            y0.extend([lane_center] * n)
+            veh_position = sum(gaps[lane])
+            for i in range(n):
+                x0.append(veh_position)
+                veh_position -= gaps[lane][i]
+        theta0 = [0] * self.vehicle_array.n_vehs
+        self.initial_state = self.vehicle_array.create_full_state_vector(
+            x0, y0, theta0, v0)
+
+    def place_equally_spaced_vehicles(self, gap: float = None):
         """
         All vehicles start at the center of their respective lanes, with
         orientation angle zero, and at the same speed, which equals their
@@ -218,7 +245,7 @@ class ExampleScenario(OptimalControlScenario):
     """
 
     def create_initial_state(self):
-        self.set_uniform_initial_state()
+        self.place_equally_spaced_vehicles()
         self.vehicle_array.assign_leaders(self.initial_state)
         print(self.initial_state)
 
@@ -268,11 +295,11 @@ class MinimumTimeControl(OptimalControlScenario):
     """
     def __init__(self):
         super().__init__()
-        self.set_uniform_vehicles(
+        self.create_uniform_vehicles(
             [1], vehicle_handler.FourStateVehicle, 10)
 
     def create_initial_state(self):
-        self.set_uniform_initial_state()
+        self.place_equally_spaced_vehicles()
         self.vehicle_array.assign_leaders(self.initial_state)
         print(self.initial_state)
 
@@ -293,26 +320,50 @@ class MinimumTimeControl(OptimalControlScenario):
     def set_constraints(self):
         self.set_input_boundaries()
 
+
 class LaneChangeWithConstraints(OptimalControlScenario):
     """
     Used to test how to code safety constraints
     """
 
-    def __init__(self, n_vehs: int, v_ff: float, lane_changing_vehicle_id: int):
+    def __init__(self, n_dest_lane_vehs: int, v_ff: float,
+                 lane_changing_vehicle_id: int = 1):
         super().__init__()
         self.lc_id = lane_changing_vehicle_id
-        veh_classes = []
-        for i in range(n_vehs):
+        veh_classes = [[]]
+        n_orig_lane_vehs = 3
+        for i in range(n_orig_lane_vehs):
             if i == lane_changing_vehicle_id:
-                veh_classes.append(vehicle_handler.FourStateVehicleAccelFB)
+                veh_classes[0].append(vehicle_handler.FourStateVehicleAccelFB)
             else:
-                veh_classes.append(vehicle_handler.LongitudinalVehicle)
-        self.set_vehicles([veh_classes], [v_ff] * n_vehs)
-        self.min_lc_x = 20
+                veh_classes[0].append(vehicle_handler.LongitudinalVehicle)
+        if n_dest_lane_vehs > 0:
+            veh_classes.append([])
+        for i in range(n_dest_lane_vehs):
+            veh_classes[1].append(vehicle_handler.LongitudinalVehicle)
+        self.create_vehicles(veh_classes,
+                             [v_ff] * (n_orig_lane_vehs + n_dest_lane_vehs))
+        self.min_lc_x = 20  # only used for initial tests
 
     def create_initial_state(self):
-        gap = 9
-        self.set_uniform_initial_state(gap)
+        sample_vehicle = self.vehicle_array.vehicles[0]
+        v_ff = sample_vehicle.free_flow_speed
+        gap_steady_state = v_ff + 1
+        gaps = [[]]
+        # Orig lane
+        for i in range(self.n_per_lane[0]):
+            if i == self.lc_id:  # TODO: gap setting is wrong by one index
+                gaps[0].append(gap_steady_state - 2)
+            else:
+                gaps[0].append(gap_steady_state)
+        # Dest lane
+        if len(self.n_per_lane) > 1:
+            gaps.append([])
+            for i in range(self.n_per_lane[1]):
+                gaps[1].append(gap_steady_state)
+
+        self.place_vehicles(gaps, [v_ff] * sum(self.n_per_lane))
+        # self.place_equally_spaced_vehicles(gap_steady_state)
         self.vehicle_array.assign_leaders(self.initial_state)
         print(self.initial_state)
 
@@ -346,21 +397,19 @@ class LaneChangeWithConstraints(OptimalControlScenario):
         # Linear constraint: lb <= A*[x; u] <= ub
         # vel_con = LinearConstraint([0, 0, 0, 1, 0, 0], 0, 15)
         # self.constraints.append(vel_con)
-        # TODO: not getting the expected result. Could try a 'less' nonlinear
-        #  constraint?
 
         epsilon = 1e-10
-        nlc = NonlinearConstraint(self.safe_constraint,
+        nlc = NonlinearConstraint(self.safety_constraint,
                                   -epsilon, epsilon)
         self.constraints.append(nlc)
 
-    def safe_constraint(self, states, inputs):
+    def safety_constraint(self, states, inputs):
         gap = self.vehicle_array.compute_gap_to_leader(self.lc_id, states)
         lc_vehicle = self.vehicle_array.vehicles[self.lc_id]
         lc_veh_vel = self.vehicle_array.get_a_vehicle_state_by_id(
             self.lc_id, states, 'v')
         safe_gap = lc_vehicle.compute_safe_gap(lc_veh_vel)
-        dist_to_safe_gap = gap - 11
+        dist_to_safe_gap = gap - 10
         phi = self.vehicle_array.get_a_vehicle_input_by_id(
             self.lc_id, inputs, 'phi')
         return min(dist_to_safe_gap, 0) * phi
@@ -398,13 +447,13 @@ class VehicleFollowingScenario(SimulationScenario):
 
     def __init__(self, n_per_lane: List[int], v_ff: float):
         super().__init__()
-        self.set_uniform_vehicles(n_per_lane,
-                                  vehicle_handler.LongitudinalVehicle,
-                                  v_ff)
+        self.create_uniform_vehicles(n_per_lane,
+                                     vehicle_handler.LongitudinalVehicle,
+                                     v_ff)
 
     def create_initial_state(self):
         gap = 2
-        self.set_uniform_initial_state(gap)
+        self.place_equally_spaced_vehicles(gap)
         self.vehicle_array.assign_leaders(self.initial_state)
         print(self.initial_state)
 
