@@ -1,5 +1,4 @@
-import plot_helpers
-import vehicle_array
+import analysis
 import vehicle_handler
 import scenarios
 
@@ -18,15 +17,18 @@ def run_base_scenario(n_per_lane, max_iter=100):
     base_scenario.create_vehicles(vehicles, [10, 10])
     base_scenario.create_dynamic_system()
     base_scenario.set_optimal_control_problem_functions(tf)
-    base_scenario.run(max_iter)
+    time_points, result = base_scenario.solve(max_iter)
+    base_scenario.run(result)
     base_scenario.save_response_data(file_name)
     data = base_scenario.response_to_dataframe()
-    plot_helpers.plot_lane_change(data)
+    analysis.plot_lane_change(data)
 
 
 def load_and_plot_latest_scenario():
-    data = plot_helpers.load_simulated_scenario(file_name)
-    plot_helpers.plot_constrained_lane_change(data, 1, 0)
+    data = analysis.load_simulated_scenario(file_name)
+    analysis.plot_constrained_lane_change(data, 1)
+    # analysis.plot_initial_and_final_states(data)
+    # analysis.check_constraint_satisfaction(data, 1)
 
 
 def run_no_lc_scenario():
@@ -35,7 +37,7 @@ def run_no_lc_scenario():
     scenario = scenarios.VehicleFollowingScenario([2], v_ff)
     scenario.set_boundary_conditions(tf)
     scenario.run()
-    plot_helpers.plot_vehicle_following(scenario.response_to_dataframe())
+    analysis.plot_vehicle_following(scenario.response_to_dataframe())
 
 
 def run_constraints_scenario():
@@ -43,21 +45,26 @@ def run_constraints_scenario():
     tf = 10
 
     lc_veh_id = 1
-    scenario = scenarios.LaneChangeWithConstraints(1, v_ff, lc_veh_id)
+    scenario = scenarios.LaneChangeWithConstraints(2, v_ff, lc_veh_id)
     scenario.create_dynamic_system()
     scenario.set_optimal_control_problem_functions(tf)
-
-    scenario.run(300)
+    analysis.plot_initial_and_final_states(
+        scenario.boundary_conditions_to_dataframe())
+    result = scenario.solve(300)
+    scenario.run(result)
     scenario.save_response_data(file_name)
     data = scenario.response_to_dataframe()
-    plot_helpers.plot_constrained_lane_change(data, lc_veh_id, lc_veh_id-1)
+    analysis.plot_constrained_lane_change(data, lc_veh_id)
+    # scenario.replay(result)
+    # data = scenario.response_to_dataframe()
+    # analysis.plot_constrained_lane_change(data, lc_veh_id, lc_veh_id - 1)
 
 
 def main():
     # run_no_lc_scenario()
     # run_base_scenario([1, 1], max_iter=200)
-    # run_constraints_scenario()
-    load_and_plot_latest_scenario()
+    run_constraints_scenario()
+    # load_and_plot_latest_scenario()
 
 
 if __name__ == "__main__":

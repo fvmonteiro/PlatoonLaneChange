@@ -65,6 +65,9 @@ class VehicleArray:
         vehicle = self.vehicles[veh_id]
         return vehicle.get_input(vehicle_inputs, input_name)
 
+    def set_a_vehicle_free_flow_speed(self, veh_id, v_ff):
+        self.vehicles[veh_id].set_free_flow_speed(v_ff)
+
     def create_vehicle_array(self, vehicle_classes: List[Type[BaseVehicle]],
                              free_flow_speeds: List[float]):
         """
@@ -76,7 +79,9 @@ class VehicleArray:
         """
         self.n_vehs = len(vehicle_classes)
         for i in range(len(vehicle_classes)):
-            self.vehicles.append(vehicle_classes[i](free_flow_speeds[i]))
+            vehicle = vehicle_classes[i]()
+            vehicle.set_free_flow_speed(free_flow_speeds[i])
+            self.vehicles.append(vehicle)
             self.state_idx_map.append(self.n_states)
             self.input_idx_map.append(self.n_inputs)
             self.n_states += self.vehicles[-1].n_states
@@ -140,19 +145,46 @@ class VehicleArray:
         """
 
         for ego_vehicle in self.vehicles:
-            ego_states = self.get_vehicle_state_vector_by_id(ego_vehicle.id, state)
+            ego_states = self.get_vehicle_state_vector_by_id(ego_vehicle.id,
+                                                             state)
             ego_x = ego_vehicle.get_state(ego_states, 'x')
             ego_y = ego_vehicle.get_state(ego_states, 'y')
-            leader_x = float('inf')
+            leader_x = np.inf
             for other_vehicle in self.vehicles:
-                other_states = self.get_vehicle_state_vector_by_id(other_vehicle.id,
-                                                                   state)
+                other_states = self.get_vehicle_state_vector_by_id(
+                    other_vehicle.id, state)
                 other_x = other_vehicle.get_state(other_states, 'x')
                 other_y = other_vehicle.get_state(other_states, 'y')
                 if (np.abs(other_y - ego_y) < lane_width / 2  # same lane
                         and ego_x < other_x < leader_x):  # ahead and close
                     leader_x = other_x
                     ego_vehicle.leader_id = other_vehicle.id
+
+    def assign_dest_lane_vehicles(self, state, lc_veh_id, y_target):
+        ego_vehicle = self.vehicles[lc_veh_id]
+        ego_states = self.get_vehicle_state_vector_by_id(ego_vehicle.id,
+                                                         state)
+        ego_x = ego_vehicle.get_state(ego_states, 'x')
+        dest_lane_follower_x = -np.inf
+        dest_lane_leader_x = np.inf
+        for other_vehicle in self.vehicles:
+            other_states = self.get_vehicle_state_vector_by_id(
+                other_vehicle.id, state)
+            other_x = other_vehicle.get_state(other_states, 'x')
+            other_y = other_vehicle.get_state(other_states, 'y')
+            if np.abs(other_y - y_target) < lane_width / 2:
+                if ego_x < other_x < dest_lane_leader_x:
+                    dest_lane_leader_x = other_x
+                    ego_vehicle.destination_leader_id = other_vehicle.id
+                elif dest_lane_follower_x < other_x < ego_x:
+                    dest_lane_follower_x = other_x
+                    ego_vehicle.destination_follower_id = other_vehicle.id
+
+    def compute_free_flow_displacement(self, tf: float) -> np.ndarray:
+        delta_x = np.zeros(len(self.vehicles))
+        for i, veh in enumerate(self.vehicles):
+            delta_x[i] = veh.free_flow_speed * tf
+        return delta_x
 
     def compute_gap_to_leader(self, ego_id, states):
         """
@@ -205,10 +237,11 @@ class VehicleArray:
         """
         data_per_vehicle = []
         for vehicle in self.vehicles:
-            ego_states = self.get_vehicle_state_vector_by_id(vehicle.id, states)
-            ego_inputs = self.get_vehicle_inputs_vector_by_id(vehicle.id, inputs)
+            ego_states = self.get_vehicle_state_vector_by_id(vehicle.id,
+                                                             states)
+            ego_inputs = self.get_vehicle_inputs_vector_by_id(vehicle.id,
+                                                              inputs)
             vehicle_df = vehicle.to_dataframe(time, ego_states, ego_inputs)
-            vehicle_df['id'] = vehicle.id
             data_per_vehicle.append(vehicle_df)
-        all_data = pd.concat(data_per_vehicle)
+        all_data = pd.concat(data_per_vehicle).reset_index()
         return all_data.fillna(0)

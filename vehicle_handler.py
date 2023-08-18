@@ -9,21 +9,22 @@ class BaseVehicle(ABC):
 
     _counter = 0
 
-    def __init__(self, free_flow_speed):
+    def __init__(self):
         """
 
-        :param free_flow_speed: Desired speed if there's no vehicle ahead
         """
         self.state_names, self.n_states = None, None
         self.input_names, self.n_inputs = None, None
         self.state_idx, self.input_idx = {}, {}
+        self.free_flow_speed = None
         self.initial_state = None
         self.leader_id = -1
+        self.destination_leader_id = -1
+        self.destination_follower_id = -1
 
         # Some parameters
         self.id = BaseVehicle._counter
         BaseVehicle._counter += 1
-        self.free_flow_speed = free_flow_speed
         self.lr = 2  # dist from C.G. to rear wheel
         self.lf = 1  # dist from C.G. to front wheel
         self.wheelbase = self.lr + self.lf
@@ -31,6 +32,10 @@ class BaseVehicle(ABC):
 
     def __repr__(self):
         return self.__class__.__name__
+
+    def __str__(self):
+        return (self.__class__.__name__ + ": V_f=" + str(self.free_flow_speed)
+                + ", x0=" + str(self.initial_state))
 
     @staticmethod
     def reset_vehicle_counter():
@@ -44,11 +49,24 @@ class BaseVehicle(ABC):
     def get_input(self, inputs: List, input_name: str) -> float:
         return inputs[self.input_idx[input_name]]
 
+    def set_free_flow_speed(self, v_ff: float):
+        self.free_flow_speed = v_ff
+
+    def set_initial_state(self, x: float, y: float, theta: float,
+                          v: float = None):
+        self.initial_state = self.create_state_vector(x, y, theta, v)
+
     def has_leader(self):
         return self.leader_id >= 0
 
     def compute_safe_gap(self, v_ego):
         return 0  # we ignore safety for vehicles without accel feedback
+
+    def compute_gap_error(self, ego_states, leader_states):
+        gap = (self.get_state(leader_states, 'x')
+               - self.get_state(ego_states, 'x'))
+        safe_gap = self.compute_safe_gap(self.get_state(ego_states, 'v'))
+        return gap - safe_gap
 
     def dynamics(self, ego_states, inputs, leader_states):
         theta = self.get_state(ego_states, 'theta')
@@ -77,17 +95,13 @@ class BaseVehicle(ABC):
         derivatives[self.state_idx['theta']] = (vel * np.tan(phi)
                                                 / self.wheelbase)
 
-    def set_initial_state(self, x: float, y: float, theta: float,
-                          v: float = None):
-        self.initial_state = self.create_state_vector(x, y, theta, v)
-
     def create_state_vector(self, x: float, y: float, theta: float,
                             v: float = None):
         state_vector = np.zeros(self.n_states)
         state_vector[self.state_idx['x']] = x
         state_vector[self.state_idx['y']] = y
         state_vector[self.state_idx['theta']] = theta
-        self.set_speed(v, state_vector)
+        self._set_speed(v, state_vector)
         return state_vector
 
     def to_dataframe(self, time: np.ndarray,
@@ -95,7 +109,12 @@ class BaseVehicle(ABC):
         data = np.concatenate([time.reshape(1, -1), states, inputs])
         columns = (['t'] + [s for s in self.state_names]
                    + [i for i in self.input_names])
-        return pd.DataFrame(data=np.transpose(data), columns=columns)
+        df = pd.DataFrame(data=np.transpose(data), columns=columns)
+        df['id'] = self.id
+        df['leader_id'] = self.leader_id
+        df['dest_lane_leader_id'] = self.destination_leader_id
+        df['dest_lane_follower_id'] = self.destination_follower_id
+        return df
 
     def get_vel(self, states, inputs):
         try:
@@ -104,7 +123,7 @@ class BaseVehicle(ABC):
             return inputs[self.input_idx['v']]
 
     @abstractmethod
-    def set_speed(self, v0, state):
+    def _set_speed(self, v0, state):
         """
         Sets the proper element in array state equal to v0
         :param v0: speed to write
@@ -156,11 +175,11 @@ class ThreeStateVehicle(BaseVehicle, ABC):
     _state_names = ['x', 'y', 'theta']
     _input_names = ['v', 'phi']
 
-    def __init__(self, free_flow_speed: float):
-        super().__init__(free_flow_speed)
+    def __init__(self):
+        super().__init__()
         self._set_model(self._state_names, self._input_names)
 
-    def set_speed(self, v0, state):
+    def _set_speed(self, v0, state):
         # Does nothing because velocity is an input for this model
         pass
 
@@ -182,8 +201,8 @@ class ThreeStateVehicleRearWheel(ThreeStateVehicle):
     """ From the library's example.
     States: [x, y, theta], inputs: [v, phi], centered at the rear wheels """
 
-    def __init__(self, free_flow_speed: float):
-        super().__init__(free_flow_speed)
+    def __init__(self):
+        super().__init__()
 
     def compute_derivatives(self, vel, theta, phi, accel, derivatives):
         self.position_update_rear_wheels(vel, theta, phi, derivatives)
@@ -192,8 +211,8 @@ class ThreeStateVehicleRearWheel(ThreeStateVehicle):
 class ThreeStateVehicleCG(ThreeStateVehicle):
     """ States: [x, y, theta], inputs: [v, phi], centered at the C.G. """
 
-    def __init__(self, free_flow_speed: float):
-        super().__init__(free_flow_speed)
+    def __init__(self):
+        super().__init__()
 
     def compute_derivatives(self, vel, theta, phi, accel, derivatives):
         self.position_update_cg(vel, theta, phi, derivatives)
@@ -205,13 +224,13 @@ class FourStateVehicle(BaseVehicle):
     _state_names = ['x', 'y', 'theta', 'v']
     _input_names = ['a', 'phi']
 
-    def __init__(self, free_flow_speed: float):
-        super().__init__(free_flow_speed)
+    def __init__(self):
+        super().__init__()
         self._set_model(self._state_names, self._input_names)
         self.brake_max = -4
         self.accel_max = 2
 
-    def set_speed(self, v0, state):
+    def _set_speed(self, v0, state):
         state[self.state_idx['v']] = v0
 
     def compute_derivatives(self, vel, theta, phi, accel, derivatives):
@@ -235,14 +254,19 @@ class FourStateVehicleAccelFB(FourStateVehicle):
 
     _input_names = ['phi']
 
-    def __init__(self, free_flow_speed: float):
-        super().__init__(free_flow_speed)
+    def __init__(self):
+        super().__init__()
 
         # Controller parameters
         self.h = 1.0  # time headway [s]
+        self.safe_h = 1.0
         self.c = 1.0  # standstill distance [m]
         self.kg = 0.5
         self.kv = 0.5
+        # Note: h and safe_h are a simplification of the system. The time
+        # headway used for vehicle following is computed in a way to
+        # overestimate the nonlinear safe distance. In the above, we just
+        # assume the safe distance is also linear and with a smaller h.
 
     def compute_acceleration(self, ego_states, inputs, leader_states) -> float:
         """
@@ -250,20 +274,29 @@ class FourStateVehicleAccelFB(FourStateVehicle):
         """
         v_ego = self.get_state(ego_states, 'v')
         if leader_states is None or len(leader_states) == 0:
-            accel = self.kv * (self.free_flow_speed - v_ego)
+            return self.compute_velocity_control(v_ego)
         else:
             gap = (self.get_state(leader_states, 'x')
                    - self.get_state(ego_states, 'x'))
             v_leader = self.get_state(leader_states, 'v')
-            accel = (self.kg * (gap - self.h * v_ego - self.c)
-                     + self.kv * (v_leader - v_ego))
-        return accel
+            accel = self.compute_gap_control(gap, v_ego, v_leader)
+            if v_ego >= self.free_flow_speed and accel > 0:
+                return self.compute_velocity_control(v_ego)
+            return accel
 
     def get_input_limits(self) -> (List[float], List[float]):
         return [-self.phi_max], [self.phi_max]
 
-    def compute_safe_gap(self, v_ego):
-        return self.h * v_ego - self.c
+    def compute_safe_gap(self, v_ego: float) -> float:
+        return self.safe_h * v_ego + self.c
+
+    def compute_velocity_control(self, v_ego: float) -> float:
+        return self.kv * (self.free_flow_speed - v_ego)
+
+    def compute_gap_control(self, gap: float, v_ego: float,
+                            v_leader: float) -> float:
+        return (self.kg * (gap - self.h * v_ego - self.c)
+                + self.kv * (v_leader - v_ego))
 
 
 class LongitudinalVehicle(FourStateVehicleAccelFB):
@@ -272,8 +305,8 @@ class LongitudinalVehicle(FourStateVehicleAccelFB):
 
     _input_names = []
 
-    def __init__(self, free_flow_speed: float):
-        super().__init__(free_flow_speed)
+    def __init__(self):
+        super().__init__()
         self._set_model(self._state_names, self._input_names)
 
     def get_input(self, inputs: List, input_name: str) -> float:
