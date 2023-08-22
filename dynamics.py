@@ -1,5 +1,8 @@
+from vehicle_group import VehicleGroup
+
+
 # === Functions passed to the optimal control library methods === #
-def vehicle_update(t, states, inputs, params):
+def vehicles_derivatives(t, states, inputs, params):
     """
     Implements the kinematic bicycle model with reference at the vehicles C.G.
     Follows the model of updfcn of the control package.
@@ -9,10 +12,10 @@ def vehicle_update(t, states, inputs, params):
     :param params: Dictionary which must contain the vehicle type
     :return: state update function
     """
-    vehicle_array = params['vehicle_array']
+    vehicle_group: VehicleGroup = params['vehicle_array']
 
-    return vehicle_array.update(states, inputs, params)
+    return vehicle_group.compute_derivatives(states, inputs, params)
 
 
 def vehicle_output(t, x, u, params):
-    return x  # return x, y, theta (full state)
+    return x  # return (full state)

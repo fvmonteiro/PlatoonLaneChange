@@ -51,26 +51,47 @@ def load_simulated_scenario(pickle_file_name: str):
     return data
 
 
-def plot_initial_and_final_states(data: pd.DataFrame):
+def compare_desired_and_actual_final_states(desired_data, simulated_data):
+    fig, ax = plt.subplots(2, 1)
+    plot_initial_and_final_states(desired_data, ax[0])
+    ax[0].set_title("Desired")
+    ax[0].set_aspect('equal', adjustable='box')
+    plot_initial_and_final_states(simulated_data, ax[1])
+    ax[1].set_title("Simulated")
+    ax[1].set_aspect('equal', adjustable='box')
+    fig.tight_layout()
+    fig.show()
+
+
+def plot_initial_and_final_states(data: pd.DataFrame, axis=None):
     """
 
     :param data: Dataframe containing only initial and desired final state
      for each vehicle
     """
-    fig, ax = plt.subplots()
+    if axis is None:
+        fig, ax = plt.subplots()
+    else:
+        ax = axis
+        fig = plt.gcf()
+
     cmap = plt.get_cmap("tab10")
     n_vehs = data['id'].nunique()
     ax.scatter(data=data[data['t'] == data['t'].min()], x='x', y='y',
                marker='>', c=cmap.colors[0:n_vehs])
     ax.scatter(data=data[data['t'] == data['t'].max()], x='x', y='y',
-               marker='>', c=cmap.colors[0:n_vehs], alpha=0.7)
+               marker='>', c=cmap.colors[0:n_vehs], alpha=0.6)
     min_y = data['y'].min()
     max_y = data['y'].max()
     ax.axhline(y=(min_y + max_y) / 2, linestyle='--', color='black')
-    ax.set(ylim=(min_y - 2, max_y + 2))
+    ax.set(xlabel=_get_variable_with_unit('x'),
+           ylabel=_get_variable_with_unit('y'),
+           ylim=(min_y - 2, max_y + 2))
     ax.set_aspect('equal', adjustable='box')
-    fig.tight_layout()
-    fig.show()
+
+    if axis is None:
+        fig.tight_layout()
+        fig.show()
 
 
 def plot_lane_change(data: pd.DataFrame):
@@ -126,7 +147,7 @@ def plot_constrained_lane_change(data: pd.DataFrame, lc_veh_id: int):
     low, high = ax[0].get_ylim()
     low, high = max(low, -5), min(high, 5)
     ax[0].set(xlabel=_get_variable_with_unit('t'),
-              ylabel=_get_variable_with_unit('gap'),
+              ylabel=_get_variable_with_unit('gap_error'),
               ylim=(low, high))
 
     for i, (x, y) in enumerate(zip(x_axes, y_axes)):
@@ -150,11 +171,9 @@ def plot_vehicle_following(data: pd.DataFrame):
     :return:
     """
     sns.set_style('whitegrid')
-    data['gap'] = 0
-    data.loc[data['id'] == 1, 'gap'] = (data.loc[data['id'] == 0, 'x']
-                                        - data.loc[data['id'] == 1, 'x'])
+    compute_values_relative_to_leader(data)
     x_axes = ['t', 't']
-    y_axes = ['gap', 'v']
+    y_axes = ['gap_to_leader', 'v']
     plot_scenario_results(x_axes, y_axes, data)
 
 
