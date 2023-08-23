@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-import vehicle_handler as vh
+import vehicle_models as vh
 
 
 class VehicleMode(ABC):

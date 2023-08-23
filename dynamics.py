@@ -1,4 +1,4 @@
-from vehicle_group import VehicleGroup
+import vehicle_group_ocp_interface as vgi
 
 
 # === Functions passed to the optimal control library methods === #
@@ -12,7 +12,7 @@ def vehicles_derivatives(t, states, inputs, params):
     :param params: Dictionary which must contain the vehicle type
     :return: state update function
     """
-    vehicle_group: VehicleGroup = params['vehicle_array']
+    vehicle_group: vgi.VehicleGroupInterface = params['vehicle_group']
 
     return vehicle_group.compute_derivatives(states, inputs, params)
 

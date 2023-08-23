@@ -9,18 +9,19 @@ import pandas as pd
 
 from scipy.optimize import LinearConstraint, NonlinearConstraint
 
-import vehicle_handler
+import vehicle_models
 from constants import lane_width
 import dynamics
 from vehicle_group import VehicleGroup
-from vehicle_handler import BaseVehicle
+from vehicle_models import BaseVehicle
+import vehicle_group_ocp_interface as vgi
 
 
 class SimulationScenario(ABC):
     def __init__(self):
         self.n_per_lane = []
         self.vehicle_group = VehicleGroup()
-        vehicle_handler.BaseVehicle.reset_vehicle_counter()
+        vehicle_models.BaseVehicle.reset_vehicle_counter()
         # Simulation parameters
         self.initial_state, self.tf = None, None
         # Simulation results
@@ -77,8 +78,8 @@ class SimulationScenario(ABC):
                 y0.append(lane_center)
                 theta0.append(0.0)
         v0 = self.vehicle_group.get_free_flow_speeds()
-        self.initial_state = self.vehicle_group.create_full_state_vector(
-            x0, y0, theta0, v0)
+        self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
+        self.initial_state = self.vehicle_group.get_full_initial_state_vector()
 
     def set_boundary_conditions(self, tf: float):
         """ Sets the initial state, final time and, depending on the scenario,
@@ -86,14 +87,14 @@ class SimulationScenario(ABC):
         self.tf = tf
         self.create_initial_state()
         self.create_final_state()
+        self.vehicle_group.update_surrounding_vehicles()
 
     def create_final_state(self):
         """ Default behavior: no final state specification """
         pass
 
     def response_to_dataframe(self) -> pd.DataFrame:
-        return self.vehicle_group.to_dataframe(
-            self.time, self.states, self.inputs)
+        return self.vehicle_group.to_dataframe(self.inputs)
 
     @abstractmethod
     def create_initial_state(self):
@@ -109,7 +110,47 @@ class SimulationScenario(ABC):
         pass
 
 
+class VehicleFollowingScenario(SimulationScenario):
+    """
+    Scenario to test acceleration feedback laws. No lane changes.
+    """
+
+    def __init__(self, n_vehs: int):
+        super().__init__()
+        vehicle_classes = ([[vehicle_models.LongitudinalVehicle]
+                            * n_vehs])
+        v_ff = [10] + [12] * n_vehs
+        self.create_vehicles(vehicle_classes)
+        self.set_free_flow_speeds(v_ff)
+
+    def create_initial_state(self):
+        gap = 2
+        self.place_equally_spaced_vehicles(gap)
+        print(self.initial_state)
+
+    def run(self, parameters=None):
+        """
+
+        :param parameters: Parameters depend on the concrete implementation
+        :return:
+        """
+        dt = 1e-2
+        time = np.arange(0, self.tf, dt)
+        states = np.zeros([len(self.initial_state), len(time)])
+        states[:, 0] = self.initial_state
+        steering_angle = np.zeros([self.vehicle_group.n_vehs, len(time)])
+        self.vehicle_group.update_surrounding_vehicles()
+        for i in range(len(time) - 1):
+            dxdt = self.vehicle_group.compute_derivatives(
+                steering_angle[:, i])
+            states[:, i + 1] = states[:, i] + dxdt * (time[i + 1] - time[i])
+            self.vehicle_group.update_surrounding_vehicles()
+        self.time, self.states, self.inputs = time, states, steering_angle
+
+
 class OptimalControlScenario(SimulationScenario, ABC):
+
+    vehicles_ocp_interface: vgi.VehicleGroupInterface
 
     def __init__(self):
         super().__init__()
@@ -119,68 +160,52 @@ class OptimalControlScenario(SimulationScenario, ABC):
         self.final_state = None, None
         self.running_cost, self.terminal_cost = None, None
         self.terminal_constraints, self.constraints = None, None
+
         # self.response = None
 
     def create_dynamic_system(self) -> None:
-        params = {'vehicle_array': self.vehicle_group,
+        self.vehicles_ocp_interface = vgi.VehicleGroupInterface(
+            self.vehicle_group)
+        params = {'vehicle_group': self.vehicles_ocp_interface,
                   'test': True}
 
         # Define the vehicle steering dynamics as an input/output system
-        input_names = self.vehicle_group.create_input_names()
-        output_names = self.vehicle_group.create_output_names()
+        input_names = self.vehicles_ocp_interface.create_input_names()
+        output_names = self.vehicles_ocp_interface.create_output_names()
 
-        n_states = self.vehicle_group.n_states
+        n_states = self.vehicles_ocp_interface.n_states
         self.dynamic_system = ct.NonlinearIOSystem(
             dynamics.vehicles_derivatives, dynamics.vehicle_output,
-            params=params, states=n_states, name='vehicle_array',
+            params=params, states=n_states, name='vehicle_group',
             inputs=input_names, outputs=output_names)
-
-    def set_free_flow_all_change_lanes_final_state(self):
-        """
-        Sets the final state where all vehicles change from their initial
-        lanes while traveling at their free-flow speed.
-
-        :return:
-        """
-        delta_x, delta_y, delta_theta, delta_v = [], [], [], []
-        for veh in self.vehicle_group.get_all_vehicles():
-            v_ff = veh.free_flow_speed
-            veh_id = veh.id
-            delta_x.append(v_ff * self.tf)
-            lane_0 = self.vehicle_group.get_a_vehicle_state_by_id(
-                veh_id, self.initial_state, 'y') // lane_width
-            delta_y.append((-1) ** lane_0 * lane_width)
-            delta_theta.append(0.0)
-            delta_v.append(0.0)
-        delta_state = self.vehicle_group.create_full_state_vector(
-            delta_x, delta_y, delta_theta, delta_v)
-        self.final_state = self.initial_state + delta_state
 
     def boundary_conditions_to_dataframe(self) -> pd.DataFrame:
         """
         Puts initial state and desired final conditions in a dataframe.
         """
+        # TODO: must be redone
         return self.vehicle_group.to_dataframe(
             np.array([0, self.tf]),
             np.vstack((self.initial_state, self.final_state)).T,
-            np.zeros([self.vehicle_group.n_inputs, 2])
+            np.zeros([self.vehicles_ocp_interface.n_inputs, 2])
         )
 
     def set_optimal_control_problem_functions(self, tf: float):
-        self.set_boundary_conditions(tf)
+        # self.set_boundary_conditions(tf)
+        # self.vehicle_group.update_surrounding_vehicles()
         self.set_costs()
         self.set_constraints()
 
     def set_input_boundaries(self):
         input_lower_bounds, input_upper_bounds = (
-            self.vehicle_group.get_input_limits())
+            self.vehicles_ocp_interface.get_input_limits())
         self.constraints = [opt.input_range_constraint(
             self.dynamic_system, input_lower_bounds,
             input_upper_bounds)]
 
     def solve(self, max_iter: int = 100):
         # Initial guess; not initial control
-        u0 = self.vehicle_group.get_desired_input()
+        u0 = self.vehicles_ocp_interface.get_desired_input()
         timepts = np.linspace(0, self.tf, 10, endpoint=True)
         result = opt.solve_ocp(
             self.dynamic_system, timepts, self.initial_state,
@@ -230,17 +255,34 @@ class ExampleScenario(OptimalControlScenario):
 
     def create_initial_state(self):
         self.place_equally_spaced_vehicles()
-        self.vehicle_group.assign_leaders(self.initial_state)
         print(self.initial_state)
 
     def create_final_state(self):
-        self.set_free_flow_all_change_lanes_final_state()
+        """
+        Sets the final state where all vehicles change from their initial
+        lanes while traveling at their free-flow speed.
+
+        :return:
+        """
+        xf, yf, thetaf, vf = [], [], [], []
+        for veh in self.vehicle_group.get_all_vehicles():
+            v_ff = veh.free_flow_speed
+            lane = veh.get_current_lane()
+            xf.append(veh.get_a_current_state('x') + v_ff * self.tf)
+            veh.set_lane_change_direction((-1) ** lane)
+            veh.update_target_y()
+            yf.append(veh.target_y)
+            thetaf.append(0.0)
+            vf.append(v_ff)
+        self.final_state = self.vehicle_group.create_full_state_vector(
+            xf, yf, thetaf, vf
+        )
         print(self.final_state)
 
     def set_costs(self):
         Q, R, P = self.create_simple_weight_matrices()
         # Desired control; not final control
-        uf = self.vehicle_group.get_desired_input()
+        uf = self.vehicles_ocp_interface.get_desired_input()
         self.running_cost = opt.quadratic_cost(self.dynamic_system,
                                                Q, R, x0=self.final_state, u0=uf)
         self.terminal_cost = opt.quadratic_cost(self.dynamic_system,
@@ -248,20 +290,20 @@ class ExampleScenario(OptimalControlScenario):
 
     def create_simple_weight_matrices(self):
         # don't turn too sharply: matrix Q
-        state_cost_weights = [0.] * self.vehicle_group.n_states
-        theta_idx = self.vehicle_group.get_state_indices('theta')
+        state_cost_weights = [0.] * self.vehicles_ocp_interface.n_states
+        theta_idx = self.vehicles_ocp_interface.get_state_indices('theta')
         for i in theta_idx:
             state_cost_weights[i] = 0.1
         state_cost = np.diag(state_cost_weights)
 
         # keep inputs small: matrix R
-        input_cost_weights = [1] * self.vehicle_group.n_inputs
+        input_cost_weights = [1] * self.vehicles_ocp_interface.n_inputs
         input_cost = np.diag(input_cost_weights)
 
         # get close to final point: matrix P
         if ('v' in self.vehicle_group.vehicles[0].input_names
                 or 'a' in self.vehicle_group.vehicles[0].input_names):
-            final_state_weights = [1000] * self.vehicle_group.n_states
+            final_state_weights = [1000] * self.vehicles_ocp_interface.n_states
         else:
             # If we can't control speed or acceleration, we shouldn't care about
             # final position and velocity
@@ -284,11 +326,11 @@ class LaneChangeWithConstraints(OptimalControlScenario):
 
         n_dest_lane_vehs = 2
         veh_classes = (
-            [[vehicle_handler.LongitudinalVehicle,
-              vehicle_handler.FourStateVehicleAccelFB,  # lane changing veh
-              vehicle_handler.LongitudinalVehicle],
-             [vehicle_handler.LongitudinalVehicle] * n_dest_lane_vehs])
-        v_ff = [v_ego, v_ego, v_ego, 1.0 * v_ego, 1.0 * v_ego]
+            [[vehicle_models.LongitudinalVehicle,
+              vehicle_models.FourStateVehicleAccelFB,  # lane changing veh
+              vehicle_models.LongitudinalVehicle],
+             [vehicle_models.LongitudinalVehicle] * n_dest_lane_vehs])
+        v_ff = [v_ego, v_ego, v_ego, 1.1 * v_ego, 0.9 * v_ego]
 
         self.create_vehicles(veh_classes)
         self.set_free_flow_speeds(v_ff)
@@ -306,7 +348,7 @@ class LaneChangeWithConstraints(OptimalControlScenario):
 
         # Vehicles: origin lane leader, ego, origin lane follower,
         # dest lane leader, dest lane follower
-        sample_veh = vehicle_handler.FourStateVehicleAccelFB()
+        sample_veh = vehicle_models.FourStateVehicleAccelFB()
         safe_gap = sample_veh.compute_safe_gap(vE)
         # All initial states
         off_set = 0
@@ -316,35 +358,36 @@ class LaneChangeWithConstraints(OptimalControlScenario):
               self.target_y, self.target_y]
         theta0 = [0., 0., 0., 0., 0.]
         v0 = [vE, vE, vE, vE, vE]
-        self.initial_state = self.vehicle_group.create_full_state_vector(
-            x0, y0, theta0, v0)
-        self.vehicle_group.assign_leaders(self.initial_state)
-        self.vehicle_group.assign_dest_lane_vehicles(
-            self.initial_state, self.lc_veh_id, self.target_y)
+        self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
+        self.initial_state = self.vehicle_group.get_full_initial_state_vector()
+        # self.vehicle_group.assign_dest_lane_vehicles(
+        #     self.initial_state, self.lc_veh_id, self.target_y)
 
     def create_final_state(self):
         # Note: xf and vf are irrelevant with the accel feedback model
-        delta_x, delta_y, delta_theta, delta_v = [], [], [], []
+        lc_vehicle = self.vehicle_group.vehicles[self.lc_veh_id]
+        lc_vehicle.set_lane_change_direction(1)
+        lc_vehicle.update_target_y()
+        xf, yf, thetaf, vf = [], [], [], []
         for veh in self.vehicle_group.get_all_vehicles():
             v_ff = veh.free_flow_speed
-            veh_id = veh.id
-            delta_x.append(v_ff * self.tf)
-            delta_y.append(self.target_y if veh_id == self.lc_veh_id else 0)
-            delta_theta.append(0.0)
-            delta_v.append(0.0)
-
-        delta_state = self.vehicle_group.create_full_state_vector(
-            delta_x, delta_y, delta_theta, delta_v)
-        self.final_state = self.initial_state + delta_state
+            xf.append(veh.get_a_current_state('x') + v_ff * self.tf)
+            yf.append(veh.target_y)
+            thetaf.append(0.0)
+            vf.append(v_ff)
+        self.final_state = self.vehicle_group.create_full_state_vector(
+            xf, yf, thetaf, vf
+        )
+        print(self.final_state)
 
     def set_costs(self):
         # Desired control; not final control
-        uf = self.vehicle_group.get_desired_input()
-        Q = np.diag([0, 0, 0.1, 0] * self.vehicle_group.n_vehs)
-        R = np.diag([0.1] * self.vehicle_group.n_inputs)
+        uf = self.vehicles_ocp_interface.get_desired_input()
+        Q = np.diag([0, 0, 0.1, 0] * self.vehicles_ocp_interface.n_vehs)
+        R = np.diag([0.1] * self.vehicles_ocp_interface.n_inputs)
         self.running_cost = opt.quadratic_cost(self.dynamic_system, Q, R,
                                                self.final_state, uf)
-        P = np.diag([0, 1000, 1000, 0] * self.vehicle_group.n_vehs)
+        P = np.diag([0, 1000, 1000, 0] * self.vehicles_ocp_interface.n_vehs)
         self.terminal_cost = opt.quadratic_cost(self.dynamic_system,
                                                 P, 0, x0=self.final_state)
 
@@ -369,47 +412,53 @@ class LaneChangeWithConstraints(OptimalControlScenario):
     def safety_constraint_orig_lane_leader(self, states, inputs):
         lc_vehicle = self.vehicle_group.vehicles[self.lc_veh_id]
         return self.lane_changing_safety_constraint(
-            states, inputs, lc_vehicle.id, lc_vehicle.leader_id)
+            states, inputs, lc_vehicle.id, lc_vehicle.get_orig_lane_leader_id())
 
     def safety_constraint_dest_lane_leader(self, states, inputs):
         lc_vehicle = self.vehicle_group.vehicles[self.lc_veh_id]
         return self.lane_changing_safety_constraint(
-            states, inputs, lc_vehicle.id, lc_vehicle.destination_leader_id)
+            states, inputs, lc_vehicle.id,
+            lc_vehicle.get_dest_lane_leader_id())
 
     def safety_constraint_dest_lane_follower(self, states, inputs):
         lc_vehicle = self.vehicle_group.vehicles[self.lc_veh_id]
         return self.lane_changing_safety_constraint(
-            states, inputs, lc_vehicle.destination_follower_id, lc_vehicle.id)
+            states, inputs, lc_vehicle.get_dest_lane_follower_id(),
+            lc_vehicle.id)
 
     def lane_changing_safety_constraint(self, states, inputs, follower_id,
                                         leader_id):
         if leader_id < 0:  # no leader
             return 0
 
-        follower_veh = self.vehicle_group.vehicles[follower_id]
-        follower_states = self.vehicle_group.get_vehicle_state_vector_by_id(
-            follower_veh.id, states)
-        leader_states = self.vehicle_group.get_vehicle_state_vector_by_id(
-            leader_id, states)
+        follower_veh = self.vehicles_ocp_interface.vehicles[follower_id]
+        follower_states = (
+            self.vehicles_ocp_interface.get_vehicle_state_vector_by_id(
+                follower_id, states))
+        leader_states = (
+            self.vehicles_ocp_interface.get_vehicle_state_vector_by_id(
+                leader_id, states))
         gap_error = follower_veh.compute_gap_error(follower_states,
                                                    leader_states)
-        phi = self.vehicle_group.get_a_vehicle_input_by_id(
+        phi = self.vehicles_ocp_interface.get_a_vehicle_input_by_id(
             self.lc_veh_id, inputs, 'phi')
-        margin = 1e-2
+        margin = 1e-1
+        # TODO: possible issue. When gap error becomes less than zero during
+        #  the maneuver, then phi is forced to zero.
         return min(gap_error + margin, 0) * phi
 
     def lane_change_starting_point_constraint(self, states, inputs):
-        lc_veh_x = self.vehicle_group.get_a_vehicle_state_by_id(
+        lc_veh_x = self.vehicles_ocp_interface.get_a_vehicle_state_by_id(
             self.lc_veh_id, states, 'x')
-        phi = self.vehicle_group.get_a_vehicle_input_by_id(
+        phi = self.vehicles_ocp_interface.get_a_vehicle_input_by_id(
             self.lc_veh_id, inputs, 'phi')
         dist_to_point = lc_veh_x - self.min_lc_x
         return min(dist_to_point, 0) * phi
 
     def smooth_lane_change_starting_point_constraint(self, states, inputs):
-        lc_veh_x = self.vehicle_group.get_a_vehicle_state_by_id(
+        lc_veh_x = self.vehicles_ocp_interface.get_a_vehicle_state_by_id(
             self.lc_veh_id, states, 'x')
-        phi = self.vehicle_group.get_a_vehicle_input_by_id(
+        phi = self.vehicles_ocp_interface.get_a_vehicle_input_by_id(
             self.lc_veh_id, inputs, 'phi')
         dist_to_point = lc_veh_x - self.min_lc_x
 
@@ -439,48 +488,11 @@ class LaneChangeWithConstraints(OptimalControlScenario):
         steering_angle = inputs
         for i in range(len(time) - 1):
             dxdt = self.vehicle_group.compute_derivatives(
-                states[:, i], steering_angle[:, i], None)
+                steering_angle[:, i])
             states[:, i + 1] = states[:, i] + dxdt * (time[i + 1] - time[i])
         self.time = time
         self.states = states
         self.inputs = steering_angle
-
-
-class VehicleFollowingScenario(SimulationScenario):
-    """
-    Scenario to test acceleration feedback laws. No lane changes.
-    """
-
-    def __init__(self, n_vehs: int):
-        super().__init__()
-        vehicle_classes = ([[vehicle_handler.LongitudinalVehicle]
-                            * n_vehs])
-        v_ff = [10] + [12] * n_vehs
-        self.create_vehicles(vehicle_classes)
-        self.set_free_flow_speeds(v_ff)
-
-    def create_initial_state(self):
-        gap = 2
-        self.place_equally_spaced_vehicles(gap)
-        self.vehicle_group.assign_leaders(self.initial_state)
-        print(self.initial_state)
-
-    def run(self, parameters=None):
-        """
-
-        :param parameters: Parameters depend on the concrete implementation
-        :return:
-        """
-        dt = 1e-2
-        time = np.arange(0, self.tf, dt)
-        states = np.zeros([len(self.initial_state), len(time)])
-        states[:, 0] = self.initial_state
-        steering_angle = np.zeros([self.vehicle_group.n_vehs, len(time)])
-        for i in range(len(time) - 1):
-            dxdt = self.vehicle_group.compute_derivatives(
-                states[:, i], steering_angle[:, i], None)
-            states[:, i + 1] = states[:, i] + dxdt * (time[i + 1] - time[i])
-        self.time, self.states, self.inputs = time, states, steering_angle
 
 
 class CBFLaneChangeScenario(SimulationScenario):
@@ -491,48 +503,44 @@ class CBFLaneChangeScenario(SimulationScenario):
 
         n_dest_lane_vehs = 2
         veh_classes = (
-                [[vehicle_handler.LongitudinalVehicle,
-                 vehicle_handler.FourStateVehicleAccelFB,  # lane changing veh
-                 vehicle_handler.LongitudinalVehicle],
-                 [vehicle_handler.LongitudinalVehicle] * n_dest_lane_vehs])
-
-        vE = 10
-        v_ff = [vE, vE, vE, 1.0 * vE, 0.9 * vE]
+            [[vehicle_models.LongitudinalVehicle,
+              vehicle_models.FourStateVehicleAccelFB,  # lane changing veh
+              vehicle_models.LongitudinalVehicle],
+             [vehicle_models.LongitudinalVehicle] * n_dest_lane_vehs])
         self.create_vehicles(veh_classes)
-        self.set_free_flow_speeds(v_ff)
         self.target_y = lane_width
-        self.dest_lane_follower = -1
 
     def create_initial_state(self):
-        # Ego (lane-changing) vehicle
-        xE = 0
-        yE = 0
-        vE = 10
 
-        sample_veh = vehicle_handler.FourStateVehicleAccelFB()
-        safe_gap = sample_veh.compute_safe_gap(vE)
+        ego_speed = 12
+        orig_lane_speed = 10
+        dest_lane_speed = 10
+        v_ff = [orig_lane_speed, ego_speed, ego_speed,
+                dest_lane_speed, 0.8 * dest_lane_speed]
+        self.set_free_flow_speeds(v_ff)
+
+        ego_veh = self.vehicle_group.vehicles[self.lc_veh_id]
+        safe_gap = ego_veh.compute_safe_gap(orig_lane_speed)
         # All initial states
-        off_set = 2
-        x0 = [xE + safe_gap - off_set, xE, xE - safe_gap,
-              xE + safe_gap - off_set, xE - safe_gap + off_set]
-        y0 = [yE, yE, yE,
+        x_ego = 0
+        y_ego = 0
+        off_set = 1
+        x0 = [x_ego + safe_gap - off_set, x_ego, x_ego - safe_gap,
+              x_ego + safe_gap - 2 * off_set, x_ego - safe_gap + off_set]
+        y0 = [y_ego, y_ego, y_ego,
               self.target_y, self.target_y]
         theta0 = [0., 0., 0., 0., 0.]
-        v0 = [vE, vE, vE, vE, vE]
+        v0 = [orig_lane_speed, orig_lane_speed, orig_lane_speed,
+              dest_lane_speed, dest_lane_speed]
         self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
         self.initial_state = self.vehicle_group.get_full_initial_state_vector()
-
-        self.vehicle_group.assign_leaders(self.initial_state)
-        self.vehicle_group.assign_dest_lane_vehicles(
-            self.initial_state, self.lc_veh_id, self.target_y)
-        print(self.initial_state)
 
     def run(self, parameters=None):
         dt = 1e-2
         time = np.arange(0, self.tf, dt)
-        states = np.zeros([len(self.initial_state), len(time)])
-        states[:, 0] = self.initial_state
-        steering_angle = np.zeros([self.vehicle_group.n_inputs, len(time)])
+        self.vehicle_group.initialize_state_matrices(len(time))
+        steering_angle = np.zeros([self.vehicle_group.n_vehs, len(time)])
+        self.vehicle_group.update_surrounding_vehicles()
         for i in range(len(time) - 1):
             if i == 0:
                 self.vehicle_group.set_lane_change_direction_by_id(
@@ -540,8 +548,8 @@ class CBFLaneChangeScenario(SimulationScenario):
             self.vehicle_group.update_modes()
             steering_angle[:, i] = (
                 self.vehicle_group.compute_steering_wheel_angle())
-            dxdt = self.vehicle_group.compute_derivatives(
-                states[:, i], steering_angle[:, i], None)
-            states[:, i + 1] = states[:, i] + dxdt * (time[i + 1] - time[i])
-            self.vehicle_group.set_vehicles_states(time[i], states[:, i + 1])
+            self.vehicle_group.compute_derivatives(
+                steering_angle[:, i])
+            self.vehicle_group.update_states(time[i+1])
+            self.vehicle_group.update_surrounding_vehicles()
         self.time, self.states, self.inputs = time, states, steering_angle
