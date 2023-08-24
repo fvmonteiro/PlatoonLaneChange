@@ -154,7 +154,7 @@ def plot_constrained_lane_change(data: pd.DataFrame, lc_veh_id: int):
     x_axes = ['x', 't', 't']
     y_axes = ['y', 'v', 'phi']
 
-    lc_vehicle = vehicle_models.FourStateVehicleAccelFB()
+    lc_vehicle = vehicle_models.SafeAccelOptimalLCVehicle()
     lc_vehicle_data = data[data['id'] == lc_veh_id]
 
     fig, ax = plt.subplots(len(y_axes) + 1)

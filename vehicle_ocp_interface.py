@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Iterable
+from typing import List
 
 import numpy as np
+import pandas as pd
 
 from constants import lane_width
 import vehicle_models as vm
@@ -19,6 +20,9 @@ class BaseVehicleInterface(ABC):
         self.input_names, self.n_inputs = None, None
         self.state_idx, self.input_idx = {}, {}
         self.free_flow_speed = vehicle.free_flow_speed
+        self._orig_leader_id: int = vehicle.get_orig_lane_leader_id()
+        self._destination_leader_id: int = vehicle.get_dest_lane_leader_id()
+        self._destination_follower_id: int = vehicle.get_dest_lane_follower_id()
         self._leader_id = vehicle.get_current_leader_id()
         self.target_lane = vehicle.target_lane
         self.target_y = vehicle.target_y
@@ -61,22 +65,6 @@ class BaseVehicleInterface(ABC):
         """
         return self._leader_id
 
-    def set_free_flow_speed(self, v_ff: float):
-        self.free_flow_speed = v_ff
-
-    def set_current_leader_id(self, veh_id):
-        """
-        Sets which vehicle used to determine this vehicle's accel. The
-        definition of leader ids for all vehicles in a vehicle group determines
-        the operating mode.
-        :param veh_id: leading vehicle's id. Use -1 to designate no leader
-        :return:
-        """
-        self._leader_id = veh_id
-
-    def update_target_y(self):
-        self.target_y = self.target_lane * lane_width
-
     def has_leader(self):
         return self._leader_id >= 0
 
@@ -117,14 +105,16 @@ class BaseVehicleInterface(ABC):
         derivatives[self.state_idx['theta']] = (vel * np.tan(phi)
                                                 / self.wheelbase)
 
-    def create_state_vector(self, x: float, y: float, theta: float,
-                            v: float = None):
-        state_vector = np.zeros(self.n_states)
-        state_vector[self.state_idx['x']] = x
-        state_vector[self.state_idx['y']] = y
-        state_vector[self.state_idx['theta']] = theta
-        self._set_speed(v, state_vector)
-        return state_vector
+    def to_dataframe(self, time, states, inputs):
+        data = np.concatenate([time.reshape(1, -1), states, inputs])
+        columns = (['t'] + [s for s in self.state_names]
+                   + [i for i in self.input_names])
+        df = pd.DataFrame(data=np.transpose(data), columns=columns)
+        df['id'] = self.id
+        df['orig_lane_leader_id'] = self._orig_leader_id
+        df['dest_lane_leader_id'] = self._destination_leader_id
+        df['dest_lane_follower_id'] = self._destination_follower_id
+        return df
 
     @abstractmethod
     def _set_speed(self, v0, state):
@@ -176,6 +166,101 @@ class BaseVehicleInterface(ABC):
         self._derivatives = np.zeros(self.n_states)
 
 
+class FourStateVehicleInterfaceInterface(BaseVehicleInterface):
+    """ States: [x, y, theta, v], inputs: [a, phi], centered at the C.G. """
+
+    _state_names = ['x', 'y', 'theta', 'v']
+    _input_names = ['a', 'phi']
+
+    def __init__(self, vehicle: vm.OpenLoopVehicle):
+        super().__init__(vehicle)
+        self._set_model(self._state_names, self._input_names)
+        self.brake_max = vehicle.brake_max
+        self.accel_max = vehicle.accel_max
+
+    def _set_speed(self, v0, state):
+        state[self.state_idx['v']] = v0
+
+    def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
+        self._position_derivative_cg(vel, theta, phi, derivatives)
+        derivatives[self.state_idx['v']] = accel
+
+    def compute_acceleration(self, ego_states, inputs, leader_states):
+        return self.select_input_from_vector(inputs, 'a')
+
+    def get_desired_input(self) -> List[float]:
+        return [0] * self.n_inputs
+
+    def get_input_limits(self) -> (List[float], List[float]):
+        return [self.brake_max, -self.phi_max], [self.accel_max, self.phi_max]
+
+
+class FourStateVehicleInterfaceAccelFBInterface(
+        FourStateVehicleInterfaceInterface):
+    """ States: [x, y, theta, v], inputs: [phi], centered at the C.G.
+     and accel is computed by a feedback law"""
+
+    _input_names = ['phi']
+
+    def __init__(self, vehicle: vm.SafeAccelOptimalLCVehicle):
+        super().__init__(vehicle)
+
+        # Controller parameters
+        self.h = vehicle.h  # time headway [s]
+        self.kg = vehicle.kg
+        self.kv = vehicle.kv
+
+    def get_input_limits(self) -> (List[float], List[float]):
+        return [-self.phi_max], [self.phi_max]
+
+    def compute_acceleration(self, ego_states, inputs, leader_states) -> float:
+        """
+        Computes acceleration for the ego vehicle following a leader
+        """
+        v_ego = self.select_state_from_vector(ego_states, 'v')
+        if leader_states is None or len(leader_states) == 0:
+            return self.compute_velocity_control(v_ego)
+        else:
+            gap = (self.select_state_from_vector(leader_states, 'x')
+                   - self.select_state_from_vector(ego_states, 'x'))
+            v_leader = self.select_state_from_vector(leader_states, 'v')
+            accel = self.compute_gap_control(gap, v_ego, v_leader)
+            if v_ego >= self.free_flow_speed and accel > 0:
+                return self.compute_velocity_control(v_ego)
+            return accel
+
+    def compute_velocity_control(self, v_ego: float) -> float:
+        return self.kv * (self.free_flow_speed - v_ego)
+
+    def compute_gap_control(self, gap: float, v_ego: float,
+                            v_leader: float) -> float:
+        return (self.kg * (gap - self.h * v_ego - self.c)
+                + self.kv * (v_leader - v_ego))
+
+
+class LongitudinalVehicleInterface(FourStateVehicleInterfaceAccelFBInterface):
+    """ Vehicle that does not perform lane change and computes its own
+    acceleration """
+
+    _input_names = []
+
+    def __init__(self, vehicle: vm.ClosedLoopVehicle):
+        super().__init__(vehicle)
+        self._set_model(self._state_names, self._input_names)
+
+    def select_input_from_vector(self, inputs: List, input_name: str) -> float:
+        return 0.0  # all inputs are computed internally
+
+    def get_desired_input(self) -> List[float]:
+        return []
+
+    def get_input_limits(self) -> (List[float], List[float]):
+        return [], []
+
+
+# =========================== Three-State Vehicles =========================== #
+# Three-state vehicles are used in initial tests with the optimization tool
+# since they are simpler and were used in the tool's example.
 class ThreeStateVehicleInterface(BaseVehicleInterface, ABC):
     """ States: [x, y, theta], inputs: [v, phi] """
     _state_names = ['x', 'y', 'theta']
@@ -219,95 +304,3 @@ class ThreeStateVehicleCGInterface(ThreeStateVehicleInterface):
 
     def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
         self._position_derivative_cg(vel, theta, phi, derivatives)
-
-
-class FourStateVehicleInterfaceInterface(BaseVehicleInterface):
-    """ States: [x, y, theta, v], inputs: [a, phi], centered at the C.G. """
-
-    _state_names = ['x', 'y', 'theta', 'v']
-    _input_names = ['a', 'phi']
-
-    def __init__(self, vehicle: vm.FourStateVehicle):
-        super().__init__(vehicle)
-        self._set_model(self._state_names, self._input_names)
-        self.brake_max = vehicle.brake_max
-        self.accel_max = vehicle.accel_max
-
-    def _set_speed(self, v0, state):
-        state[self.state_idx['v']] = v0
-
-    def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
-        self._position_derivative_cg(vel, theta, phi, derivatives)
-        derivatives[self.state_idx['v']] = accel
-
-    def compute_acceleration(self, ego_states, inputs, leader_states):
-        return self.select_input_from_vector(inputs, 'a')
-
-    def get_desired_input(self) -> List[float]:
-        return [0] * self.n_inputs
-
-    def get_input_limits(self) -> (List[float], List[float]):
-        return [self.brake_max, -self.phi_max], [self.accel_max, self.phi_max]
-
-
-class FourStateVehicleInterfaceAccelFBInterface(
-    FourStateVehicleInterfaceInterface):
-    """ States: [x, y, theta, v], inputs: [phi], centered at the C.G.
-     and accel is computed by a feedback law"""
-
-    _input_names = ['phi']
-
-    def __init__(self, vehicle: vm.FourStateVehicleAccelFB):
-        super().__init__(vehicle)
-
-        # Controller parameters
-        self.h = vehicle.h  # time headway [s]
-        self.kg = vehicle.kg
-        self.kv = vehicle.kv
-
-    def get_input_limits(self) -> (List[float], List[float]):
-        return [-self.phi_max], [self.phi_max]
-
-    def compute_acceleration(self, ego_states, inputs, leader_states) -> float:
-        """
-        Computes acceleration for the ego vehicle following a leader
-        """
-        v_ego = self.select_state_from_vector(ego_states, 'v')
-        if leader_states is None or len(leader_states) == 0:
-            return self.compute_velocity_control(v_ego)
-        else:
-            gap = (self.select_state_from_vector(leader_states, 'x')
-                   - self.select_state_from_vector(ego_states, 'x'))
-            v_leader = self.select_state_from_vector(leader_states, 'v')
-            accel = self.compute_gap_control(gap, v_ego, v_leader)
-            if v_ego >= self.free_flow_speed and accel > 0:
-                return self.compute_velocity_control(v_ego)
-            return accel
-
-    def compute_velocity_control(self, v_ego: float) -> float:
-        return self.kv * (self.free_flow_speed - v_ego)
-
-    def compute_gap_control(self, gap: float, v_ego: float,
-                            v_leader: float) -> float:
-        return (self.kg * (gap - self.h * v_ego - self.c)
-                + self.kv * (v_leader - v_ego))
-
-
-class LongitudinalVehicleInterface(FourStateVehicleInterfaceAccelFBInterface):
-    """ Vehicle that does not perform lane change and computes its own
-    acceleration """
-
-    _input_names = []
-
-    def __init__(self, vehicle: vm.LongitudinalVehicle):
-        super().__init__(vehicle)
-        self._set_model(self._state_names, self._input_names)
-
-    def select_input_from_vector(self, inputs: List, input_name: str) -> float:
-        return 0.0  # all inputs are computed internally
-
-    def get_desired_input(self) -> List[float]:
-        return []
-
-    def get_input_limits(self) -> (List[float], List[float]):
-        return [], []

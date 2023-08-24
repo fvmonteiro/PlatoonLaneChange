@@ -12,9 +12,9 @@ def vehicles_derivatives(t, states, inputs, params):
     :param params: Dictionary which must contain the vehicle type
     :return: state update function
     """
-    vehicle_group: vgi.VehicleGroupInterface = params['vehicle_group']
+    vehicle_group_interface: vgi.VehicleGroupInterface = params['vehicle_group']
 
-    return vehicle_group.compute_derivatives(states, inputs, params)
+    return vehicle_group_interface.compute_derivatives(states, inputs, params)
 
 
 def vehicle_output(t, x, u, params):
