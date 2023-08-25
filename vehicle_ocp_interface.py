@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Union
 
 import numpy as np
 import pandas as pd
 
-from constants import lane_width
 import vehicle_models as vm
 
 
@@ -19,6 +18,7 @@ class BaseVehicleInterface(ABC):
         self.state_names, self.n_states = None, None
         self.input_names, self.n_inputs = None, None
         self.state_idx, self.input_idx = {}, {}
+
         self.free_flow_speed = vehicle.free_flow_speed
         self._orig_leader_id: int = vehicle.get_orig_lane_leader_id()
         self._destination_leader_id: int = vehicle.get_dest_lane_leader_id()
@@ -26,6 +26,8 @@ class BaseVehicleInterface(ABC):
         self._leader_id = vehicle.get_current_leader_id()
         self.target_lane = vehicle.target_lane
         self.target_y = vehicle.target_y
+        # The vehicle's current state is the starting point for the ocp
+        self.initial_state = vehicle.get_states()
 
         # Some parameters
         self.id = vehicle.id
@@ -67,6 +69,15 @@ class BaseVehicleInterface(ABC):
 
     def has_leader(self):
         return self._leader_id >= 0
+
+    def create_state_vector(self, x: float, y: float, theta: float,
+                            v: float = None):
+        state_vector = np.zeros(self.n_states)
+        state_vector[self.state_idx['x']] = x
+        state_vector[self.state_idx['y']] = y
+        state_vector[self.state_idx['theta']] = theta
+        self._set_speed(v, state_vector)
+        return state_vector
 
     def compute_safe_gap(self, v_ego):
         return self.safe_h * v_ego + self.c
@@ -166,13 +177,12 @@ class BaseVehicleInterface(ABC):
         self._derivatives = np.zeros(self.n_states)
 
 
-class FourStateVehicleInterfaceInterface(BaseVehicleInterface):
-    """ States: [x, y, theta, v], inputs: [a, phi], centered at the C.G. """
+class FourStateVehicleInterface(BaseVehicleInterface, ABC):
 
     _state_names = ['x', 'y', 'theta', 'v']
     _input_names = ['a', 'phi']
 
-    def __init__(self, vehicle: vm.OpenLoopVehicle):
+    def __init__(self, vehicle: vm.FourStateVehicle):
         super().__init__(vehicle)
         self._set_model(self._state_names, self._input_names)
         self.brake_max = vehicle.brake_max
@@ -181,28 +191,36 @@ class FourStateVehicleInterfaceInterface(BaseVehicleInterface):
     def _set_speed(self, v0, state):
         state[self.state_idx['v']] = v0
 
+    def get_desired_input(self) -> List[float]:
+        return [0] * self.n_inputs
+
     def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
         self._position_derivative_cg(vel, theta, phi, derivatives)
         derivatives[self.state_idx['v']] = accel
 
+
+class OpenLoopVehicleInterfaceInterface(FourStateVehicleInterface):
+    """ States: [x, y, theta, v], inputs: [a, phi], centered at the C.G. """
+
+    def __init__(self, vehicle: vm.OpenLoopVehicle):
+        super().__init__(vehicle)
+
     def compute_acceleration(self, ego_states, inputs, leader_states):
         return self.select_input_from_vector(inputs, 'a')
-
-    def get_desired_input(self) -> List[float]:
-        return [0] * self.n_inputs
 
     def get_input_limits(self) -> (List[float], List[float]):
         return [self.brake_max, -self.phi_max], [self.accel_max, self.phi_max]
 
 
-class FourStateVehicleInterfaceAccelFBInterface(
-        FourStateVehicleInterfaceInterface):
+class SafeAccelVehicleInterface(FourStateVehicleInterface):
     """ States: [x, y, theta, v], inputs: [phi], centered at the C.G.
      and accel is computed by a feedback law"""
 
     _input_names = ['phi']
 
-    def __init__(self, vehicle: vm.SafeAccelOptimalLCVehicle):
+    def __init__(self,
+                 vehicle: Union[vm.SafeAccelOpenLoopLCVehicle,
+                                vm.SafeAccelOptimalLCVehicle]):
         super().__init__(vehicle)
 
         # Controller parameters
@@ -238,7 +256,7 @@ class FourStateVehicleInterfaceAccelFBInterface(
                 + self.kv * (v_leader - v_ego))
 
 
-class LongitudinalVehicleInterface(FourStateVehicleInterfaceAccelFBInterface):
+class ClosedLoopVehicleInterface(SafeAccelVehicleInterface):
     """ Vehicle that does not perform lane change and computes its own
     acceleration """
 
@@ -246,7 +264,7 @@ class LongitudinalVehicleInterface(FourStateVehicleInterfaceAccelFBInterface):
 
     def __init__(self, vehicle: vm.ClosedLoopVehicle):
         super().__init__(vehicle)
-        self._set_model(self._state_names, self._input_names)
+        # self._set_model(self._state_names, self._input_names)
 
     def select_input_from_vector(self, inputs: List, input_name: str) -> float:
         return 0.0  # all inputs are computed internally

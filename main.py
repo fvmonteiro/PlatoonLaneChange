@@ -11,7 +11,7 @@ def run_base_scenario(n_per_lane, max_iter=100):
     v_ff = 10
     tf = 10
 
-    base_scenario = scenarios.ExampleScenario()
+    base_scenario = scenarios.ExampleScenarioExternal()
     # vehicles = [[vehicle_models.ThreeStateVehicleRearWheel],
     #             [vehicle_models.SafeAccelOptimalLCVehicle]]
     vehicles = [[vehicle_models.SafeAccelOptimalLCVehicle,
@@ -38,10 +38,9 @@ def run_no_lc_scenario():
 
 
 def run_constraints_scenario():
-    v_ff = 10
     tf = 10
 
-    scenario = scenarios.LaneChangeWithConstraints(v_ff)
+    scenario = scenarios.LaneChangeWithConstraints()
     scenario.set_boundary_conditions(tf)
     scenario.create_dynamic_system()
     scenario.set_optimal_control_problem_functions()
@@ -66,7 +65,15 @@ def load_and_plot_latest_scenario():
 def run_cbf_lc_scenario():
     tf = 15
     scenario = scenarios.FeedbackLaneChangeScenario()
-    scenario.create_initial_state()
+    scenario.run(tf)
+    data = scenario.response_to_dataframe()
+    analysis.plot_initial_and_final_states(data)
+    analysis.plot_constrained_lane_change(data, scenario.lc_veh_id)
+
+
+def run_internal_optimal_controller():
+    tf = 15
+    scenario = scenarios.InternalOptimalControlScenario()
     scenario.run(tf)
     data = scenario.response_to_dataframe()
     analysis.plot_initial_and_final_states(data)
@@ -79,7 +86,8 @@ def main():
     # run_no_lc_scenario()
     # run_base_scenario([1], max_iter=200)
     # run_constraints_scenario()
-    run_cbf_lc_scenario()
+    # run_cbf_lc_scenario()
+    run_internal_optimal_controller()
     # load_and_plot_latest_scenario()
 
     end_time = time.time()

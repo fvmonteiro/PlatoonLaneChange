@@ -1,30 +1,54 @@
+from __future__ import annotations
+
 from typing import Dict, List, Union
 
 import numpy as np
 import pandas as pd
 
 import vehicle_models as vm
-import vehicle_group as vg
 import vehicle_ocp_interface as vi
 
 
+# ========= Functions passed to the optimal control library methods ========== #
+def vehicles_derivatives(t, states, inputs, params):
+    """
+    Implements the kinematic bicycle model with reference at the vehicles C.G.
+    Follows the model of updfcn of the control package.
+    :param t: time
+    :param states: Array with states of all vehicles [x1, y1, ..., xN, yN]
+    :param inputs: Array with inputs of all vehicles [u11, u12, ..., u1N, u2N]
+    :param params: Dictionary which must contain the vehicle type
+    :return: state update function
+    """
+    vehicle_group_interface: VehicleGroupInterface = params['vehicle_group']
+
+    return vehicle_group_interface.compute_derivatives(states, inputs, params)
+
+
+def vehicle_output(t, x, u, params):
+    return x  # return (full state)
+
+
+# ================ Support for interface creation ================ #
 def get_interface_for_vehicle(
         vehicle: Union[vm.BaseVehicle, vm.ThreeStateVehicle,
                        vm.OpenLoopVehicle]):
     interface_map = {
+        vm.OpenLoopVehicle: vi.OpenLoopVehicleInterfaceInterface,
+        vm.SafeAccelOpenLoopLCVehicle: vi.SafeAccelVehicleInterface,
+        vm.OptimalControlVehicle: vi.OpenLoopVehicleInterfaceInterface,
+        vm.SafeAccelOptimalLCVehicle: vi.SafeAccelVehicleInterface,
+        vm.ClosedLoopVehicle: vi.ClosedLoopVehicleInterface,
         vm.ThreeStateVehicleRearWheel: vi.ThreeStateVehicleRearWheelInterface,
-        vm.ThreeStateVehicleCG: vi.ThreeStateVehicleCGInterface,
-        vm.OpenLoopVehicle: vi.FourStateVehicleInterfaceInterface,
-        vm.SafeAccelOptimalLCVehicle:
-            vi.FourStateVehicleInterfaceAccelFBInterface,
-        vm.ClosedLoopVehicle: vi.LongitudinalVehicleInterface}
+        vm.ThreeStateVehicleCG: vi.ThreeStateVehicleCGInterface
+    }
     return interface_map[type(vehicle)](vehicle)
 
 
 class VehicleGroupInterface:
     """ Class to help manage groups of vehicles """
 
-    def __init__(self, vehicle_group: vg.VehicleGroup):
+    def __init__(self, vehicles: Dict[int, vm.BaseVehicle]):
         # TODO: make vehicles a  list?
         #  The order of vehicles must be fixed anyway
         self.vehicles: Dict[int, vi.BaseVehicleInterface] = {}
@@ -33,25 +57,26 @@ class VehicleGroupInterface:
         self.sorted_vehicle_ids = None
         self.n_vehs = 0
         self.n_states, self.n_inputs = 0, 0
-        # Maps the vehicle id (position in the 'vehicles' list) to the index of
-        # its states in the state vector containing all vehicles
-        self.state_idx_map = []
-        # Maps the vehicle id (position in the 'vehicles' list) to the index of
-        # its inputs in the full input vector
-        self.input_idx_map = []
+        # Maps the vehicle id to the index of its states in the state vector
+        # containing all vehicles
+        self.state_idx_map: Dict[int, int] = {}
+        # Maps the vehicle id to the index of its inputs in the full input
+        # vector
+        self.input_idx_map: Dict[int, int] = {}
 
-        self.create_vehicle_interfaces(vehicle_group)
-        self.mode = vehicle_group.mode
+        self.create_vehicle_interfaces(vehicles)
+        # self.mode = vehicle_group.mode
 
-    def create_vehicle_interfaces(self, vehicle_group: vg.VehicleGroup):
+    def create_vehicle_interfaces(
+            self, vehicles: Dict[int, vm.BaseVehicle]):
         self.sorted_vehicle_ids = []
-        for veh_id in sorted(vehicle_group.vehicles.keys()):
+        for veh_id in sorted(vehicles.keys()):
             vehicle_interface = get_interface_for_vehicle(
-                vehicle_group.vehicles[veh_id])
+                vehicles[veh_id])
             self.sorted_vehicle_ids.append(vehicle_interface.id)
             self.vehicles[veh_id] = vehicle_interface
-            self.state_idx_map.append(self.n_states)
-            self.input_idx_map.append(self.n_inputs)
+            self.state_idx_map[veh_id] = self.n_states
+            self.input_idx_map[veh_id] = self.n_inputs
             self.n_states += vehicle_interface.n_states
             self.n_inputs += vehicle_interface.n_inputs
         self.n_vehs = len(self.vehicles)
@@ -73,6 +98,16 @@ class VehicleGroupInterface:
             veh_desired_inputs = vehicle.get_desired_input()
             desired_inputs.extend(veh_desired_inputs)
         return desired_inputs
+
+    def get_initial_state(self):
+        """
+        Gets all vehicles' current states, which are used as the starting
+        point for the ocp
+        """
+        initial_state = []
+        for veh_id in self.sorted_vehicle_ids:
+            initial_state.extend(self.vehicles[veh_id].initial_state)
+        return np.array(initial_state)
 
     def get_state_indices(self, state_name: str) -> List[int]:
         state_indices = []
@@ -120,6 +155,24 @@ class VehicleGroupInterface:
                                  in vehicle.state_names])
         return output_names
 
+    def create_desired_state(self, tf: float):
+        """
+        Creates a full (for all vehicles) state vector where all vehicles
+        travel at their current speeds, and are at their desired lateral
+        positions
+        """
+        # Note: xf and vf are irrelevant with the accel feedback model
+        desired_state = []
+        for veh_id in self.sorted_vehicle_ids:
+            veh = self.vehicles[veh_id]
+            veh_states = veh.initial_state
+            vf = veh.select_state_from_vector(veh_states, 'v')
+            xf = veh.select_state_from_vector(veh_states, 'x') + vf * tf
+            yf = veh.target_y
+            thetaf = 0.0
+            desired_state.extend(veh.create_state_vector(xf, yf, thetaf, vf))
+        return np.array(desired_state)
+
     def compute_derivatives(self, states, inputs, params):
         """
         Computes the states derivatives
@@ -142,6 +195,30 @@ class VehicleGroupInterface:
             dxdt.extend(vehicle.compute_derivatives(ego_states, ego_inputs,
                                                     leader_states))
         return np.array(dxdt)
+
+    def lane_changing_safety_constraint(self, states, inputs, lc_veh_id,
+                                        other_id, is_other_behind):
+        if other_id < 0:  # no risk
+            return 0
+        if is_other_behind:
+            follower_id, leader_id = other_id, lc_veh_id
+        else:
+            follower_id, leader_id = lc_veh_id, other_id
+        follower_veh = self.vehicles[follower_id]
+        follower_states = (
+            self.get_vehicle_state_vector_by_id(
+                follower_id, states))
+        leader_states = (
+            self.get_vehicle_state_vector_by_id(
+                leader_id, states))
+        gap_error = follower_veh.compute_gap_error(follower_states,
+                                                   leader_states)
+        phi = self.get_a_vehicle_input_by_id(
+            lc_veh_id, inputs, 'phi')
+        margin = 1e-1
+        # TODO: possible issue. When gap error becomes less than zero during
+        #  the maneuver, then phi is forced to zero.
+        return min(gap_error + margin, 0) * phi
 
     def map_ocp_solution_to_vehicle_inputs(self, ocp_inputs):
         inputs_map = {}

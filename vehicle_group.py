@@ -3,14 +3,14 @@ from typing import Dict, Iterable, List, Type, Union
 import numpy as np
 import pandas as pd
 
-from vehicle_models import BaseVehicle
+import vehicle_models as vm
 
 
 class VehicleGroup:
     """ Class to help manage groups of vehicles """
 
     def __init__(self):
-        self.vehicles: Dict[int, BaseVehicle] = {}
+        self.vehicles: Dict[int, vm.BaseVehicle] = {}
         # Often, we need to iterate over all vehicles in the order they were
         # created. The list below makes that easy
         self.sorted_vehicle_ids = None
@@ -31,7 +31,7 @@ class VehicleGroup:
             initial_state.extend(self.vehicles[veh_id].initial_state)
         return initial_state
 
-    def get_all_vehicles(self) -> Iterable[BaseVehicle]:
+    def get_all_vehicles(self) -> Iterable[vm.BaseVehicle]:
         return self.vehicles.values()
 
     def get_all_states(self):
@@ -69,7 +69,7 @@ class VehicleGroup:
         for vehicle in self.vehicles.values():
             vehicle.initialize_simulation_logs(n_samples)
 
-    def create_vehicle_array(self, vehicle_classes: List[Type[BaseVehicle]]):
+    def create_vehicle_array(self, vehicle_classes: List[Type[vm.BaseVehicle]]):
         """
 
         Populates the list of vehicles following the given classes

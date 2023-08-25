@@ -11,7 +11,6 @@ from scipy.optimize import LinearConstraint, NonlinearConstraint
 
 import vehicle_models
 from constants import lane_width
-import dynamics
 from vehicle_group import VehicleGroup
 from vehicle_models import BaseVehicle
 import vehicle_group_ocp_interface as vgi
@@ -77,6 +76,45 @@ class SimulationScenario(ABC):
                 y0.append(lane_center)
                 theta0.append(0.0)
         v0 = self.vehicle_group.get_free_flow_speeds()
+        self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
+        self.initial_state = self.vehicle_group.get_full_initial_state_vector()
+
+    def create_base_lane_change_initial_state(self, v_ego, v_lo, v_ld, v_fd,
+                                              position_offset):
+        """
+        Creates an initial state for 5 vehicles: 3 at the origin lane, with
+        the lane changing one between other two, and 2 at the destination lane.
+        :param v_ego: lane changing vehicle free flow speed
+        :param v_lo: origin lane leader free flow speed
+        :param v_ld: destination lane leader free flow speed
+        :param v_fd: destination lane follower free flow speed
+        :param position_offset: determines by how much surrounding vehicles'
+         positions deviate from the safe lane change values
+        """
+        # TODO: how to ensure proper vehicle 'sync' between creates vehicles
+        #  and the initial states
+        target_y = lane_width
+        orig_lane_speed = 10
+        dest_lane_speed = 10
+        v_ff = [v_lo, v_ego, v_ego,
+                v_ld, v_fd]
+        self.set_free_flow_speeds(v_ff)
+
+        # We assume all vehicles have the same parameters, so all safe gaps are
+        # the same
+        sample_veh = self.vehicle_group.vehicles[0]
+        safe_gap = sample_veh.compute_safe_gap(v_lo)
+        # Initial states
+        x_ego = 0
+        y_ego = 0
+        x0 = [x_ego + safe_gap - position_offset, x_ego, x_ego - safe_gap,
+              x_ego + safe_gap - 3 * position_offset,
+              x_ego - safe_gap + position_offset]
+        y0 = [y_ego, y_ego, y_ego,
+              target_y, target_y]
+        theta0 = [0., 0., 0., 0., 0.]
+        v0 = [orig_lane_speed, orig_lane_speed, orig_lane_speed,
+              dest_lane_speed, dest_lane_speed]
         self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
         self.initial_state = self.vehicle_group.get_full_initial_state_vector()
 
@@ -149,32 +187,17 @@ class FeedbackLaneChangeScenario(SimulationScenario):
             [[vehicle_models.ClosedLoopVehicle]
              * (n_dest_lane_vehs + n_orig_lane_vehs)])
         self.create_vehicles(veh_classes)
-        self.target_y = lane_width
+        self.create_initial_state()
 
     def create_initial_state(self):
 
         v_ego = 12
         orig_lane_speed = 10
         dest_lane_speed = 10
-        v_ff = [orig_lane_speed, v_ego, v_ego,
-                dest_lane_speed, 0.8 * dest_lane_speed]
-        self.set_free_flow_speeds(v_ff)
-
-        ego_veh = self.vehicle_group.vehicles[self.lc_veh_id]
-        safe_gap = ego_veh.compute_safe_gap(orig_lane_speed)
-        # All initial states
-        x_ego = 0
-        y_ego = 0
-        off_set = 1
-        x0 = [x_ego + safe_gap - off_set, x_ego, x_ego - safe_gap,
-              x_ego + safe_gap - 3 * off_set, x_ego - safe_gap + off_set]
-        y0 = [y_ego, y_ego, y_ego,
-              self.target_y, self.target_y]
-        theta0 = [0., 0., 0., 0., 0.]
-        v0 = [orig_lane_speed, orig_lane_speed, orig_lane_speed,
-              dest_lane_speed, dest_lane_speed]
-        self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
-        self.initial_state = self.vehicle_group.get_full_initial_state_vector()
+        position_offset = 1
+        self.create_base_lane_change_initial_state(
+            v_ego, orig_lane_speed, dest_lane_speed, 0.8 * dest_lane_speed,
+            position_offset)
 
     def run(self, final_time):
         self.tf = final_time
@@ -193,7 +216,48 @@ class FeedbackLaneChangeScenario(SimulationScenario):
             self.vehicle_group.update_surrounding_vehicles()
 
 
-class OptimalControlScenario(SimulationScenario, ABC):
+class InternalOptimalControlScenario(SimulationScenario):
+
+    def __init__(self):
+        super().__init__()
+        self.lc_veh_id = 1  # lane changing vehicle
+
+        n_dest_lane_vehs = 2
+        veh_classes = (
+            [[vehicle_models.ClosedLoopVehicle,
+              vehicle_models.SafeAccelOptimalLCVehicle,  # lane changing veh
+              vehicle_models.ClosedLoopVehicle],
+             [vehicle_models.ClosedLoopVehicle] * n_dest_lane_vehs])
+        self.create_vehicles(veh_classes)
+        self.create_initial_state()
+
+    def create_initial_state(self):
+        v_ego = 10
+        orig_lane_speed = v_ego
+        dest_lane_speed = 1.1 * v_ego
+        v_fd = 0.9 * v_ego
+        position_offset = 0
+        self.create_base_lane_change_initial_state(
+            v_ego, orig_lane_speed, dest_lane_speed, v_fd, position_offset)
+
+    def run(self, final_time):
+        self.tf = final_time
+        dt = 1e-2
+        time = np.arange(0, self.tf, dt)
+        self.vehicle_group.initialize_state_matrices(len(time))
+        self.vehicle_group.update_surrounding_vehicles()
+        for i in range(len(time) - 1):
+            if i == 100:
+                self.vehicle_group.set_lane_change_direction_by_id(
+                    self.lc_veh_id, 1)
+            self.vehicle_group.update_modes()
+            self.vehicle_group.determine_inputs({})
+            self.vehicle_group.compute_derivatives()
+            self.vehicle_group.update_states(time[i + 1])
+            self.vehicle_group.update_surrounding_vehicles()
+
+
+class ExternalOptimalControlScenario(SimulationScenario, ABC):
     vehicles_ocp_interface: vgi.VehicleGroupInterface
 
     def __init__(self):
@@ -216,7 +280,7 @@ class OptimalControlScenario(SimulationScenario, ABC):
 
     def create_dynamic_system(self) -> None:
         self.vehicles_ocp_interface = vgi.VehicleGroupInterface(
-            self.vehicle_group)
+            self.vehicle_group.vehicles)
         params = {'vehicle_group': self.vehicles_ocp_interface,
                   'test': True}
 
@@ -226,7 +290,7 @@ class OptimalControlScenario(SimulationScenario, ABC):
 
         n_states = self.vehicles_ocp_interface.n_states
         self.dynamic_system = ct.NonlinearIOSystem(
-            dynamics.vehicles_derivatives, dynamics.vehicle_output,
+            vgi.vehicles_derivatives, vgi.vehicle_output,
             params=params, states=n_states, name='vehicle_group',
             inputs=input_names, outputs=output_names)
 
@@ -320,7 +384,7 @@ class OptimalControlScenario(SimulationScenario, ABC):
         pass
 
 
-class ExampleScenario(OptimalControlScenario):
+class ExampleScenarioExternal(ExternalOptimalControlScenario):
     """
     Two-lane scenario where all vehicles want to perform a lane change starting
     at t=0 and ending at tf.
@@ -390,7 +454,7 @@ class ExampleScenario(OptimalControlScenario):
         self.set_input_boundaries()
 
 
-class LaneChangeWithConstraints(OptimalControlScenario):
+class LaneChangeWithConstraints(ExternalOptimalControlScenario):
     """
     Used to test how to code safety constraints
     """
@@ -402,40 +466,21 @@ class LaneChangeWithConstraints(OptimalControlScenario):
         n_dest_lane_vehs = 2
         veh_classes = (
             [[vehicle_models.ClosedLoopVehicle,
-              vehicle_models.SafeAccelOptimalLCVehicle,  # lane changing veh
+              vehicle_models.SafeAccelOpenLoopLCVehicle,  # lane changing veh
               vehicle_models.ClosedLoopVehicle],
              [vehicle_models.ClosedLoopVehicle] * n_dest_lane_vehs])
         self.create_vehicles(veh_classes)
 
         self.min_lc_x = 20  # only used for initial tests
-        self.target_y = lane_width
-        self.dest_lane_follower = -1
 
     def create_initial_state(self):
-        # TODO: how to ensure proper vehicle 'synch' between creation and here?
-
         v_ego = 10
-        orig_lane_speed = 10
-        dest_lane_speed = 10
-        v_ff = [orig_lane_speed, v_ego, v_ego,
-                1.1 * dest_lane_speed, 0.9 * dest_lane_speed]
-        self.set_free_flow_speeds(v_ff)
-
-        ego_veh = vehicle_models.SafeAccelOptimalLCVehicle()
-        safe_gap = ego_veh.compute_safe_gap(orig_lane_speed)
-        # All initial states
-        x_ego = 0
-        y_ego = 0
-        off_set = 0
-        x0 = [x_ego + safe_gap - off_set, x_ego, x_ego - safe_gap,
-              x_ego + safe_gap - off_set, x_ego - safe_gap + off_set]
-        y0 = [y_ego, y_ego, y_ego,
-              self.target_y, self.target_y]
-        theta0 = [0., 0., 0., 0., 0.]
-        v0 = [orig_lane_speed, orig_lane_speed, orig_lane_speed,
-              dest_lane_speed, dest_lane_speed]
-        self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
-        self.initial_state = self.vehicle_group.get_full_initial_state_vector()
+        orig_lane_speed = v_ego
+        dest_lane_speed = 1.1 * v_ego
+        v_fd = 0.9 * v_ego
+        position_offset = 0
+        self.create_base_lane_change_initial_state(
+            v_ego, orig_lane_speed, dest_lane_speed, v_fd, position_offset)
 
     def create_final_state(self):
         # Note: xf and vf are irrelevant with the accel feedback model
