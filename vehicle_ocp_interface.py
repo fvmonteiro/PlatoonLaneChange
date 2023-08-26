@@ -219,8 +219,7 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
     _input_names = ['phi']
 
     def __init__(self,
-                 vehicle: Union[vm.SafeAccelOpenLoopLCVehicle,
-                                vm.SafeAccelOptimalLCVehicle]):
+                 vehicle: Union[vm.FourStateVehicle]):
         super().__init__(vehicle)
 
         # Controller parameters

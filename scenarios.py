@@ -4,6 +4,7 @@ from typing import Dict, List, Type, Union
 
 import control as ct
 import control.optimal as opt
+import control.flatsys as flat
 import numpy as np
 import pandas as pd
 
@@ -79,48 +80,49 @@ class SimulationScenario(ABC):
         self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
         self.initial_state = self.vehicle_group.get_full_initial_state_vector()
 
-    def create_base_lane_change_initial_state(self, v_ego, v_lo, v_ld, v_fd,
-                                              position_offset):
+    def create_base_lane_change_initial_state(self, v_ff, delta_x):
         """
         Creates an initial state for 5 vehicles: 3 at the origin lane, with
         the lane changing one between other two, and 2 at the destination lane.
-        :param v_ego: lane changing vehicle free flow speed
-        :param v_lo: origin lane leader free flow speed
-        :param v_ld: destination lane leader free flow speed
-        :param v_fd: destination lane follower free flow speed
-        :param position_offset: determines by how much surrounding vehicles'
-         positions deviate from the safe lane change values
+        :param v_ff: Dictionary with free-flow speeds for ego, lo, ld and fd
+        :param delta_x: Dictionary with deviation from minimum safe gap for lo,
+         ld and fd. Positive values lead to smaller-than-safe initial gaps.
         """
         # TODO: how to ensure proper vehicle 'sync' between creates vehicles
         #  and the initial states
+        self.vehicle_group.set_vehicle_names(['lo', 'ego', 'fo', 'ld', 'fd'])
+        self.vehicle_group.get_vehicle_by_name('fd').make_cooperative()
         target_y = lane_width
-        orig_lane_speed = 10
-        dest_lane_speed = 10
-        v_ff = [v_lo, v_ego, v_ego,
-                v_ld, v_fd]
-        self.set_free_flow_speeds(v_ff)
+        ordered_v_ff = [v_ff['lo'], v_ff['ego'], v_ff['ego'],
+                        v_ff['ld'], v_ff['fd']]
+        self.set_free_flow_speeds(ordered_v_ff)
 
         # We assume all vehicles have the same parameters, so all safe gaps are
         # the same
         sample_veh = self.vehicle_group.vehicles[0]
-        safe_gap = sample_veh.compute_safe_gap(v_lo)
+        safe_gap = sample_veh.compute_safe_gap(v_ff['lo'])
         # Initial states
         x_ego = 0
         y_ego = 0
-        x0 = [x_ego + safe_gap - position_offset, x_ego, x_ego - safe_gap,
-              x_ego + safe_gap - 3 * position_offset,
-              x_ego - safe_gap + position_offset]
+        x0 = [x_ego + safe_gap - delta_x['lo'], x_ego, x_ego - safe_gap,
+              x_ego + safe_gap - delta_x['ld'],
+              x_ego - safe_gap + delta_x['fd']]
         y0 = [y_ego, y_ego, y_ego,
               target_y, target_y]
         theta0 = [0., 0., 0., 0., 0.]
-        v0 = [orig_lane_speed, orig_lane_speed, orig_lane_speed,
-              dest_lane_speed, dest_lane_speed]
+        v0 = [v_ff['lo'], v_ff['lo'], v_ff['lo'],
+              v_ff['lo'], v_ff['lo']]
         self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
         self.initial_state = self.vehicle_group.get_full_initial_state_vector()
 
-    def create_final_state(self):
-        """ Default behavior: no final state specification """
-        pass
+    def test_scenario(self):
+        v_ff = {'ego': 10, 'lo': 10}
+        v_ff['ld'] = 1.0 * v_ff['lo']
+        v_ff['fd'] = 1.0 * v_ff['lo']
+        # Deviation from minimum safe gap
+        delta_x = {'lo': 0.0, 'ld': 0.0, 'fd': 1.0}
+        self.create_base_lane_change_initial_state(
+            v_ff, delta_x)
 
     def response_to_dataframe(self) -> pd.DataFrame:
         return self.vehicle_group.to_dataframe()
@@ -190,14 +192,7 @@ class FeedbackLaneChangeScenario(SimulationScenario):
         self.create_initial_state()
 
     def create_initial_state(self):
-
-        v_ego = 12
-        orig_lane_speed = 10
-        dest_lane_speed = 10
-        position_offset = 1
-        self.create_base_lane_change_initial_state(
-            v_ego, orig_lane_speed, dest_lane_speed, 0.8 * dest_lane_speed,
-            position_offset)
+        self.test_scenario()
 
     def run(self, final_time):
         self.tf = final_time
@@ -232,13 +227,7 @@ class InternalOptimalControlScenario(SimulationScenario):
         self.create_initial_state()
 
     def create_initial_state(self):
-        v_ego = 10
-        orig_lane_speed = v_ego
-        dest_lane_speed = 1.1 * v_ego
-        v_fd = 0.9 * v_ego
-        position_offset = 0
-        self.create_base_lane_change_initial_state(
-            v_ego, orig_lane_speed, dest_lane_speed, v_fd, position_offset)
+        self.test_scenario()
 
     def run(self, final_time):
         self.tf = final_time
@@ -325,7 +314,8 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
             trajectory_constraints=self.constraints,
             terminal_cost=self.terminal_cost,
             terminal_constraints=self.terminal_constraints,
-            initial_guess=u0, minimize_options={'maxiter': max_iter})
+            initial_guess=u0, minimize_options={'maxiter': max_iter},
+            basis=flat.BezierFamily(5, T=self.tf))
         return result
 
     def run_ocp_solution(self, result: opt.OptimalControlResult):
@@ -372,6 +362,11 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
             self.vehicle_group.compute_derivatives()
             self.vehicle_group.update_states(time[i + 1])
             self.vehicle_group.update_surrounding_vehicles()
+
+    @abstractmethod
+    def create_final_state(self):
+        """ Default behavior: no final state specification """
+        pass
 
     @abstractmethod
     def set_costs(self):
@@ -474,13 +469,13 @@ class LaneChangeWithConstraints(ExternalOptimalControlScenario):
         self.min_lc_x = 20  # only used for initial tests
 
     def create_initial_state(self):
-        v_ego = 10
-        orig_lane_speed = v_ego
-        dest_lane_speed = 1.1 * v_ego
-        v_fd = 0.9 * v_ego
-        position_offset = 0
-        self.create_base_lane_change_initial_state(
-            v_ego, orig_lane_speed, dest_lane_speed, v_fd, position_offset)
+        # Free-flow speeds
+        v_ff = {'ego': 10, 'lo': 10}
+        v_ff['ld'] = 1.1 * v_ff['ego']
+        v_ff['fd'] = 0.8 * v_ff['ego']
+        # Deviation from minimum safe gap
+        delta_x = {'lo': 0.0, 'ld': 0.0, 'fd': 0.0}
+        self.create_base_lane_change_initial_state(v_ff, delta_x)
 
     def create_final_state(self):
         # Note: xf and vf are irrelevant with the accel feedback model
@@ -497,7 +492,6 @@ class LaneChangeWithConstraints(ExternalOptimalControlScenario):
         self.final_state = self.vehicle_group.create_full_state_vector(
             xf, yf, thetaf, vf
         )
-        print(self.final_state)
 
     def set_costs(self):
         # Desired control; not final control

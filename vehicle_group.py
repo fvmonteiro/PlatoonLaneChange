@@ -15,6 +15,7 @@ class VehicleGroup:
         # created. The list below makes that easy
         self.sorted_vehicle_ids = None
         self.n_vehs = 0
+        self.name_to_id: Dict[str, int] = {}
         # The full system (all vehicles) mode is defined by follower/leader
         # pairs.
         self.mode: Dict[int, int] = {}
@@ -46,6 +47,9 @@ class VehicleGroup:
             inputs.append(self.vehicles[veh_id].get_input_history())
         return np.vstack(inputs)
 
+    def get_vehicle_by_name(self, name: str) -> vm.BaseVehicle:
+        return self.vehicles[self.name_to_id[name]]
+
     def set_a_vehicle_free_flow_speed(self, veh_id, v_ff):
         self.vehicles[veh_id].set_free_flow_speed(v_ff)
 
@@ -64,6 +68,12 @@ class VehicleGroup:
 
     def set_lane_change_direction_by_id(self, veh_id: int, lc_direction: int):
         self.vehicles[veh_id].set_lane_change_direction(lc_direction)
+
+    def set_vehicle_names(self, names: List[str]):
+        for veh_id in self.sorted_vehicle_ids:
+            vehicle = self.vehicles[veh_id]
+            vehicle.name = names[veh_id]
+            self.name_to_id[names[veh_id]] = veh_id
 
     def initialize_state_matrices(self, n_samples: int):
         for vehicle in self.vehicles.values():
@@ -110,9 +120,22 @@ class VehicleGroup:
             ego_vehicle.find_dest_lane_vehicles(self.vehicles.values())
             ego_vehicle.update_target_leader(self.vehicles)
             new_mode[ego_vehicle.id] = ego_vehicle.get_current_leader_id()
-        if new_mode != self.mode:
-            print("Mode update from:\n{}\nto\n{}".format(self.mode, new_mode))
+        if len(self.mode) == 0:
+            print("Initial mode:\n{}".format(self.mode_to_str(new_mode)))
+        elif new_mode != self.mode:
+            print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
+                self.vehicles[0].get_current_time(),
+                self.mode_to_str(self.mode), self.mode_to_str(new_mode)))
         self.mode = new_mode
+
+    def mode_to_str(self, mode):
+        pairs = []
+        for foll_id, lead_id in mode.items():
+            foll_name = self.vehicles[foll_id].name
+            lead_name = self.vehicles[lead_id].name if lead_id >= 0 else '0'
+            pairs.append(foll_name + '->' + lead_name)
+        res = ', '.join(pairs)
+        return '{' + res + '}'
 
     def determine_inputs(
             self, open_loop_controls: Dict[int, Dict[str, float]]):

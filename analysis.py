@@ -7,7 +7,7 @@ import pandas as pd
 import seaborn as sns
 
 import vehicle_models
-from constants import units
+import constants as const
 
 
 def compute_values_relative_to_other_vehicle(
@@ -91,6 +91,10 @@ def load_simulated_scenario(pickle_file_name: str):
     return data
 
 
+def compute_default_safe_gap(vel):
+    return const.safe_time_headway * vel + const.standstill_distance
+
+
 def compare_desired_and_actual_final_states(desired_data, simulated_data):
     fig, ax = plt.subplots(2, 1)
     plot_initial_and_final_states(desired_data, ax[0])
@@ -154,31 +158,29 @@ def plot_constrained_lane_change(data: pd.DataFrame, lc_veh_id: int):
     x_axes = ['x', 't', 't']
     y_axes = ['y', 'v', 'phi']
 
-    lc_vehicle = vehicle_models.SafeAccelOptimalLCVehicle()
     lc_vehicle_data = data[data['id'] == lc_veh_id]
 
     fig, ax = plt.subplots(len(y_axes) + 1)
     fig.set_size_inches(9, 6)
-    ego_safe_gap = (lc_vehicle_data['v'].to_numpy() * lc_vehicle.safe_h
-                    + lc_vehicle.c)
+    ego_safe_gap = compute_default_safe_gap(lc_vehicle_data['v'].to_numpy())
 
     gap = lc_vehicle_data['gap_to_orig_lane_leader'].to_numpy()
     orig_lane_error = gap - ego_safe_gap
-    ax[0].plot(lc_vehicle_data['t'], orig_lane_error, label='lo')
+    ax[0].plot(lc_vehicle_data['t'], orig_lane_error, label='ego to lo')
 
     gap = lc_vehicle_data['gap_to_dest_lane_leader'].to_numpy()
     dest_lane_error = gap - ego_safe_gap
-    ax[0].plot(lc_vehicle_data['t'], dest_lane_error, label='ld')
+    ax[0].plot(lc_vehicle_data['t'], dest_lane_error, label='ego to ld')
 
     dest_follower_ids = lc_vehicle_data['dest_lane_follower_id'].unique()
     dest_follower_id = [veh_id for veh_id in dest_follower_ids if veh_id >= 0]
     if len(dest_follower_id) > 1:
         print("Hey! Time to deal with multiple dest lane followers")
     follower_data = data[data['id'] == dest_follower_id[0]]
-    foll_safe_gap = follower_data['v'] * lc_vehicle.safe_h + lc_vehicle.c
+    foll_safe_gap = compute_default_safe_gap(follower_data['v'].to_numpy())
     gap = lc_vehicle_data['gap_to_dest_lane_follower'].to_numpy()
     dest_lane_error = gap - foll_safe_gap
-    ax[0].plot(lc_vehicle_data['t'], dest_lane_error, label='fd')
+    ax[0].plot(lc_vehicle_data['t'], dest_lane_error, label='fd to ego')
 
     ax[0].legend()
     low, high = ax[0].get_ylim()
@@ -189,7 +191,7 @@ def plot_constrained_lane_change(data: pd.DataFrame, lc_veh_id: int):
 
     for i, (x, y) in enumerate(zip(x_axes, y_axes)):
         show_legend = True if i == len(x_axes) - 1 else False
-        sns.lineplot(data, x=x, y=y, hue='id', ax=ax[i + 1], palette='tab10',
+        sns.lineplot(data, x=x, y=y, hue='name', ax=ax[i + 1], palette='tab10',
                      legend=show_legend)
         low, high = ax[i + 1].get_ylim()
         if y == 'v' and high - low < 1:
@@ -238,6 +240,6 @@ def plot_scenario_results(x_axes: List[str], y_axes: List[str],
 
 def _get_variable_with_unit(variable: str):
     try:
-        return variable + ' [' + units[variable] + ']'
+        return variable + ' [' + const.units[variable] + ']'
     except KeyError:
         return variable
