@@ -81,6 +81,10 @@ class VehicleGroup:
         for vehicle in self.vehicles.values():
             vehicle.initialize_simulation_logs(n_samples)
 
+    def make_all_connected(self):
+        for vehicle in self.vehicles.values():
+            vehicle.make_connected()
+
     def create_vehicle_array(self, vehicle_classes: List[Type[vm.BaseVehicle]]):
         """
 

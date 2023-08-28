@@ -119,7 +119,7 @@ class SimulationScenario(ABC):
         v_ff['ld'] = 1.0 * v_ff['lo']
         v_ff['fd'] = 1.0 * v_ff['lo']
         # Deviation from minimum safe gap
-        delta_x = {'lo': 0.0, 'ld': 0.0, 'fd': 1.0}
+        delta_x = {'lo': 0.0, 'ld': -1.0, 'fd': 1.0}
         self.create_base_lane_change_initial_state(
             v_ff, delta_x)
 
@@ -192,8 +192,7 @@ class FeedbackLaneChangeScenario(SimulationScenario):
 
     def create_initial_state(self):
         self.test_scenario()
-        self.vehicle_group.get_vehicle_by_name('ego').make_connected()
-        self.vehicle_group.get_vehicle_by_name('fd').make_connected()
+        self.vehicle_group.make_all_connected()
 
     def run(self, final_time):
         self.tf = final_time
@@ -229,6 +228,7 @@ class InternalOptimalControlScenario(SimulationScenario):
 
     def create_initial_state(self):
         self.test_scenario()
+        self.vehicle_group.make_all_connected()
 
     def run(self, final_time):
         self.tf = final_time

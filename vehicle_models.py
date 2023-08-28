@@ -43,11 +43,10 @@ class BaseVehicle(ABC):
         self._orig_leader_id: List[int] = []
         self._destination_leader_id: List[int] = []
         self._destination_follower_id: List[int] = []
-        self._incoming_vehicle_id: List[int] = []  # TODO: must reset every time
-                                             #  (make list?)
+        self._incoming_vehicle_id: List[int] = []
         # Vehicle used to determine current accel
         self._leader_id: List[int] = []
-        self.desired_future_follower_id = -1
+        self._desired_future_follower_id = -1
         self._polynomial_lc_coeffs = None
         self._long_adjust_start_time = -np.inf
         self._lc_start_time = -np.inf
@@ -112,6 +111,9 @@ class BaseVehicle(ABC):
 
     def get_incoming_vehicle_id(self):
         return self._incoming_vehicle_id[-1]
+
+    def get_desired_future_follower_id(self):
+        return self._desired_future_follower_id
 
     def get_current_leader_id(self):
         """
@@ -206,8 +208,19 @@ class BaseVehicle(ABC):
                           "(leader id) before simulation start")
             return False
 
+    def has_changed_leader(self):
+        try:
+            return self._leader_id[-2] != self._leader_id[-1]
+        except IndexError:
+            warnings.warn("Warning: trying to check if leader has changed too"
+                          "early (before two simulation steps")
+            return False
+
     def has_lane_change_intention(self):
         return self.get_current_lane() != self.target_lane
+
+    def has_requested_cooperation(self):
+        return self.get_desired_future_follower_id() >= 0
 
     def make_connected(self):
         self._is_connected = True
@@ -252,7 +265,7 @@ class BaseVehicle(ABC):
         incoming_veh_x = np.inf
         if self._is_connected:
             for other_vehicle in vehicles:
-                other_request = other_vehicle.desired_future_follower_id
+                other_request = other_vehicle._desired_future_follower_id
                 other_x = other_vehicle.get_a_state_by_name('x')
                 if other_request == self.id and other_x < incoming_veh_x:
                     new_incoming_vehicle_id = other_vehicle.id
@@ -261,7 +274,7 @@ class BaseVehicle(ABC):
 
     def request_cooperation(self):
         if self._is_connected:
-            self.desired_future_follower_id = self.get_dest_lane_follower_id()
+            self._desired_future_follower_id = self.get_dest_lane_follower_id()
 
     def receive_cooperation_request(self, other_id):
         if self._is_connected:
@@ -653,8 +666,8 @@ class OptimalControlVehicle(FourStateVehicle):
     _ocp_interface: vgi.VehicleGroupInterface
     _ocp_initial_state: np.ndarray
     _ocp_desired_state: np.ndarray
-    _ocp_solver_max_iter = 300
-    _solver_wait_time = 20.0  # [s] time between attempts to solve an ocp
+    _ocp_solver_max_iter = 200
+    _solver_wait_time = 10.0  # [s] time between attempts to solve an ocp
     _n_optimal_inputs = 2
 
     def __init__(self):
@@ -683,8 +696,27 @@ class OptimalControlVehicle(FourStateVehicle):
 
     def can_start_lane_change(self, vehicles: Dict[int, BaseVehicle]) -> bool:
         t = self.get_current_time()
-        if (t - self._solver_attempt_time
-                >= OptimalControlVehicle._solver_wait_time):
+
+        # The OPC solver should be run again every time the vehicle starts
+        # following a new leader or when the dest lane foll starts cooperating
+        if self.has_requested_cooperation():
+            cooperating_vehicle = vehicles[
+                self.get_desired_future_follower_id()]
+            has_coop_just_started = (
+                    cooperating_vehicle.get_current_leader_id() == self.id
+                    and cooperating_vehicle.has_changed_leader())
+        else:
+            has_coop_just_started = False
+        has_vehicle_configuration_changed = (
+            self.has_changed_leader() or has_coop_just_started
+        )
+        # If the OPC solver didn't find a solution at first, we do not want to
+        # run it again too soon.
+        is_cool_down_period_done = (
+                t - self._solver_attempt_time
+                >= OptimalControlVehicle._solver_wait_time
+        )
+        if has_vehicle_configuration_changed or is_cool_down_period_done:
             self._solver_attempt_time = t
             self.find_lane_change_trajectory(vehicles)
         return self._ocp_has_solution
@@ -817,6 +849,9 @@ class OptimalControlVehicle(FourStateVehicle):
 
         print("Solution{}found".format(
             " " if self._ocp_has_solution else " not "))
+        if result.cost > 4 * 1e3:  # threshold based on terminal cost params
+            print("but high cost indicates no LC.")
+            self._ocp_has_solution = False
 
         # Warning for when we start working with platoons
         if result.inputs.shape[0] > self._n_optimal_inputs:
