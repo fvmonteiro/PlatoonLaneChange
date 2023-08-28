@@ -71,7 +71,7 @@ class CLLongAdjustmentMode(CLVehicleMode):
             self.vehicle.prepare_for_lane_change_start()
             self.vehicle.set_mode(CLLaneChangingMode())
         else:
-            self.vehicle.request_cooperation(vehicles)
+            self.vehicle.request_cooperation()
 
 
 class CLLaneChangingMode(CLVehicleMode):
@@ -113,12 +113,11 @@ class OCPLongAdjustmentMode(OCPVehicleMode):
 
     def handle_lane_changing_intention(
             self, vehicles: Dict[int, vm.BaseVehicle]) -> None:
-        # if self.vehicle.can_start_lane_change(vehicles):
-        #     self.vehicle.prepare_for_lane_change_start()
-        #     self.vehicle.set_mode(OCPLaneChangingMode())
-        if self.vehicle.can_start_lane_change_with_cooperation(vehicles):
+        if self.vehicle.can_start_lane_change(vehicles):
             self.vehicle.prepare_for_lane_change_start()
             self.vehicle.set_mode(OCPLaneChangingMode())
+        else:
+            self.vehicle.request_cooperation()
 
 
 class OCPLaneChangingMode(OCPVehicleMode):

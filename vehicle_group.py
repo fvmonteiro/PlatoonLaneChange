@@ -4,10 +4,15 @@ import numpy as np
 import pandas as pd
 
 import vehicle_models as vm
+import system_operating_mode as som
 
 
 class VehicleGroup:
     """ Class to help manage groups of vehicles """
+
+    # The full system (all vehicles) mode is defined by follower/leader
+    # pairs.
+    mode: som.SystemMode
 
     def __init__(self):
         self.vehicles: Dict[int, vm.BaseVehicle] = {}
@@ -16,9 +21,6 @@ class VehicleGroup:
         self.sorted_vehicle_ids = None
         self.n_vehs = 0
         self.name_to_id: Dict[str, int] = {}
-        # The full system (all vehicles) mode is defined by follower/leader
-        # pairs.
-        self.mode: Dict[int, int] = {}
 
     def get_free_flow_speeds(self):
         v_ff = np.zeros(self.n_vehs)
@@ -114,28 +116,20 @@ class VehicleGroup:
         return np.array(full_state)
 
     def update_surrounding_vehicles(self):
-        new_mode = {}
         for ego_vehicle in self.vehicles.values():
             ego_vehicle.find_orig_lane_leader(self.vehicles.values())
             ego_vehicle.find_dest_lane_vehicles(self.vehicles.values())
+            ego_vehicle.find_cooperation_requests(self.vehicles.values())
             ego_vehicle.update_target_leader(self.vehicles)
-            new_mode[ego_vehicle.id] = ego_vehicle.get_current_leader_id()
-        if len(self.mode) == 0:
-            print("Initial mode:\n{}".format(self.mode_to_str(new_mode)))
-        elif new_mode != self.mode:
-            print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
-                self.vehicles[0].get_current_time(),
-                self.mode_to_str(self.mode), self.mode_to_str(new_mode)))
+        new_mode = som.SystemMode(self.vehicles)
+        try:
+            if new_mode != self.mode:
+                print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
+                    self.vehicles[0].get_current_time(),
+                    self.mode, new_mode))
+        except AttributeError:
+            print("Initial mode:\n{}".format(new_mode))
         self.mode = new_mode
-
-    def mode_to_str(self, mode):
-        pairs = []
-        for foll_id, lead_id in mode.items():
-            foll_name = self.vehicles[foll_id].name
-            lead_name = self.vehicles[lead_id].name if lead_id >= 0 else '0'
-            pairs.append(foll_name + '->' + lead_name)
-        res = ', '.join(pairs)
-        return '{' + res + '}'
 
     def determine_inputs(
             self, open_loop_controls: Dict[int, Dict[str, float]]):
@@ -150,7 +144,7 @@ class VehicleGroup:
             vehicle.determine_inputs(open_loop_controls.get(veh_id, {}),
                                      self.vehicles)
 
-    def update_modes(self):
+    def update_vehicle_modes(self):
         for vehicle in self.vehicles.values():
             vehicle.update_mode(self.vehicles)
 

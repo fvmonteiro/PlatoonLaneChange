@@ -43,10 +43,11 @@ class BaseVehicle(ABC):
         self._orig_leader_id: List[int] = []
         self._destination_leader_id: List[int] = []
         self._destination_follower_id: List[int] = []
-        self._incoming_vehicle_id: int = -1  # TODO: must reset every time
+        self._incoming_vehicle_id: List[int] = []  # TODO: must reset every time
                                              #  (make list?)
         # Vehicle used to determine current accel
         self._leader_id: List[int] = []
+        self.desired_future_follower_id = -1
         self._polynomial_lc_coeffs = None
         self._long_adjust_start_time = -np.inf
         self._lc_start_time = -np.inf
@@ -64,7 +65,7 @@ class BaseVehicle(ABC):
         self.safe_h = const.safe_time_headway
         self.c = const.standstill_distance
 
-        self._is_cooperative = False
+        self._is_connected = False
 
     def __repr__(self):
         return self.__class__.__name__ + ' id=' + str(self.id)
@@ -110,7 +111,7 @@ class BaseVehicle(ABC):
         return self._destination_follower_id[-1]
 
     def get_incoming_vehicle_id(self):
-        return self._incoming_vehicle_id
+        return self._incoming_vehicle_id[-1]
 
     def get_current_leader_id(self):
         """
@@ -195,7 +196,7 @@ class BaseVehicle(ABC):
             return False
 
     def is_cooperating(self):
-        return self._incoming_vehicle_id >= 0
+        return self.get_incoming_vehicle_id() >= 0
 
     def has_leader(self):
         try:
@@ -208,8 +209,8 @@ class BaseVehicle(ABC):
     def has_lane_change_intention(self):
         return self.get_current_lane() != self.target_lane
 
-    def make_cooperative(self):
-        self._is_cooperative = True
+    def make_connected(self):
+        self._is_connected = True
 
     def find_orig_lane_leader(self, vehicles: Iterable[BaseVehicle]):
         ego_x = self.get_a_state_by_name('x')
@@ -246,16 +247,24 @@ class BaseVehicle(ABC):
         self._destination_leader_id.append(new_dest_leader_id)
         self._destination_follower_id.append(new_dest_follower_id)
 
-    def request_cooperation(self, vehicles: Dict[int, BaseVehicle]):
-        # We should avoid allowing one vehicle to modify another, but this is
-        # the simplest solution. We can consider modifying later [Aug 2023]
-        if self.has_dest_lane_follower():
-            vehicles[
-                self.get_dest_lane_follower_id()
-            ].receive_cooperation_request(self.id)
+    def find_cooperation_requests(self, vehicles: Iterable[BaseVehicle]):
+        new_incoming_vehicle_id = -1
+        incoming_veh_x = np.inf
+        if self._is_connected:
+            for other_vehicle in vehicles:
+                other_request = other_vehicle.desired_future_follower_id
+                other_x = other_vehicle.get_a_state_by_name('x')
+                if other_request == self.id and other_x < incoming_veh_x:
+                    new_incoming_vehicle_id = other_vehicle.id
+                    incoming_veh_x = other_x
+        self._incoming_vehicle_id.append(new_incoming_vehicle_id)
+
+    def request_cooperation(self):
+        if self._is_connected:
+            self.desired_future_follower_id = self.get_dest_lane_follower_id()
 
     def receive_cooperation_request(self, other_id):
-        if self._is_cooperative:
+        if self._is_connected:
             self._incoming_vehicle_id = other_id
 
     def update_target_leader(self, vehicles: Dict[int, BaseVehicle]):
@@ -479,8 +488,12 @@ class FourStateVehicle(BaseVehicle, ABC):
                    - self.get_a_state_by_name('x'))
             v_leader = leader.get_vel()
             accel = self._compute_gap_control(gap, v_ego, v_leader)
+            # Stay under free flow speed
             if v_ego >= self.free_flow_speed and accel > 0:
                 accel = self._compute_velocity_control(v_ego)
+        # Don't drive backwards
+        if v_ego <= 0 and accel < 0:
+            accel = 0
         return accel
 
     def _compute_velocity_control(self, v_ego: float) -> float:
@@ -668,17 +681,11 @@ class OptimalControlVehicle(FourStateVehicle):
         self._set_constraints()
         self._solve_ocp()
 
-    def can_start_lane_change_with_cooperation(
-            self, vehicles: Dict[int, BaseVehicle]) -> bool:
-        # TODO: not working. Where do we update the leaders?
-        self.request_cooperation(vehicles)
-        self._solver_attempt_time = -np.inf  # reset
-        return self.can_start_lane_change(vehicles)
-
     def can_start_lane_change(self, vehicles: Dict[int, BaseVehicle]) -> bool:
-        if (self.get_current_time() - self._solver_attempt_time
+        t = self.get_current_time()
+        if (t - self._solver_attempt_time
                 >= OptimalControlVehicle._solver_wait_time):
-            self._solver_attempt_time = self.get_current_time()
+            self._solver_attempt_time = t
             self.find_lane_change_trajectory(vehicles)
         return self._ocp_has_solution
 

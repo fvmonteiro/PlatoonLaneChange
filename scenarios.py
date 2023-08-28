@@ -91,7 +91,6 @@ class SimulationScenario(ABC):
         # TODO: how to ensure proper vehicle 'sync' between creates vehicles
         #  and the initial states
         self.vehicle_group.set_vehicle_names(['lo', 'ego', 'fo', 'ld', 'fd'])
-        self.vehicle_group.get_vehicle_by_name('fd').make_cooperative()
         target_y = lane_width
         ordered_v_ff = [v_ff['lo'], v_ff['ego'], v_ff['ego'],
                         v_ff['ld'], v_ff['fd']]
@@ -193,6 +192,8 @@ class FeedbackLaneChangeScenario(SimulationScenario):
 
     def create_initial_state(self):
         self.test_scenario()
+        self.vehicle_group.get_vehicle_by_name('ego').make_connected()
+        self.vehicle_group.get_vehicle_by_name('fd').make_connected()
 
     def run(self, final_time):
         self.tf = final_time
@@ -204,7 +205,7 @@ class FeedbackLaneChangeScenario(SimulationScenario):
             if i == 100:
                 self.vehicle_group.set_lane_change_direction_by_id(
                     self.lc_veh_id, 1)
-            self.vehicle_group.update_modes()
+            self.vehicle_group.update_vehicle_modes()
             self.vehicle_group.determine_inputs({})
             self.vehicle_group.compute_derivatives()
             self.vehicle_group.update_states(time[i + 1])
@@ -239,7 +240,7 @@ class InternalOptimalControlScenario(SimulationScenario):
             if i == 100:
                 self.vehicle_group.set_lane_change_direction_by_id(
                     self.lc_veh_id, 1)
-            self.vehicle_group.update_modes()
+            self.vehicle_group.update_vehicle_modes()
             self.vehicle_group.determine_inputs({})
             self.vehicle_group.compute_derivatives()
             self.vehicle_group.update_states(time[i + 1])
@@ -357,7 +358,7 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
             for veh_id in inputs_per_vehicle.keys():
                 ego_inputs = inputs_per_vehicle[veh_id][:, i]
                 current_inputs[veh_id] = ego_inputs
-            self.vehicle_group.update_modes()
+            self.vehicle_group.update_vehicle_modes()
             self.vehicle_group.determine_inputs(current_inputs)
             self.vehicle_group.compute_derivatives()
             self.vehicle_group.update_states(time[i + 1])
