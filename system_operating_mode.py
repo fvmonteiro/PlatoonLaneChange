@@ -1,6 +1,6 @@
 from typing import Dict
 
-import vehicle_models as vm
+import vehicle_models.base_vehicle as base
 
 
 class SystemMode:
@@ -12,7 +12,7 @@ class SystemMode:
     - the destination lane leader (for lane changing vehicles)
     - the vehicle moving into our lane (for cooperating vehicles)
     """
-    def __init__(self, vehicles: Dict[int, vm.BaseVehicle]):
+    def __init__(self, vehicles: Dict[int, base.BaseVehicle]):
         self.id: Dict[int, int] = {}
         self.names: Dict[str, str] = {}  # same as id but with vehicle names
         for veh_id, vehicle in vehicles.items():

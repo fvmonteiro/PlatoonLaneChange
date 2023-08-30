@@ -3,7 +3,7 @@ from typing import Dict, Iterable, List, Type, Union
 import numpy as np
 import pandas as pd
 
-import vehicle_models as vm
+import vehicle_models.base_vehicle as base
 import system_operating_mode as som
 
 
@@ -15,7 +15,7 @@ class VehicleGroup:
     mode: som.SystemMode
 
     def __init__(self):
-        self.vehicles: Dict[int, vm.BaseVehicle] = {}
+        self.vehicles: Dict[int, base.BaseVehicle] = {}
         # Often, we need to iterate over all vehicles in the order they were
         # created. The list below makes that easy
         self.sorted_vehicle_ids = None
@@ -34,7 +34,7 @@ class VehicleGroup:
             initial_state.extend(self.vehicles[veh_id].initial_state)
         return initial_state
 
-    def get_all_vehicles(self) -> Iterable[vm.BaseVehicle]:
+    def get_all_vehicles(self) -> Iterable[base.BaseVehicle]:
         return self.vehicles.values()
 
     def get_all_states(self):
@@ -49,7 +49,7 @@ class VehicleGroup:
             inputs.append(self.vehicles[veh_id].get_input_history())
         return np.vstack(inputs)
 
-    def get_vehicle_by_name(self, name: str) -> vm.BaseVehicle:
+    def get_vehicle_by_name(self, name: str) -> base.BaseVehicle:
         return self.vehicles[self.name_to_id[name]]
 
     def set_a_vehicle_free_flow_speed(self, veh_id, v_ff):
@@ -85,7 +85,7 @@ class VehicleGroup:
         for vehicle in self.vehicles.values():
             vehicle.make_connected()
 
-    def create_vehicle_array(self, vehicle_classes: List[Type[vm.BaseVehicle]]):
+    def create_vehicle_array(self, vehicle_classes: List[Type[base.BaseVehicle]]):
         """
 
         Populates the list of vehicles following the given classes

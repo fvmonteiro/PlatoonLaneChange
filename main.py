@@ -14,8 +14,8 @@ def run_base_scenario(n_per_lane, max_iter=100):
     base_scenario = scenarios.ExampleScenarioExternal()
     # vehicles = [[vehicle_models.ThreeStateVehicleRearWheel],
     #             [vehicle_models.SafeAccelOptimalLCVehicle]]
-    vehicles = [[vehicle_models.SafeAccelOptimalLCVehicle,
-                vehicle_models.SafeAccelOptimalLCVehicle]]
+    vehicles = [[vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle,
+                vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle]]
     # base_scenario.set_uniform_vehicles(n_per_lane, vehicle_type, v_ff)
     base_scenario.create_vehicles(vehicles)
     base_scenario.set_free_flow_speeds(v_ff)
@@ -40,17 +40,22 @@ def run_no_lc_scenario():
 def run_constraints_scenario():
     tf = 10
 
+    # Set-up
     scenario = scenarios.LaneChangeWithConstraints()
     scenario.set_boundary_conditions(tf)
     scenario.create_dynamic_system()
     scenario.set_optimal_control_problem_functions()
+    # Solve
     print("Calling OCP solver")
     result = scenario.solve(300)
     scenario.run(result)
+    # Check results
     scenario.save_response_data(file_name)
     data = scenario.response_to_dataframe()
     lc_veh_id = scenario.lc_veh_id
     analysis.plot_constrained_lane_change(data, lc_veh_id)
+    analysis.plot_constrained_lane_change(
+        scenario.ocp_simulation_to_dataframe(), lc_veh_id)
     analysis.compare_desired_and_actual_final_states(
         scenario.boundary_conditions_to_dataframe(), data)
 
@@ -85,8 +90,8 @@ def main():
 
     # run_no_lc_scenario()
     # run_base_scenario([1], max_iter=200)
-    # run_constraints_scenario()
-    run_cbf_lc_scenario()
+    run_constraints_scenario()
+    # run_cbf_lc_scenario()
     # run_internal_optimal_controller()
     # load_and_plot_latest_scenario()
 

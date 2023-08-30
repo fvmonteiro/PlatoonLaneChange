@@ -5,7 +5,9 @@ from typing import Dict, List, Union
 import numpy as np
 import pandas as pd
 
-import vehicle_models as vm
+import vehicle_models.base_vehicle as base
+import vehicle_models.four_state_vehicles as fsv
+import vehicle_models.three_state_vehicle_models as tsv
 import vehicle_ocp_interface as vi
 
 
@@ -30,17 +32,18 @@ def vehicle_output(t, x, u, params):
 
 
 # ================ Support for interface creation ================ #
+# TODO: each vehicle model should return an interface for itself
 def get_interface_for_vehicle(
-        vehicle: Union[vm.BaseVehicle, vm.ThreeStateVehicle,
-                       vm.OpenLoopVehicle]):
+        vehicle: Union[base.BaseVehicle, tsv.ThreeStateVehicle,
+                       fsv.OpenLoopVehicle]):
     interface_map = {
-        vm.OpenLoopVehicle: vi.OpenLoopVehicleInterfaceInterface,
-        vm.SafeAccelOpenLoopLCVehicle: vi.SafeAccelVehicleInterface,
-        vm.OptimalControlVehicle: vi.OpenLoopVehicleInterfaceInterface,
-        vm.SafeAccelOptimalLCVehicle: vi.SafeAccelVehicleInterface,
-        vm.ClosedLoopVehicle: vi.ClosedLoopVehicleInterface,
-        vm.ThreeStateVehicleRearWheel: vi.ThreeStateVehicleRearWheelInterface,
-        vm.ThreeStateVehicleCG: vi.ThreeStateVehicleCGInterface
+        fsv.OpenLoopVehicle: vi.OpenLoopVehicleInterfaceInterface,
+        fsv.SafeAccelOpenLoopLCVehicle: vi.SafeAccelVehicleInterface,
+        fsv.OptimalControlVehicle: vi.OpenLoopVehicleInterfaceInterface,
+        fsv.SafeAccelOptimalLCVehicle: vi.SafeAccelVehicleInterface,
+        fsv.ClosedLoopVehicle: vi.ClosedLoopVehicleInterface,
+        tsv.ThreeStateVehicleRearWheel: vi.ThreeStateVehicleRearWheelInterface,
+        tsv.ThreeStateVehicleCG: vi.ThreeStateVehicleCGInterface
     }
     return interface_map[type(vehicle)](vehicle)
 
@@ -48,7 +51,7 @@ def get_interface_for_vehicle(
 class VehicleGroupInterface:
     """ Class to help manage groups of vehicles """
 
-    def __init__(self, vehicles: Dict[int, vm.BaseVehicle]):
+    def __init__(self, vehicles: Dict[int, base.BaseVehicle]):
         # TODO: make vehicles a  list?
         #  The order of vehicles must be fixed anyway
         self.vehicles: Dict[int, vi.BaseVehicleInterface] = {}
@@ -68,7 +71,7 @@ class VehicleGroupInterface:
         # self.mode = vehicle_group.mode
 
     def create_vehicle_interfaces(
-            self, vehicles: Dict[int, vm.BaseVehicle]):
+            self, vehicles: Dict[int, base.BaseVehicle]):
         self.sorted_vehicle_ids = []
         for veh_id in sorted(vehicles.keys()):
             vehicle_interface = get_interface_for_vehicle(

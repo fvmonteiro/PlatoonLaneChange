@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-import vehicle_models
 import constants as const
 
 

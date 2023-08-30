@@ -6,12 +6,14 @@ from typing import List, Union
 import numpy as np
 import pandas as pd
 
-import vehicle_models as vm
+import vehicle_models.base_vehicle as base
+import vehicle_models.three_state_vehicle_models as tsv
+import vehicle_models.four_state_vehicles as fsv
 
 
 class BaseVehicleInterface(ABC):
 
-    def __init__(self, vehicle: vm.BaseVehicle):
+    def __init__(self, vehicle: base.BaseVehicle):
         """
 
         """
@@ -31,6 +33,7 @@ class BaseVehicleInterface(ABC):
 
         # Some parameters
         self.id = vehicle.id
+        self.name = vehicle.name
         self.lr = vehicle.lr  # dist from C.G. to rear wheel
         self.lf = vehicle.lf  # dist from C.G. to front wheel
         self.wheelbase = self.lr + self.lf
@@ -122,6 +125,7 @@ class BaseVehicleInterface(ABC):
                    + [i for i in self.input_names])
         df = pd.DataFrame(data=np.transpose(data), columns=columns)
         df['id'] = self.id
+        df['name'] = self.name
         df['orig_lane_leader_id'] = self._orig_leader_id
         df['dest_lane_leader_id'] = self._destination_leader_id
         df['dest_lane_follower_id'] = self._destination_follower_id
@@ -182,7 +186,7 @@ class FourStateVehicleInterface(BaseVehicleInterface, ABC):
     _state_names = ['x', 'y', 'theta', 'v']
     _input_names = ['a', 'phi']
 
-    def __init__(self, vehicle: vm.FourStateVehicle):
+    def __init__(self, vehicle: fsv.FourStateVehicle):
         super().__init__(vehicle)
         self._set_model(self._state_names, self._input_names)
         self.brake_max = vehicle.brake_max
@@ -202,7 +206,7 @@ class FourStateVehicleInterface(BaseVehicleInterface, ABC):
 class OpenLoopVehicleInterfaceInterface(FourStateVehicleInterface):
     """ States: [x, y, theta, v], inputs: [a, phi], centered at the C.G. """
 
-    def __init__(self, vehicle: vm.OpenLoopVehicle):
+    def __init__(self, vehicle: fsv.OpenLoopVehicle):
         super().__init__(vehicle)
 
     def compute_acceleration(self, ego_states, inputs, leader_states):
@@ -219,7 +223,7 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
     _input_names = ['phi']
 
     def __init__(self,
-                 vehicle: Union[vm.FourStateVehicle]):
+                 vehicle: Union[fsv.FourStateVehicle]):
         super().__init__(vehicle)
 
         # Controller parameters
@@ -261,7 +265,7 @@ class ClosedLoopVehicleInterface(SafeAccelVehicleInterface):
 
     _input_names = []
 
-    def __init__(self, vehicle: vm.ClosedLoopVehicle):
+    def __init__(self, vehicle: fsv.ClosedLoopVehicle):
         super().__init__(vehicle)
         # self._set_model(self._state_names, self._input_names)
 
@@ -283,7 +287,7 @@ class ThreeStateVehicleInterface(BaseVehicleInterface, ABC):
     _state_names = ['x', 'y', 'theta']
     _input_names = ['v', 'phi']
 
-    def __init__(self, vehicle: vm.ThreeStateVehicle):
+    def __init__(self, vehicle: tsv.ThreeStateVehicle):
         super().__init__(vehicle)
         self._set_model(self._state_names, self._input_names)
 
@@ -306,7 +310,7 @@ class ThreeStateVehicleRearWheelInterface(ThreeStateVehicleInterface):
     """ From the library's example.
     States: [x, y, theta], inputs: [v, phi], centered at the rear wheels """
 
-    def __init__(self, vehicle: vm.ThreeStateVehicleRearWheel):
+    def __init__(self, vehicle: tsv.ThreeStateVehicleRearWheel):
         super().__init__(vehicle)
 
     def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
@@ -316,7 +320,7 @@ class ThreeStateVehicleRearWheelInterface(ThreeStateVehicleInterface):
 class ThreeStateVehicleCGInterface(ThreeStateVehicleInterface):
     """ States: [x, y, theta], inputs: [v, phi], centered at the C.G. """
 
-    def __init__(self, vehicle: vm.ThreeStateVehicleRearWheel):
+    def __init__(self, vehicle: tsv.ThreeStateVehicleRearWheel):
         super().__init__(vehicle)
 
     def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
