@@ -186,7 +186,7 @@ class OptimalControlVehicle(FourStateVehicle):
         """
         if self.is_lane_changing():
             self._inputs = self.opt_controller.get_input(
-                self.get_current_time())
+                self.get_current_time(), [self.id])
         else:
             self._inputs[self._input_idx['a']] = 0.0
             self._inputs[self._input_idx['phi']] = (
@@ -234,7 +234,7 @@ class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
         delta_t = t - self._lc_start_time
         if delta_t <= self._ocp_horizon:
             self._inputs[self._input_idx['phi']] = (
-                self.opt_controller.get_input(t)[0])
+                self.opt_controller.get_input(t, [self.id])[0])
         else:
             self._inputs[self._input_idx['phi']] = (
                 self.lk_controller.compute_steering_wheel_angle())

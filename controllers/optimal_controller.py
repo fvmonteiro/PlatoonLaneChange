@@ -21,14 +21,14 @@ class VehicleOptimalController:
     _constraints = []
     _ocp_solver_max_iter = 200
 
-    def __init__(self, ocp_horizon, lc_vehicles: List[base.BaseVehicle]):
+    def __init__(self, ocp_horizon):
         self._ocp_horizon = ocp_horizon
-        self.lc_vehicles = lc_vehicles
         self.terminal_constraints = None
         self._start_time = -np.inf
 
     def find_lane_change_trajectory(self, time: float,
-                                    vehicles: Dict[int, base.BaseVehicle]):
+                                    vehicles: Dict[int, base.BaseVehicle],
+                                    lc_veh_ids: List[int]):
         self._start_time = time
         self._ocp_interface = vgi.VehicleGroupInterface(vehicles)
         self._set_ocp_dynamics()
@@ -37,18 +37,19 @@ class VehicleOptimalController:
             self._ocp_horizon)
         self._set_ocp_costs()
         self._set_input_constraints()
-        self._set_safety_constraints()
+        self._set_safety_constraints([vehicles[veh_id]
+                                      for veh_id in lc_veh_ids])
         self._solve_ocp()
 
     def has_solution(self) -> bool:
         return self._ocp_has_solution
 
-    def get_input(self, time: float):
+    def get_input(self, time: float, veh_ids: List[int]):
         delta_t = time - self._start_time
 
         current_inputs = []
-        for veh in self.lc_vehicles:
-            ego_inputs = self._ocp_inputs_per_vehicle[veh.id]
+        for v_id in veh_ids:
+            ego_inputs = self._ocp_inputs_per_vehicle[v_id]
             n_optimal_inputs = ego_inputs.shape[0]
             for i in range(n_optimal_inputs):
                 current_inputs.append(np.interp(
@@ -95,10 +96,10 @@ class VehicleOptimalController:
             self.dynamic_system, input_lower_bounds,
             input_upper_bounds)])
 
-    def _set_safety_constraints(self):
+    def _set_safety_constraints(self, lc_vehicles):
         # Safety constraints
         epsilon = 1e-10
-        for veh in self.lc_vehicles:
+        for veh in lc_vehicles:
             if veh.has_orig_lane_leader():
                 orig_lane_safety = NonlinearConstraint(
                     partial(
@@ -173,6 +174,7 @@ class VehicleOptimalController:
         )
         # Note: the basis parameter above was set empirically - it might not
         # always work well
+        self.ocp_result = result
         self._ocp_time = result.time
         self._ocp_inputs_per_vehicle = (
             self._ocp_interface.map_ocp_solution_to_vehicle_inputs(

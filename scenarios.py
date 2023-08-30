@@ -4,12 +4,10 @@ from typing import List, Type, Union
 
 import control as ct
 import control.optimal as opt
-import control.flatsys as flat
 import numpy as np
 import pandas as pd
 
-from scipy.optimize import NonlinearConstraint
-
+import controllers.optimal_controller as opt_ctrl
 from constants import lane_width
 from vehicle_group import VehicleGroup
 from vehicle_models.base_vehicle import BaseVehicle
@@ -253,9 +251,9 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
 
         # All must be set by the derived class
         self.dynamic_system = None
-        self.final_state = None, None
-        self.running_cost, self.terminal_cost = None, None
-        self.terminal_constraints, self.constraints = None, None
+        self.final_state = None
+        # self.running_cost, self.terminal_cost = None, None
+        # self.terminal_constraints, self.constraints = None, None
 
     def set_boundary_conditions(self, tf: float):
         """ Sets the initial state, final time and desired final states """
@@ -263,22 +261,6 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
         self.create_initial_state()
         self.create_final_state()
         self.vehicle_group.update_surrounding_vehicles()
-
-    def create_dynamic_system(self) -> None:
-        self.vehicles_ocp_interface = vgi.VehicleGroupInterface(
-            self.vehicle_group.vehicles)
-        params = {'vehicle_group': self.vehicles_ocp_interface,
-                  'test': True}
-
-        # Define the vehicle steering dynamics as an input/output system
-        input_names = self.vehicles_ocp_interface.create_input_names()
-        output_names = self.vehicles_ocp_interface.create_output_names()
-
-        n_states = self.vehicles_ocp_interface.n_states
-        self.dynamic_system = ct.NonlinearIOSystem(
-            vgi.vehicles_derivatives, vgi.vehicle_output,
-            params=params, states=n_states, name='vehicle_group',
-            inputs=input_names, outputs=output_names)
 
     def boundary_conditions_to_dataframe(self) -> pd.DataFrame:
         """
@@ -299,33 +281,13 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
             self.ocp_response.states,
             self.ocp_response.inputs)
 
-    def set_optimal_control_problem_functions(self):
-        self.set_costs()
-        self.set_constraints()
-
-    def set_input_boundaries(self):
-        input_lower_bounds, input_upper_bounds = (
-            self.vehicles_ocp_interface.get_input_limits())
-        self.constraints = [opt.input_range_constraint(
-            self.dynamic_system, input_lower_bounds,
-            input_upper_bounds)]
-
     def solve(self, max_iter: int = 100):
-        # Initial guess; not initial control
-        u0 = self.vehicles_ocp_interface.get_desired_input()
-        time_pts = np.linspace(0, self.tf, 10, endpoint=True)
-
-        result = opt.solve_ocp(
-            self.dynamic_system, time_pts, self.initial_state,
-            cost=self.running_cost,
-            trajectory_constraints=self.constraints,
-            terminal_cost=self.terminal_cost,
-            terminal_constraints=self.terminal_constraints,
-            initial_guess=u0, log=True,
-            minimize_options={'maxiter': max_iter, 'disp': True},
-            # basis=flat.BezierFamily(5, T=self.tf)
-        )
-        return result
+        self.vehicles_ocp_interface = vgi.VehicleGroupInterface(
+            self.vehicle_group.vehicles)
+        self.controller = opt_ctrl.VehicleOptimalController(self.tf)
+        self.controller.find_lane_change_trajectory(0.0, self.vehicle_group.vehicles,
+                                               [])
+        return self.controller.ocp_result
 
     def run_ocp_solution(self, result: opt.OptimalControlResult):
         """
@@ -335,12 +297,12 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
          control time points and result obtained by the optimal control solver
         :return: Nothing. Results are stored internally
         """
-        timepts, inputs = result.time, result.inputs
+        time_pts, inputs = result.time, result.inputs
 
         # Simulate the system dynamics (open loop)
         response = ct.input_output_response(
-            self.dynamic_system, timepts, inputs, self.initial_state,
-            t_eval=np.arange(0, timepts[-1], 0.1))
+            self.controller.dynamic_system, time_pts, inputs, self.initial_state,
+            t_eval=np.arange(0, time_pts[-1], 0.1))
         self.ocp_response = response
 
     def run(self, result: opt.OptimalControlResult):
@@ -378,16 +340,6 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
         """ Default behavior: no final state specification """
         pass
 
-    @abstractmethod
-    def set_costs(self):
-        """ Sets the running and terminal state costs """
-        pass
-
-    @abstractmethod
-    def set_constraints(self):
-        """ Sets all the problem constraints """
-        pass
-
 
 class ExampleScenarioExternal(ExternalOptimalControlScenario):
     """
@@ -423,15 +375,6 @@ class ExampleScenarioExternal(ExternalOptimalControlScenario):
         )
         print(self.final_state)
 
-    def set_costs(self):
-        Q, R, P = self.create_simple_weight_matrices()
-        # Desired control; not final control
-        uf = self.vehicles_ocp_interface.get_desired_input()
-        self.running_cost = opt.quadratic_cost(self.dynamic_system,
-                                               Q, R, x0=self.final_state, u0=uf)
-        self.terminal_cost = opt.quadratic_cost(self.dynamic_system,
-                                                P, 0, x0=self.final_state)
-
     def create_simple_weight_matrices(self):
         base = 0.01
         # don't turn too sharply: matrix Q
@@ -456,9 +399,6 @@ class ExampleScenarioExternal(ExternalOptimalControlScenario):
             final_state_weights = [0, p, p, 0] * self.vehicle_group.n_vehs
         terminal_cost = np.diag(final_state_weights)
         return state_cost, input_cost, terminal_cost
-
-    def set_constraints(self):
-        self.set_input_boundaries()
 
 
 class LaneChangeWithConstraints(ExternalOptimalControlScenario):
@@ -505,82 +445,6 @@ class LaneChangeWithConstraints(ExternalOptimalControlScenario):
         self.final_state = self.vehicle_group.create_full_state_vector(
             xf, yf, thetaf, vf
         )
-
-    def set_costs(self):
-        # Desired control; not final control
-        uf = self.vehicles_ocp_interface.get_desired_input()
-        Q = np.diag([0, 0, 0.1, 0] * self.vehicles_ocp_interface.n_vehs)
-        R = np.diag([0.1] * self.vehicles_ocp_interface.n_inputs)
-        self.running_cost = opt.quadratic_cost(self.dynamic_system, Q, R,
-                                               self.final_state, uf)
-        P = np.diag([0, 1000, 1000, 0] * self.vehicles_ocp_interface.n_vehs)
-        self.terminal_cost = opt.quadratic_cost(self.dynamic_system,
-                                                P, 0, x0=self.final_state)
-
-    def set_constraints(self):
-        self.set_input_boundaries()
-        # Linear constraint: lb <= A*[x; u] <= ub
-        # vel_con = LinearConstraint([0, 0, 0, 1, 0, 0], 0, 15)
-        # self.constraints.append(vel_con)
-
-        epsilon = 1e-10
-        orig_lane_safety = NonlinearConstraint(
-            self.safety_constraint_orig_lane_leader, -epsilon, epsilon)
-        dest_lane_leader_safety = NonlinearConstraint(
-            self.safety_constraint_dest_lane_leader, -epsilon, epsilon)
-        dest_lane_follower_safety = NonlinearConstraint(
-            self.safety_constraint_dest_lane_follower, -epsilon, epsilon)
-
-        self.constraints.append(orig_lane_safety)
-        self.constraints.append(dest_lane_leader_safety)
-        self.constraints.append(dest_lane_follower_safety)
-
-    def safety_constraint_orig_lane_leader(self, states, inputs):
-        lc_vehicle = self.vehicle_group.vehicles[self.lc_veh_id]
-        return self.lane_changing_safety_constraint(
-            states, inputs, lc_vehicle.id, lc_vehicle.get_orig_lane_leader_id())
-
-    def safety_constraint_dest_lane_leader(self, states, inputs):
-        lc_vehicle = self.vehicle_group.vehicles[self.lc_veh_id]
-        return self.lane_changing_safety_constraint(
-            states, inputs, lc_vehicle.id,
-            lc_vehicle.get_dest_lane_leader_id())
-
-    def safety_constraint_dest_lane_follower(self, states, inputs):
-        lc_vehicle = self.vehicle_group.vehicles[self.lc_veh_id]
-        return self.lane_changing_safety_constraint(
-            states, inputs, lc_vehicle.get_dest_lane_follower_id(),
-            lc_vehicle.id)
-
-    def lane_changing_safety_constraint(self, states, inputs, follower_id,
-                                        leader_id):
-        if leader_id < 0:  # no leader
-            return 0
-
-        follower_veh = self.vehicles_ocp_interface.vehicles[follower_id]
-        follower_states = (
-            self.vehicles_ocp_interface.get_vehicle_state_vector_by_id(
-                follower_id, states))
-        leader_states = (
-            self.vehicles_ocp_interface.get_vehicle_state_vector_by_id(
-                leader_id, states))
-        gap_error = follower_veh.compute_gap_error(follower_states,
-                                                   leader_states)
-        phi = self.vehicles_ocp_interface.get_a_vehicle_input_by_id(
-            self.lc_veh_id, inputs, 'phi')
-        margin = 1e-1
-        # TODO: possible issue. When gap error becomes less than zero during
-        #  the maneuver, then phi is forced to zero.
-        val = min(gap_error + margin, 0) * phi
-        return val
-
-    def lane_change_starting_point_constraint(self, states, inputs):
-        lc_veh_x = self.vehicles_ocp_interface.get_a_vehicle_state_by_id(
-            self.lc_veh_id, states, 'x')
-        phi = self.vehicles_ocp_interface.get_a_vehicle_input_by_id(
-            self.lc_veh_id, inputs, 'phi')
-        dist_to_point = lc_veh_x - self.min_lc_x
-        return min(dist_to_point, 0) * phi
 
     def smooth_lane_change_starting_point_constraint(self, states, inputs):
         lc_veh_x = self.vehicles_ocp_interface.get_a_vehicle_state_by_id(
