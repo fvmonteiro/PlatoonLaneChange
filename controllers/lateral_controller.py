@@ -15,8 +15,8 @@ class LateralController:
                          * np.tan(slip_angle))
 
     def _compute_cbf_slip_angle(self, y_ref: float, vy_ref: float):
-        lat_error = y_ref - self.vehicle.get_a_state_by_name('y')
-        theta = self.vehicle.get_a_state_by_name('theta')
+        lat_error = y_ref - self.vehicle.get_y()
+        theta = self.vehicle.get_theta()
         vel = self.vehicle.get_vel()
         return ((vy_ref + self._lateral_gain * lat_error)
                 / (vel * np.cos(theta)) - np.tan(theta))
@@ -49,7 +49,7 @@ class LaneChangingController(LateralController):
         return self._translate_slip_to_steering_wheel_angle(slip_angle)
 
     def _compute_polynomial_lc_trajectory(self, lc_duration):
-        y0 = self.vehicle.get_a_state_by_name('y')
+        y0 = self.vehicle.get_y()
         vy0 = 0
         ay0 = 0
         yf = self.vehicle.target_y

@@ -3,7 +3,9 @@ from typing import Dict, Iterable, List, Type, Union
 import numpy as np
 import pandas as pd
 
+import platoon
 import vehicle_models.base_vehicle as base
+import vehicle_models.four_state_vehicles as fsv
 import system_operating_mode as som
 
 
@@ -52,6 +54,11 @@ class VehicleGroup:
     def get_vehicle_by_name(self, name: str) -> base.BaseVehicle:
         return self.vehicles[self.name_to_id[name]]
 
+    def get_free_flow_desired_gaps(self):
+        gaps = []
+        for veh_id in self.sorted_vehicle_ids:
+            gaps.append(self.vehicles[veh_id].free_flow_speed)
+
     def set_a_vehicle_free_flow_speed(self, veh_id, v_ff):
         self.vehicles[veh_id].set_free_flow_speed(v_ff)
 
@@ -99,6 +106,21 @@ class VehicleGroup:
             vehicle = veh_class()
             self.sorted_vehicle_ids.append(vehicle.id)
             self.vehicles[vehicle.id] = vehicle
+
+    # def create_platoons(self,
+    #                     platoon_assignment: List[List[fsv.PlatoonVehicle]]):
+    #     """
+    #     Creates platoons and include vehicles in them
+    #     :param platoon_assignment:
+    #     :return:
+    #     """
+    #     for platoon_vehicles in platoon_assignment:
+    #         new_platoon = platoon.Platoon()
+    #         for veh in sorted(platoon_vehicles,
+    #                           key=lambda x: x.get_a_state_by_name('x'),
+    #                           reverse=True):
+    #             new_platoon.add_vehicle(veh.id)
+    #             veh.set_platoon(new_platoon)
 
     def create_full_state_vector(self, x, y, theta, v=None):
         """

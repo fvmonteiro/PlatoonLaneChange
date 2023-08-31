@@ -7,7 +7,7 @@ import pandas as pd
 
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
-import vehicle_models.three_state_vehicle_models as tsv
+import vehicle_models.three_state_vehicles as tsv
 import vehicle_ocp_interface as vi
 
 
@@ -169,12 +169,42 @@ class VehicleGroupInterface:
         for veh_id in self.sorted_vehicle_ids:
             veh = self.vehicles[veh_id]
             veh_states = veh.initial_state
-            vf = veh.select_state_from_vector(veh_states, 'v')
+            try:
+                vf = veh.select_state_from_vector(veh_states, 'v')
+            except KeyError:  # three-state vehicles have v as an input
+                vf = veh.select_input_from_vector(veh.get_desired_input(), 'v')
             xf = veh.select_state_from_vector(veh_states, 'x') + vf * tf
             yf = veh.target_y
             thetaf = 0.0
             desired_state.extend(veh.create_state_vector(xf, yf, thetaf, vf))
         return np.array(desired_state)
+
+    def create_state_cost_matrix(self, x_cost=0, y_cost=0,
+                                 theta_cost=0, v_cost=0):
+        """
+        Creates a diagonal cost function where each state of all vehicles gets
+        the same weight
+        :param x_cost:
+        :param y_cost:
+        :param theta_cost:
+        :param v_cost:
+        :return:
+        """
+        veh_costs = []
+        for veh_id in self.sorted_vehicle_ids:
+            veh_costs.extend(self.vehicles[veh_id].create_state_vector(
+                x_cost, y_cost, theta_cost, v_cost))
+        return np.diag(veh_costs)
+
+    def create_terminal_cost_matrix(self, cost):
+        veh_costs = []
+        for veh_id in self.sorted_vehicle_ids:
+            veh = self.vehicles[veh_id]
+            if 'v' in veh.input_names or 'a' in veh.input_names:
+                veh_costs.extend([cost] * veh.n_states)
+            else:
+                veh_costs.extend([0, cost, cost, 0])
+        return np.diag(veh_costs)
 
     def compute_derivatives(self, states, inputs, params):
         """
@@ -200,7 +230,8 @@ class VehicleGroupInterface:
         return np.array(dxdt)
 
     def lane_changing_safety_constraint(self, states, inputs, lc_veh_id,
-                                        other_id, is_other_behind):
+                                        other_id, is_other_behind,
+                                        make_smooth: bool = True):
         if other_id < 0:  # no risk
             return 0
         if is_other_behind:
@@ -221,7 +252,19 @@ class VehicleGroupInterface:
         margin = 1e-1
         # TODO: possible issue. When gap error becomes less than zero during
         #  the maneuver, then phi is forced to zero.
-        return min(gap_error + margin, 0) * phi
+        if make_smooth:
+            return self.smooth_min_0(gap_error + margin) * phi
+        else:
+            return min(gap_error + margin, 0) * phi
+
+    @staticmethod
+    def smooth_min_0(x, epsilon: float = 1e-5):
+        if x < -epsilon:
+            return x
+        elif x > epsilon:
+            return 0
+        else:
+            return -(x - epsilon) ** 2 / 4 / epsilon
 
     def map_ocp_solution_to_vehicle_inputs(self, ocp_inputs):
         inputs_map = {}

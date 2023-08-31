@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 import vehicle_models.base_vehicle as base
-import vehicle_models.three_state_vehicle_models as tsv
+import vehicle_models.three_state_vehicles as tsv
 import vehicle_models.four_state_vehicles as fsv
 
 
@@ -192,11 +192,14 @@ class FourStateVehicleInterface(BaseVehicleInterface, ABC):
         self.brake_max = vehicle.brake_max
         self.accel_max = vehicle.accel_max
 
-    def _set_speed(self, v0, state):
-        state[self.state_idx['v']] = v0
-
     def get_desired_input(self) -> List[float]:
         return [0] * self.n_inputs
+
+    # def get_vel(self, values):
+    #     return self.select_state_from_vector(values, 'v')
+
+    def _set_speed(self, v0, state):
+        state[self.state_idx['v']] = v0
 
     def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
         self._position_derivative_cg(vel, theta, phi, derivatives)

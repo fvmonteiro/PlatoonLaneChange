@@ -19,7 +19,7 @@ class SystemMode:
             leader_id = vehicle.get_current_leader_id()
             self.id[veh_id] = leader_id
             self.names[vehicle.name] = (vehicles[leader_id].name
-                                        if leader_id >= 0 else '0')
+                                        if leader_id >= 0 else ' ')
 
     def __eq__(self, other):
         return self.id == other.id

@@ -12,11 +12,15 @@ def run_base_scenario(n_per_lane, max_iter=100):
     tf = 10
 
     base_scenario = scenarios.ExampleScenarioExternal()
-    # vehicles = [[vehicle_models.ThreeStateVehicleRearWheel],
-    #             [vehicle_models.SafeAccelOptimalLCVehicle]]
-    vehicles = [[vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle,
-                vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle]]
-    base_scenario.create_vehicles(vehicles)
+    # vehicles = [
+    #     [vehicle_models.three_state_vehicles.ThreeStateVehicleRearWheel],
+    #     [vehicle_models.three_state_vehicles.ThreeStateVehicleRearWheel]
+    # ]
+    vehicles = [
+        [vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle,
+         vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle]
+    ]
+    base_scenario.create_vehicle_group(vehicles)
     base_scenario.set_free_flow_speeds(v_ff)
     base_scenario.set_boundary_conditions(tf)
     result = base_scenario.solve(max_iter)
@@ -64,7 +68,7 @@ def load_and_plot_latest_scenario():
 
 def run_cbf_lc_scenario():
     tf = 15
-    scenario = scenarios.FeedbackLaneChangeScenario()
+    scenario = scenarios.LaneChangeScenario.closed_loop()
     scenario.run(tf)
     data = scenario.response_to_dataframe()
     analysis.plot_initial_and_final_states(data)
@@ -73,7 +77,7 @@ def run_cbf_lc_scenario():
 
 def run_internal_optimal_controller():
     tf = 15
-    scenario = scenarios.InternalOptimalControlScenario()
+    scenario = scenarios.LaneChangeScenario.optimal_control()
     scenario.run(tf)
     data = scenario.response_to_dataframe()
     analysis.plot_initial_and_final_states(data)
@@ -84,9 +88,9 @@ def main():
     start_time = time.time()
 
     # run_no_lc_scenario()
-    # run_base_scenario([1], max_iter=200)
-    run_constraints_scenario()
-    # run_cbf_lc_scenario()
+    # run_base_scenario([1], max_iter=400)
+    # run_constraints_scenario()
+    run_cbf_lc_scenario()
     # run_internal_optimal_controller()
     # load_and_plot_latest_scenario()
 

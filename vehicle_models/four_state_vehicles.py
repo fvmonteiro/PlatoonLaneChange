@@ -10,6 +10,7 @@ import controllers.optimal_controller as opt_ctrl
 import platoon
 import vehicle_models.base_vehicle as base
 import vehicle_operating_modes.concrete_vehicle_modes as modes
+from vehicle_models.base_vehicle import BaseVehicle
 
 
 class FourStateVehicle(base.BaseVehicle, ABC):
@@ -38,6 +39,9 @@ class FourStateVehicle(base.BaseVehicle, ABC):
 
     def get_vel(self):
         return self.get_a_state_by_name('v')
+
+    def compute_gap_to_a_leader(self, a_leader: BaseVehicle):
+        return BaseVehicle.compute_a_gap(a_leader, self)
 
     def _set_speed(self, v0, state):
         state[self._state_idx['v']] = v0
@@ -119,7 +123,7 @@ class OptimalControlVehicle(FourStateVehicle):
     Accel and phi computed by optimal control when there is lane change
     intention. Otherwise, zero accel and lane keeping phi. """
 
-    _solver_wait_time = 10.0  # [s] time between attempts to solve an ocp
+    _solver_wait_time = 20.0  # [s] time between attempts to solve an ocp
     _n_optimal_inputs = 2
 
     def __init__(self):
@@ -130,11 +134,9 @@ class OptimalControlVehicle(FourStateVehicle):
         self._ocp_has_solution = False
         self._ocp_horizon = 10.0  # [s]
         self._solver_attempt_time = -np.inf
-        self.constraints = []
-        self.terminal_constraints = None
 
         self.opt_controller = opt_ctrl.VehicleOptimalController(
-            self._ocp_horizon, [self])
+            self._ocp_horizon)
 
     def update_mode(self, vehicles: Dict[int, base.BaseVehicle]):
         if self.has_lane_change_intention():
@@ -168,8 +170,9 @@ class OptimalControlVehicle(FourStateVehicle):
         if has_vehicle_configuration_changed or is_cool_down_period_done:
             self._solver_attempt_time = t
             print("t={:.2f}, veh:{}. Calling ocp solver...".format(t, self.id))
-            self.opt_controller.find_lane_change_trajectory(t, vehicles)
-        return self.opt_controller.has_solution()
+            self.opt_controller.find_lane_change_trajectory(t, vehicles,
+                                                            [self.id])
+        return True  # TODO: self.opt_controller.has_solution()
 
     def is_lane_changing(self):
         delta_t = self.get_current_time() - self._lc_start_time
@@ -217,7 +220,7 @@ class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
 
     def __init__(self):
         super().__init__()
-        self._controller = long_ctrl.LongitudinalController(self)
+        self._long_controller = long_ctrl.LongitudinalController(self)
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
                           vehicles: Dict[int, base.BaseVehicle]):
@@ -229,19 +232,17 @@ class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
         :return: Nothing. The vehicle stores the computed input values
         """
         self._inputs[self._input_idx['a']] = (
-            self._controller.compute_acceleration(vehicles))
-        t = self.get_current_time()
-        delta_t = t - self._lc_start_time
-        if delta_t <= self._ocp_horizon:
-            self._inputs[self._input_idx['phi']] = (
-                self.opt_controller.get_input(t, [self.id])[0])
+            self._long_controller.compute_acceleration(vehicles))
+        if self.is_lane_changing():
+            t = self.get_current_time()
+            phi = self.opt_controller.get_input(t, self.id)[0]
         else:
-            self._inputs[self._input_idx['phi']] = (
-                self.lk_controller.compute_steering_wheel_angle())
+            phi = self.lk_controller.compute_steering_wheel_angle()
+        self._inputs[self._input_idx['phi']] = phi
 
     def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]):
         self._leader_id.append(
-            self._controller.get_more_critical_leader(vehicles))
+            self._long_controller.get_more_critical_leader(vehicles))
 
 
 class ClosedLoopVehicle(FourStateVehicle):
@@ -253,7 +254,7 @@ class ClosedLoopVehicle(FourStateVehicle):
 
     def __init__(self):
         super().__init__()
-        self._controller = long_ctrl.LongitudinalController(self)
+        self._long_controller = long_ctrl.LongitudinalController(self)
         self.set_mode(modes.CLLaneKeepingMode())
         self.lc_controller = lat_ctrl.LaneChangingController(self)
 
@@ -268,21 +269,21 @@ class ClosedLoopVehicle(FourStateVehicle):
         if self.has_orig_lane_leader():
             orig_lane_leader = vehicles[self._orig_leader_id[-1]]
             is_safe_to_orig_lane_leader = (
-                base.BaseVehicle.is_gap_safe_for_lane_change(
+                ClosedLoopVehicle.is_gap_safe_for_lane_change(
                     orig_lane_leader, self))
 
         is_safe_to_dest_lane_leader = True
         if self.has_dest_lane_leader():
             dest_lane_leader = vehicles[self._destination_leader_id[-1]]
             is_safe_to_dest_lane_leader = (
-                base.BaseVehicle.is_gap_safe_for_lane_change(
+                ClosedLoopVehicle.is_gap_safe_for_lane_change(
                     dest_lane_leader, self))
 
         is_safe_to_dest_lane_follower = True
         if self.has_dest_lane_follower():
             dest_lane_follower = vehicles[self._destination_follower_id[-1]]
             is_safe_to_dest_lane_follower = (
-                base.BaseVehicle.is_gap_safe_for_lane_change(
+                ClosedLoopVehicle.is_gap_safe_for_lane_change(
                     self, dest_lane_follower))
 
         return (is_safe_to_orig_lane_leader
@@ -290,8 +291,8 @@ class ClosedLoopVehicle(FourStateVehicle):
                 and is_safe_to_dest_lane_follower)
 
     def is_lane_change_complete(self):
-        return (np.abs(self.get_a_state_by_name('y') - self.target_y) < 1e-2
-                and np.abs(self.get_a_state_by_name('theta')) < 1e-3)
+        return (np.abs(self.get_y() - self.target_y) < 1e-2
+                and np.abs(self.get_theta()) < 1e-3)
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
                           vehicles: Dict[int, base.BaseVehicle]):
@@ -302,7 +303,7 @@ class ClosedLoopVehicle(FourStateVehicle):
         :return: Nothing. The vehicle stores the computed input values
         """
         self._inputs[self._input_idx['a']] = (
-            self._controller.compute_acceleration(vehicles))
+            self._long_controller.compute_acceleration(vehicles))
         delta_t = self.get_current_time() - self._lc_start_time
         if delta_t <= self._lc_duration:
             phi = self.lc_controller.compute_steering_wheel_angle()
@@ -313,7 +314,7 @@ class ClosedLoopVehicle(FourStateVehicle):
 
     def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]):
         self._leader_id.append(
-            self._controller.get_more_critical_leader(vehicles))
+            self._long_controller.get_more_critical_leader(vehicles))
 
     def _set_up_longitudinal_adjustments_control(
             self, vehicles: Dict[int, base.BaseVehicle]):
@@ -324,12 +325,70 @@ class ClosedLoopVehicle(FourStateVehicle):
         self.lc_controller.start(self._lc_start_time,
                                  self._lc_duration)
 
+    @staticmethod
+    def is_gap_safe_for_lane_change(leading_vehicle: BaseVehicle,
+                                    following_vehicle: BaseVehicle):
+        margin = 1e-2
+        gap = BaseVehicle.compute_a_gap(leading_vehicle, following_vehicle)
+        safe_gap = following_vehicle.compute_safe_gap(
+            following_vehicle.get_vel())
+        return gap + margin >= safe_gap
+
 
 class PlatoonVehicle(SafeAccelOpenLoopLCVehicle):
+    """
+    Vehicles belonging to a platoon. Each vehicle computes its own acceleration
+    but the lane change control is defined by the platoon.
+    Note: not yet sure who this class should inherit from
+    """
+
+    _platoon: platoon.Platoon
 
     def __init__(self):
         super().__init__()
+        self._long_controller = long_ctrl.LongitudinalController(self)
 
+    def set_platoon(self, new_platoon: platoon.Platoon):
+        self._platoon = new_platoon
+
+    def update_mode(self, vehicles: Dict[int, BaseVehicle]):
+        pass  # TODO
+
+    def can_start_lane_change(self, vehicles: Dict[int, base.BaseVehicle]
+                              ) -> bool:
+        t = self.get_current_time()
+        if self._is_platoon_leader():
+            self._platoon.compute_lane_change_trajectory(t, vehicles)
+        return self._platoon.trajectory_exists
+
+    def _determine_inputs(self, open_loop_controls: np.ndarray,
+                          vehicles: Dict[int, base.BaseVehicle]):
+        """
+        Sets the open loop controls a (acceleration) and phi (steering wheel
+        angle)
+        :param open_loop_controls: Vector with accel and phi values
+        :param vehicles: Surrounding vehicles
+        :return: Nothing. The vehicle stores the computed input values
+        """
+        self._inputs[self._input_idx['a']] = (
+            self._long_controller.compute_acceleration(vehicles))
+
+        t = self.get_current_time()
+        if self._platoon.is_lane_changing(t):
+            if self._is_platoon_leader():
+                self._platoon.retrieve_all_inputs(t)
+            phi = self._platoon.get_input_for_vehicle(self.id)
+        else:
+            phi = self.lk_controller.compute_steering_wheel_angle()
+        self._inputs[self._input_idx['phi']] = phi
+
+    def _set_up_lane_change_control(self):
+        self._platoon.set_lc_start_time(self._lc_start_time)
+
+    def _is_platoon_leader(self):
+        return self.id == self._platoon.get_platoon_leader_id()
+
+    # ========================= Not in use =================================== #
     # Methods if we want platoon vehicles to manage platoons.
     # [Aug 23] For now, it is easier to create platoons in the scenarios
     def analyze_platoons(self, vehicles: Dict[int, base.BaseVehicle],

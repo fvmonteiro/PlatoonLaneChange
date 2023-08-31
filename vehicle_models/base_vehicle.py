@@ -48,7 +48,7 @@ class BaseVehicle(ABC):
         self._platoon_id = -1
 
         # Some parameters
-        self.id = BaseVehicle._counter
+        self.id: int = BaseVehicle._counter
         BaseVehicle._counter += 1
         self.name: str = str(self.id)  # default
         self.lr = 2  # dist from C.G. to rear wheel
@@ -75,6 +75,15 @@ class BaseVehicle(ABC):
     def get_current_time(self):
         return self.time[self._iter_counter]
 
+    def get_x(self):
+        return self.get_a_state_by_name('x')
+
+    def get_y(self):
+        return self.get_a_state_by_name('y')
+
+    def get_theta(self):
+        return self.get_a_state_by_name('theta')
+
     def get_a_state_by_name(self, state_name):
         return self._states[self._state_idx[state_name]]
 
@@ -82,7 +91,7 @@ class BaseVehicle(ABC):
         return self._inputs[self._input_idx[input_name]]
 
     def get_current_lane(self):
-        return round(self.get_a_state_by_name('y') / const.lane_width)
+        return round(self.get_y() / const.lane_width)
 
     def get_states(self):
         return self._states
@@ -117,7 +126,12 @@ class BaseVehicle(ABC):
          acceleration
         :return:
         """
-        return self._leader_id[-1]
+        try:
+            return self._leader_id[-1]
+        except IndexError:
+            # Some vehicles never set a target leader because they do not have
+            # closed-loop acceleration control
+            return self._orig_leader_id[-1]
 
     def get_platoon_id(self):
         return self._platoon_id
@@ -144,7 +158,7 @@ class BaseVehicle(ABC):
 
     def set_lane_change_direction(self, lc_direction):
         self.target_lane = (
-                    round(self.get_a_state_by_name('y') / const.lane_width)
+                    round(self.get_y() / const.lane_width)
                     + lc_direction)
 
     def set_current_leader_id(self, veh_id):
@@ -228,13 +242,13 @@ class BaseVehicle(ABC):
         return self.get_platoon_id() >= 0
 
     def find_orig_lane_leader(self, vehicles: Iterable[BaseVehicle]):
-        ego_x = self.get_a_state_by_name('x')
-        ego_y = self.get_a_state_by_name('y')
+        ego_x = self.get_x()
+        ego_y = self.get_y()
         orig_lane_leader_x = np.inf
         new_orig_leader_id = -1
         for other_vehicle in vehicles:
-            other_x = other_vehicle.get_a_state_by_name('x')
-            other_y = other_vehicle.get_a_state_by_name('y')
+            other_x = other_vehicle.get_x()
+            other_y = other_vehicle.get_y()
             if (np.abs(other_y - ego_y) < const.lane_width / 2  # same lane
                     and ego_x < other_x < orig_lane_leader_x):
                 orig_lane_leader_x = other_x
@@ -246,12 +260,12 @@ class BaseVehicle(ABC):
         new_dest_follower_id = -1
         if self.has_lane_change_intention():
             y_target_lane = self.target_lane * const.lane_width
-            ego_x = self.get_a_state_by_name('x')
+            ego_x = self.get_x()
             dest_lane_follower_x = -np.inf
             dest_lane_leader_x = np.inf
             for other_vehicle in vehicles:
-                other_x = other_vehicle.get_a_state_by_name('x')
-                other_y = other_vehicle.get_a_state_by_name('y')
+                other_x = other_vehicle.get_x()
+                other_y = other_vehicle.get_y()
                 if np.abs(other_y - y_target_lane) < const.lane_width / 2:
                     if ego_x < other_x < dest_lane_leader_x:
                         dest_lane_leader_x = other_x
@@ -268,7 +282,7 @@ class BaseVehicle(ABC):
         if self._is_connected:
             for other_vehicle in vehicles:
                 other_request = other_vehicle._desired_future_follower_id
-                other_x = other_vehicle.get_a_state_by_name('x')
+                other_x = other_vehicle.get_x()
                 if other_request == self.id and other_x < incoming_veh_x:
                     new_incoming_vehicle_id = other_vehicle.id
                     incoming_veh_x = other_x
@@ -290,32 +304,25 @@ class BaseVehicle(ABC):
         """
         self._update_target_leader(vehicles)
 
-    def compute_gap_to_a_leader(self, a_leader: BaseVehicle):
-        return BaseVehicle.compute_a_gap(a_leader, self)
-
-    @staticmethod
-    def is_gap_safe_for_lane_change(leading_vehicle: BaseVehicle,
-                                    following_vehicle: BaseVehicle):
-        margin = 1e-2
-        gap = BaseVehicle.compute_a_gap(leading_vehicle, following_vehicle)
-        safe_gap = following_vehicle.compute_safe_gap(
-            following_vehicle.get_vel())
-        return gap + margin >= safe_gap
-
     @staticmethod
     def compute_a_gap(leading_vehicle: BaseVehicle,
                       following_vehicle: BaseVehicle):
-        return (leading_vehicle.get_a_state_by_name('x')
-                - following_vehicle.get_a_state_by_name('x'))
+        return (leading_vehicle.get_x()
+                - following_vehicle.get_x())
 
     def compute_safe_gap(self, v_ego=None):
         if v_ego is None:
             v_ego = self.get_vel()
         return self.safe_h * v_ego + self.c
 
+    def compute_desired_gap(self, v_ego=None):
+        if v_ego is None:
+            v_ego = self.get_vel()
+        return self.h * v_ego + self.c
+
     def compute_derivatives(self):
         self._derivatives = np.zeros(self._n_states)
-        theta = self.get_a_state_by_name('theta')
+        theta = self.get_theta()
         phi = self.get_an_input_by_name('phi')
         vel = self.get_vel()
         self._compute_derivatives(vel, theta, phi)
