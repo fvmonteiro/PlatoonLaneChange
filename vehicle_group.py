@@ -5,7 +5,6 @@ import pandas as pd
 
 import platoon
 import vehicle_models.base_vehicle as base
-import vehicle_models.four_state_vehicles as fsv
 import system_operating_mode as som
 
 

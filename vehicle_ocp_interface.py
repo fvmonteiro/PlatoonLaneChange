@@ -206,7 +206,7 @@ class FourStateVehicleInterface(BaseVehicleInterface, ABC):
         derivatives[self.state_idx['v']] = accel
 
 
-class OpenLoopVehicleInterfaceInterface(FourStateVehicleInterface):
+class OpenLoopVehicleInterface(FourStateVehicleInterface):
     """ States: [x, y, theta, v], inputs: [a, phi], centered at the C.G. """
 
     def __init__(self, vehicle: fsv.OpenLoopVehicle):

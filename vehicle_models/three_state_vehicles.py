@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from abc import ABC
-from typing import Dict
+from typing import Dict, List
 
 import numpy as np
 
 import vehicle_models.base_vehicle as base
+# import vehicle_ocp_interface as vi
 
 
 # =========================== Three-State Vehicles =========================== #
@@ -66,6 +69,7 @@ class ThreeStateVehicleRearWheel(ThreeStateVehicle):
 
     def __init__(self):
         super().__init__()
+        self._ocp_interface = ThreeStateVehicleRearWheelInterface
 
     def _compute_derivatives(self, vel, theta, phi):
         self._position_derivative_rear_wheels(vel, theta, phi)
@@ -76,6 +80,52 @@ class ThreeStateVehicleCG(ThreeStateVehicle):
 
     def __init__(self):
         super().__init__()
+        self._ocp_interface = ThreeStateVehicleCGInterface
 
     def _compute_derivatives(self, vel, theta, phi):
         self._position_derivative_cg(vel, theta, phi)
+
+
+class ThreeStateVehicleInterface(base.BaseVehicleInterface, ABC):
+    """ States: [x, y, theta], inputs: [v, phi] """
+    _state_names = ['x', 'y', 'theta']
+    _input_names = ['v', 'phi']
+
+    def __init__(self, vehicle: ThreeStateVehicle):
+        super().__init__(vehicle)
+        self._set_model(self._state_names, self._input_names)
+
+    def _set_speed(self, v0, state):
+        # Does nothing because velocity is an input for this model
+        pass
+
+    def compute_acceleration(self, ego_states, inputs, leader_states):
+        # Does nothing because velocity is an input for this model
+        pass
+
+    def get_desired_input(self) -> List[float]:
+        return [self.free_flow_speed, 0]
+
+    def get_input_limits(self) -> (List[float], List[float]):
+        return [0, -self.phi_max], [self.free_flow_speed + 5, self.phi_max]
+
+
+class ThreeStateVehicleRearWheelInterface(ThreeStateVehicleInterface):
+    """ From the library's example.
+    States: [x, y, theta], inputs: [v, phi], centered at the rear wheels """
+
+    def __init__(self, vehicle: ThreeStateVehicleRearWheel):
+        super().__init__(vehicle)
+
+    def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
+        self._position_derivative_rear_wheels(vel, theta, phi, derivatives)
+
+
+class ThreeStateVehicleCGInterface(ThreeStateVehicleInterface):
+    """ States: [x, y, theta], inputs: [v, phi], centered at the C.G. """
+
+    def __init__(self, vehicle: ThreeStateVehicleRearWheel):
+        super().__init__(vehicle)
+
+    def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
+        self._position_derivative_cg(vel, theta, phi, derivatives)

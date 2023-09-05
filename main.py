@@ -28,14 +28,14 @@ def run_base_opc_scenario(n_per_lane, max_iter=100):
     tf = 10
 
     scenario = scenarios.ExampleScenarioExternal()
-    # vehicles = [
-    #     [vehicle_models.three_state_vehicles.ThreeStateVehicleRearWheel],
-    #     [vehicle_models.three_state_vehicles.ThreeStateVehicleRearWheel]
-    # ]
     vehicles = [
-        [vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle,
-         vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle]
+        [vehicle_models.three_state_vehicles.ThreeStateVehicleRearWheel],
+        [vehicle_models.three_state_vehicles.ThreeStateVehicleRearWheel]
     ]
+    # vehicles = [
+    #     [vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle,
+    #      vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle]
+    # ]
     scenario.create_vehicle_group(vehicles)
     scenario.set_free_flow_speeds(v_ff)
     scenario.set_boundary_conditions(tf)
@@ -98,10 +98,10 @@ def main():
 
     # run_no_lc_scenario()
     # run_fast_lane_change()
-    # run_base_scenario([1], max_iter=400)
+    run_base_opc_scenario([1], max_iter=400)
     # run_constraints_scenario()
-    n_orig, n_dest = 2, 1
-    run_cbf_lc_scenario(n_orig, n_dest)
+    # n_orig, n_dest = 2, 1
+    # run_cbf_lc_scenario(n_orig, n_dest)
     # run_internal_optimal_controller(n_orig, n_dest)
     # load_and_plot_latest_scenario()
 

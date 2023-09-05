@@ -92,11 +92,14 @@ class VehicleOptimalController:
             inputs=input_names, outputs=output_names)
 
     def _set_ocp_costs(self):
+        # TODO: should depend on the vehicle model
+        #  Three state: y_cost=0, theta_cost=0.1
+        #  Safe vehicles: y_cost=0.1, theta_cost=10
         # Desired control; not final control
         uf = self._ocp_interface.get_desired_input()
 
         state_cost_matrix = self._ocp_interface.create_state_cost_matrix(
-            y_cost=0.1, theta_cost=10)
+            y_cost=0.0, theta_cost=1e-1)
 
         input_cost_matrix = np.diag([0.01] * self._ocp_interface.n_inputs)
         self._running_cost = opt.quadratic_cost(
