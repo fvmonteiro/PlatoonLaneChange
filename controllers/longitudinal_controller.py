@@ -23,18 +23,25 @@ class LongitudinalController:
         v_ego = self.vehicle.get_vel()
         v_ff = self.vehicle.free_flow_speed
         if not self.vehicle.has_leader():
-            accel = self._compute_velocity_control(v_ff, v_ego)
+            accel = self.compute_velocity_control(v_ff, v_ego)
         else:
             leader = vehicles[self.vehicle.get_current_leader_id()]
             gap = self.vehicle.compute_gap_to_a_leader(leader)
             v_leader = leader.get_vel()
-            accel = self._compute_gap_control(gap, v_ego, v_leader)
+            accel = self.compute_gap_control(gap, v_ego, v_leader)
             # Stay under free flow speed
             if v_ego >= self.vehicle.free_flow_speed and accel > 0:
-                accel = self._compute_velocity_control(v_ff, v_ego)
-        # Don't drive backwards
-        # if v_ego <= 0 and accel < 0:
-        #     accel = 0
+                accel = self.compute_velocity_control(v_ff, v_ego)
+        return accel
+
+    def compute_acceleration_bare(self, v_ego, v_ff, has_leader, gap, v_leader):
+        if has_leader:
+            accel = self.compute_velocity_control(v_ff, v_ego)
+        else:
+            accel = self.compute_gap_control(gap, v_ego, v_leader)
+            # Stay under free flow speed
+            if v_ego >= self.vehicle.free_flow_speed and accel > 0:
+                accel = self.compute_velocity_control(v_ff, v_ego)
         return accel
 
     def compute_accel_to_a_leader(self, other_id, vehicles) -> float:
@@ -42,7 +49,7 @@ class LongitudinalController:
             other_vehicle = vehicles[other_id]
             gap = self.vehicle.compute_gap_to_a_leader(other_vehicle)
             v_ego = self.vehicle.get_vel()
-            return self._compute_gap_control(
+            return self.compute_gap_control(
                 gap, v_ego, other_vehicle.get_vel())
         else:
             return np.inf
@@ -66,11 +73,11 @@ class LongitudinalController:
 
         return min(candidate_accel, key=candidate_accel.get)
 
-    def _compute_velocity_control(self, desired_vel: float,
-                                  v_ego: float) -> float:
-        return self.kv * (desired_vel - v_ego)
+    def compute_velocity_control(self, v_ff: float,
+                                 v_ego: float) -> float:
+        return self.kv * (v_ff - v_ego)
 
-    def _compute_gap_control(self, gap: float, v_ego: float,
-                             v_leader: float) -> float:
+    def compute_gap_control(self, gap: float, v_ego: float,
+                            v_leader: float) -> float:
         return (self.kg * (gap - self.vehicle.h * v_ego - self.vehicle.c)
                 + self.kv * (v_leader - v_ego))

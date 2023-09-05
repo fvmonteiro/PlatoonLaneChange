@@ -19,7 +19,6 @@ class FourStateVehicle(base.BaseVehicle, ABC):
 
     _state_names = ['x', 'y', 'theta', 'v']
     _input_names = ['a', 'phi']
-    _long_controller: long_ctrl.LongitudinalController
 
     def __init__(self):
         super().__init__()
@@ -27,15 +26,13 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         self.brake_max = -4
         self.accel_max = 2
 
-        # Controller parameters
-        self.lk_controller = lat_ctrl.LaneKeepingController(self)
-        self.h = const.veh_following_time_headway
-        self.kg = 0.5
-        self.kv = 0.5
-        # Note: h and safe_h are a simplification of the system. The time
-        # headway used for vehicle following is computed in a way to
-        # overestimate the nonlinear safe distance. In the above, we just
-        # assume the safe distance is also linear and with a smaller h.
+        # Controllers
+        self.lk_controller: lat_ctrl.LaneKeepingController = (
+            lat_ctrl.LaneKeepingController(self)
+        )
+        self.long_controller: long_ctrl.LongitudinalController = (
+            long_ctrl.LongitudinalController(self)
+        )
 
     def get_vel(self):
         return self.get_a_state_by_name('v')
@@ -98,24 +95,23 @@ class SafeAccelOpenLoopLCVehicle(OpenLoopVehicle):
 
     def __init__(self):
         super().__init__()
-        self._controller = long_ctrl.LongitudinalController(self)
+        # self.long_controller = long_ctrl.LongitudinalController(self)
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
                           vehicles: Dict[int, base.BaseVehicle]):
         """
         Sets the open loop controls a (acceleration) and phi (steering wheel
         angle)
-        :param open_loop_controls: Vector with accel and phi values
-        :param vehicles: Surrounding vehicles
+        :param open_loop_controls: Array with phi value
         :return: Nothing. The vehicle stores the computed input values
         """
         self._inputs[self._input_idx['a']] = (
-            self._controller.compute_acceleration(vehicles))
+            self.long_controller.compute_acceleration(vehicles))
         self._inputs[self._input_idx['phi']] = open_loop_controls[0]
 
     def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]):
         self._leader_id.append(
-            self._controller.get_more_critical_leader(vehicles))
+            self.long_controller.get_more_critical_leader(vehicles))
 
 
 class OptimalControlVehicle(FourStateVehicle):
@@ -220,7 +216,7 @@ class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
 
     def __init__(self):
         super().__init__()
-        self._long_controller = long_ctrl.LongitudinalController(self)
+        # self.long_controller = long_ctrl.LongitudinalController(self)
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
                           vehicles: Dict[int, base.BaseVehicle]):
@@ -232,7 +228,7 @@ class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
         :return: Nothing. The vehicle stores the computed input values
         """
         self._inputs[self._input_idx['a']] = (
-            self._long_controller.compute_acceleration(vehicles))
+            self.long_controller.compute_acceleration(vehicles))
         if self.is_lane_changing():
             t = self.get_current_time()
             phi = self.opt_controller.get_input(t, self.id)[0]
@@ -242,7 +238,7 @@ class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
 
     def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]):
         self._leader_id.append(
-            self._long_controller.get_more_critical_leader(vehicles))
+            self.long_controller.get_more_critical_leader(vehicles))
 
 
 class ClosedLoopVehicle(FourStateVehicle):
@@ -254,7 +250,7 @@ class ClosedLoopVehicle(FourStateVehicle):
 
     def __init__(self):
         super().__init__()
-        self._long_controller = long_ctrl.LongitudinalController(self)
+        # self.long_controller = long_ctrl.LongitudinalController(self)
         self.set_mode(modes.CLLaneKeepingMode())
         self.lc_controller = lat_ctrl.LaneChangingController(self)
 
@@ -303,7 +299,7 @@ class ClosedLoopVehicle(FourStateVehicle):
         :return: Nothing. The vehicle stores the computed input values
         """
         self._inputs[self._input_idx['a']] = (
-            self._long_controller.compute_acceleration(vehicles))
+            self.long_controller.compute_acceleration(vehicles))
         delta_t = self.get_current_time() - self._lc_start_time
         if delta_t <= self._lc_duration:
             phi = self.lc_controller.compute_steering_wheel_angle()
@@ -314,7 +310,7 @@ class ClosedLoopVehicle(FourStateVehicle):
 
     def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]):
         self._leader_id.append(
-            self._long_controller.get_more_critical_leader(vehicles))
+            self.long_controller.get_more_critical_leader(vehicles))
 
     def _set_up_longitudinal_adjustments_control(
             self, vehicles: Dict[int, base.BaseVehicle]):
@@ -346,7 +342,7 @@ class PlatoonVehicle(SafeAccelOpenLoopLCVehicle):
 
     def __init__(self):
         super().__init__()
-        self._long_controller = long_ctrl.LongitudinalController(self)
+        # self.long_controller = long_ctrl.LongitudinalController(self)
 
     def set_platoon(self, new_platoon: platoon.Platoon):
         self._platoon = new_platoon
@@ -371,7 +367,7 @@ class PlatoonVehicle(SafeAccelOpenLoopLCVehicle):
         :return: Nothing. The vehicle stores the computed input values
         """
         self._inputs[self._input_idx['a']] = (
-            self._long_controller.compute_acceleration(vehicles))
+            self.long_controller.compute_acceleration(vehicles))
 
         t = self.get_current_time()
         if self._platoon.is_lane_changing(t):

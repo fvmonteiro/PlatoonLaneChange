@@ -24,7 +24,7 @@ class LateralController:
 
 class LaneKeepingController(LateralController):
     def compute_steering_wheel_angle(self):
-        lane_center = self.vehicle.get_current_lane() * const.lane_width
+        lane_center = self.vehicle.get_current_lane() * const.LANE_WIDTH
         slip_angle = self._compute_cbf_slip_angle(lane_center, 0.0)
         return self._translate_slip_to_steering_wheel_angle(slip_angle)
 

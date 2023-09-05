@@ -57,8 +57,13 @@ class BaseVehicle(ABC):
         self.phi_max = 0.1  # max steering wheel angle
         # self._lateral_gain = 1
         self._lc_duration = 5  # [s]
-        self.safe_h = const.safe_time_headway
-        self.c = const.standstill_distance
+        # Note: h and safe_h are a simplification of the system. The time
+        # headway used for vehicle following is computed in a way to
+        # overestimate the nonlinear safe distance. In the above, we just
+        # assume the safe distance is also linear and with a smaller h.
+        self.h = const.TIME_HEADWAY
+        self.safe_h = const.SAFE_LC_TIME_HEADWAY
+        self.c = const.STANDSTILL_DISTANCE
 
         self._is_connected = False
 
@@ -91,7 +96,7 @@ class BaseVehicle(ABC):
         return self._inputs[self._input_idx[input_name]]
 
     def get_current_lane(self):
-        return round(self.get_y() / const.lane_width)
+        return round(self.get_y() / const.LANE_WIDTH)
 
     def get_states(self):
         return self._states
@@ -143,7 +148,7 @@ class BaseVehicle(ABC):
                           v: float = None):
         self.initial_state = self.create_state_vector(x, y, theta, v)
         self._states = self.initial_state
-        self.target_lane = round(y / const.lane_width)
+        self.target_lane = round(y / const.LANE_WIDTH)
         self.target_y = y
 
     def set_mode(self, mode: modes.VehicleMode):
@@ -158,7 +163,7 @@ class BaseVehicle(ABC):
 
     def set_lane_change_direction(self, lc_direction):
         self.target_lane = (
-                    round(self.get_y() / const.lane_width)
+                    round(self.get_y() / const.LANE_WIDTH)
                     + lc_direction)
 
     def set_current_leader_id(self, veh_id):
@@ -181,7 +186,7 @@ class BaseVehicle(ABC):
         # the first input is computed, not given
 
     def update_target_y(self):
-        self.target_y = self.target_lane * const.lane_width
+        self.target_y = self.target_lane * const.LANE_WIDTH
 
     def reset_lane_change_start_time(self):
         self._lc_start_time = -np.inf
@@ -249,7 +254,7 @@ class BaseVehicle(ABC):
         for other_vehicle in vehicles:
             other_x = other_vehicle.get_x()
             other_y = other_vehicle.get_y()
-            if (np.abs(other_y - ego_y) < const.lane_width / 2  # same lane
+            if (np.abs(other_y - ego_y) < const.LANE_WIDTH / 2  # same lane
                     and ego_x < other_x < orig_lane_leader_x):
                 orig_lane_leader_x = other_x
                 new_orig_leader_id = other_vehicle.id
@@ -259,14 +264,14 @@ class BaseVehicle(ABC):
         new_dest_leader_id = -1
         new_dest_follower_id = -1
         if self.has_lane_change_intention():
-            y_target_lane = self.target_lane * const.lane_width
+            y_target_lane = self.target_lane * const.LANE_WIDTH
             ego_x = self.get_x()
             dest_lane_follower_x = -np.inf
             dest_lane_leader_x = np.inf
             for other_vehicle in vehicles:
                 other_x = other_vehicle.get_x()
                 other_y = other_vehicle.get_y()
-                if np.abs(other_y - y_target_lane) < const.lane_width / 2:
+                if np.abs(other_y - y_target_lane) < const.LANE_WIDTH / 2:
                     if ego_x < other_x < dest_lane_leader_x:
                         dest_lane_leader_x = other_x
                         new_dest_leader_id = other_vehicle.id
@@ -315,10 +320,13 @@ class BaseVehicle(ABC):
             v_ego = self.get_vel()
         return self.safe_h * v_ego + self.c
 
-    def compute_desired_gap(self, v_ego=None):
-        if v_ego is None:
-            v_ego = self.get_vel()
-        return self.h * v_ego + self.c
+    def compute_free_flow_desired_gap(self):
+        return self.compute_desired_gap(self.free_flow_speed)
+
+    def compute_desired_gap(self, vel: float = None):
+        if vel is None:
+            vel = self.get_vel()
+        return self.h * vel + self.c
 
     def compute_derivatives(self):
         self._derivatives = np.zeros(self._n_states)

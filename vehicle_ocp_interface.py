@@ -85,7 +85,7 @@ class BaseVehicleInterface(ABC):
     def compute_safe_gap(self, v_ego):
         return self.safe_h * v_ego + self.c
 
-    def compute_gap_error(self, ego_states, leader_states):
+    def compute_error_to_safe_gap(self, ego_states, leader_states):
         gap = (self.select_state_from_vector(leader_states, 'x')
                - self.select_state_from_vector(ego_states, 'x'))
         safe_gap = self.compute_safe_gap(self.select_state_from_vector(
@@ -231,8 +231,8 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
 
         # Controller parameters
         self.h = vehicle.h  # time headway [s]
-        self.kg = vehicle.kg
-        self.kv = vehicle.kv
+        # TODO: concentrate all accel computation functions in the control class
+        self.long_controller = vehicle.long_controller
 
     def get_input_limits(self) -> (List[float], List[float]):
         return [-self.phi_max], [self.phi_max]
@@ -242,24 +242,19 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
         Computes acceleration for the ego vehicle following a leader
         """
         v_ego = self.select_state_from_vector(ego_states, 'v')
+        v_ff = self.free_flow_speed
         if leader_states is None or len(leader_states) == 0:
-            return self.compute_velocity_control(v_ego)
+            return self.long_controller.compute_velocity_control(v_ff, v_ego)
         else:
             gap = (self.select_state_from_vector(leader_states, 'x')
                    - self.select_state_from_vector(ego_states, 'x'))
             v_leader = self.select_state_from_vector(leader_states, 'v')
-            accel = self.compute_gap_control(gap, v_ego, v_leader)
+            accel = self.long_controller.compute_gap_control(gap, v_ego,
+                                                             v_leader)
             if v_ego >= self.free_flow_speed and accel > 0:
-                return self.compute_velocity_control(v_ego)
+                return self.long_controller.compute_velocity_control(
+                    v_ff, v_ego)
             return accel
-
-    def compute_velocity_control(self, v_ego: float) -> float:
-        return self.kv * (self.free_flow_speed - v_ego)
-
-    def compute_gap_control(self, gap: float, v_ego: float,
-                            v_leader: float) -> float:
-        return (self.kg * (gap - self.h * v_ego - self.c)
-                + self.kv * (v_leader - v_ego))
 
 
 class ClosedLoopVehicleInterface(SafeAccelVehicleInterface):
