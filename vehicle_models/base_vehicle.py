@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Iterable, Type
+from typing import Dict, Iterable, List, Tuple, Type
 import warnings
 
 import numpy as np
@@ -48,6 +48,11 @@ class BaseVehicle(ABC):
         self._long_adjust_start_time = -np.inf
         self._lc_start_time = -np.inf
         self._platoon_id = -1
+
+        # For when we want to predefine who should be followed. Used in
+        # optimal control problems
+        self.ocp_leader_switch_times: List[float] = []
+        self.ocp_leader_sequence: List[int] = []
 
         # Some parameters
         self.id: int = BaseVehicle._counter
@@ -136,12 +141,18 @@ class BaseVehicle(ABC):
          acceleration
         :return:
         """
-        try:
-            return self._leader_id[-1]
-        except IndexError:
-            # Some vehicles never set a target leader because they do not have
-            # closed-loop acceleration control
-            return self._orig_leader_id[-1]
+        if len(self.ocp_leader_sequence) == 0:
+            try:
+                return self._leader_id[-1]
+            except IndexError:
+                # Some vehicles never set a target leader because they do not
+                # have closed-loop acceleration control
+                return self._orig_leader_id[-1]
+        else:
+            time = self.get_current_time()
+            idx = np.searchsorted(self.ocp_leader_switch_times, time,
+                                  side='right')
+            return self.ocp_leader_sequence[idx-1]
 
     def get_platoon_id(self):
         return self._platoon_id
@@ -180,6 +191,16 @@ class BaseVehicle(ABC):
         :return:
         """
         self._leader_id.append(veh_id)
+
+    def set_ocp_leader_sequence(self, leader_sequence: List[Tuple[float, int]]):
+        """
+        For optimal control problems, sets the desired/tested
+        sequence of leaders throughout the solver horizon
+        """
+
+        for t, l_id in leader_sequence:
+            self.ocp_leader_switch_times.append(t)
+            self.ocp_leader_sequence.append(l_id)
 
     def initialize_simulation_logs(self, n_samples):
         self._iter_counter = 0
@@ -224,12 +245,7 @@ class BaseVehicle(ABC):
         return self.get_incoming_vehicle_id() >= 0
 
     def has_leader(self):
-        try:
-            return self._leader_id[-1] >= 0
-        except IndexError:
-            warnings.warn("Warning: trying to access vehicle data "
-                          "(leader id) before simulation start")
-            return False
+        return self.get_current_leader_id() >= 0
 
     def has_changed_leader(self):
         try:
@@ -496,6 +512,15 @@ class BaseVehicleInterface(ABC):
         self.input_names, self.n_inputs = None, None
         self.state_idx, self.input_idx = {}, {}
 
+        # Copy values from the vehicle
+        self.id = vehicle.id
+        self.name = vehicle.name
+        self.lr = vehicle.lr  # dist from C.G. to rear wheel
+        self.lf = vehicle.lf  # dist from C.G. to front wheel
+        self.wheelbase = self.lr + self.lf
+        self.phi_max = vehicle.phi_max  # max steering wheel angle
+        self.safe_h = vehicle.safe_h
+        self.c = vehicle.c  # standstill distance [m]
         self.free_flow_speed = vehicle.free_flow_speed
         self._orig_leader_id: int = vehicle.get_orig_lane_leader_id()
         self._destination_leader_id: int = vehicle.get_dest_lane_leader_id()
@@ -506,15 +531,9 @@ class BaseVehicleInterface(ABC):
         # The vehicle's current state is the starting point for the ocp
         self.initial_state = vehicle.get_states()
 
-        # Some parameters
-        self.id = vehicle.id
-        self.name = vehicle.name
-        self.lr = vehicle.lr  # dist from C.G. to rear wheel
-        self.lf = vehicle.lf  # dist from C.G. to front wheel
-        self.wheelbase = self.lr + self.lf
-        self.phi_max = vehicle.phi_max  # max steering wheel angle
-        self.safe_h = vehicle.safe_h
-        self.c = vehicle.c  # standstill distance [m]
+        # Only set for some vehicle types
+        self.ocp_leader_switch_times: List[float] = []
+        self.ocp_leader_sequence: List[int] = []
 
     def __repr__(self):
         return self.__class__.__name__ + ' id=' + str(self.id)
@@ -537,16 +556,19 @@ class BaseVehicleInterface(ABC):
         except KeyError:
             return inputs[self.input_idx['v']]
 
-    def get_current_leader_id(self):
+    def get_current_leader_id(self, time):
         """
         The 'current' leader is the vehicle being used to define this vehicle's
          acceleration
         :return:
         """
-        return self._leader_id
+        if len(self.ocp_leader_sequence) == 0:
+            return self._leader_id
+        idx = np.searchsorted(self.ocp_leader_switch_times, time, side='right')
+        return self.ocp_leader_sequence[idx-1]
 
-    def has_leader(self):
-        return self._leader_id >= 0
+    def has_leader(self, time):
+        return self.get_current_leader_id(time) >= 0
 
     def create_state_vector(self, x: float, y: float, theta: float,
                             v: float = None):

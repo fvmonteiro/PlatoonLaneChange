@@ -39,8 +39,8 @@ def run_base_opc_scenario(n_per_lane, max_iter=100):
     scenario.create_vehicle_group(vehicles)
     scenario.set_free_flow_speeds(v_ff)
     scenario.set_boundary_conditions(tf)
-    result = scenario.solve(max_iter)
-    scenario.run(result)
+    scenario.solve(max_iter)
+    scenario.run()
     scenario.save_response_data(file_name)
     data = scenario.response_to_dataframe()
     analysis.plot_lane_change(data)
@@ -54,8 +54,8 @@ def run_constraints_scenario():
     scenario.set_boundary_conditions(tf)
     # Solve
     print("Calling OCP solver")
-    result = scenario.solve(300)
-    scenario.run(result)
+    scenario.solve(300)
+    scenario.run()
     # Check results
     scenario.save_response_data(file_name)
     data = scenario.response_to_dataframe()
@@ -69,7 +69,7 @@ def run_constraints_scenario():
 
 def load_and_plot_latest_scenario():
     data = analysis.load_simulated_scenario(file_name)
-    analysis.plot_constrained_lane_change(data, 1)
+    analysis.plot_constrained_lane_change(data, 'ego')
     # analysis.plot_initial_and_final_states(data)
     # analysis.check_constraint_satisfaction(data, 1)
 
@@ -93,16 +93,27 @@ def run_internal_optimal_controller(n_orig=3, n_dest=2):
     analysis.plot_constrained_lane_change(data, 'ego')
 
 
+def run_mode_switch_test(n_orig, n_dest):
+    tf = 15
+    scenario = scenarios.ModeSwitchTests.optimal_control(n_orig, n_dest)
+    scenario.run(tf)
+    data = scenario.response_to_dataframe()
+    scenario.save_response_data(file_name)
+    # analysis.plot_initial_and_final_states(data)
+    analysis.plot_constrained_lane_change(data, 'ego')
+
+
 def main():
     start_time = time.time()
 
     # run_no_lc_scenario()
     # run_fast_lane_change()
-    run_base_opc_scenario([1], max_iter=400)
+    # run_base_opc_scenario([1], max_iter=400)
     # run_constraints_scenario()
-    # n_orig, n_dest = 2, 1
+    n_orig, n_dest = 1, 1
     # run_cbf_lc_scenario(n_orig, n_dest)
     # run_internal_optimal_controller(n_orig, n_dest)
+    run_mode_switch_test(n_orig, n_dest)
     # load_and_plot_latest_scenario()
 
     end_time = time.time()

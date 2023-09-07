@@ -167,12 +167,13 @@ def plot_constrained_lane_change(data: pd.DataFrame,
         show_legend = True if i == len(x_axes) - 1 else False
         sns.lineplot(data, x=x, y=y, hue='name', ax=ax[i + 1], palette='tab10',
                      legend=show_legend)
-        low, high = ax[i + 1].get_ylim()
-        if y == 'v' and high - low < 1:
-            low, high = np.floor(low - 0.5), np.ceil(high + 0.5)
+        _, x_high = ax[i + 1].get_xlim()
+        y_low, y_high = ax[i + 1].get_ylim()
+        if y == 'v' and y_high - y_low < 1:
+            y_low, y_high = np.floor(y_low - 0.5), np.ceil(y_high + 0.5)
         ax[i + 1].set(xlabel=_get_variable_with_unit(x),
                       ylabel=_get_variable_with_unit(y),
-                      ylim=(low, high))
+                      xlim=(0, x_high), ylim=(y_low, y_high))
     fig.tight_layout()
     fig.show()
 
@@ -208,11 +209,12 @@ def plot_gap_errors(data: pd.DataFrame,
         ax.plot(lc_vehicle_data['t'], dest_lane_error, label='fd to ego')
 
     ax.legend()
-    low, high = ax.get_ylim()
+    y_low, y_high = ax.get_ylim()
+    _, x_high = ax.get_xlim()
     # low, high = max(low, -2), min(high, 2)
     ax.set(xlabel=_get_variable_with_unit('t'),
            ylabel=_get_variable_with_unit('gap_error'),
-           ylim=(low, high))
+           xlim=(0, x_high), ylim=(y_low, y_high))
 
 
 def plot_vehicle_following(data: pd.DataFrame):

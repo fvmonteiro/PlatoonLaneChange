@@ -1,9 +1,9 @@
-from typing import Any, Dict, Iterable, List, Type, Union
+from typing import Any, Dict, Iterable, List, Type, Union, Tuple
 
 import numpy as np
 import pandas as pd
 
-import platoon
+# import platoon
 import vehicle_models.base_vehicle as base
 import system_operating_mode as som
 
@@ -22,6 +22,7 @@ class VehicleGroup:
         self.sorted_vehicle_ids = None
         self.n_vehs = 0
         self.name_to_id: Dict[str, int] = {}
+        # self.ocp_mode_sequence: List[Tuple[int, Dict[int, int]]] = []
 
     def get_free_flow_speeds(self):
         v_ff = np.zeros(self.n_vehs)
@@ -49,6 +50,13 @@ class VehicleGroup:
         for veh_id in self.sorted_vehicle_ids:
             inputs.append(self.vehicles[veh_id].get_input_history())
         return np.vstack(inputs)
+
+    def get_vehicle_id_by_name(self, name: str) -> int:
+        """
+        Returns the id of the vehicle with given name. Returns -1 if the name
+        is not found.
+        """
+        return self.name_to_id.get(name, -1)
 
     def get_vehicle_by_name(self, name: str) -> base.BaseVehicle:
         return self.vehicles[self.name_to_id[name]]
@@ -92,6 +100,15 @@ class VehicleGroup:
             vehicle = self.vehicles[veh_id]
             vehicle.name = names[veh_id]
             self.name_to_id[names[veh_id]] = veh_id
+
+    def set_ocp_leader_sequence(
+            self, leader_sequence: Dict[int, List[Tuple[float, int]]]):
+        """
+        :param leader_sequence: Dictionary with the leader sequence,
+        defined by tuples (time, leader id), as values and vehicle ids as keys
+        """
+        for veh_id, sequence in leader_sequence.items():
+            self.vehicles[veh_id].set_ocp_leader_sequence(sequence)
 
     def map_values_to_names(self, values) -> Dict[str, Any]:
         """

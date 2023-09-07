@@ -122,11 +122,11 @@ class SimulationScenario(ABC):
         self.lane_change_scenario_vehicle_filter(all_names)
         self.vehicle_group.set_vehicle_names(all_names)
         # Free-flow speeds
-        v_ff = {'ego': 12, 'lo': 10}
-        v_ff['ld'] = 0.9 * v_ff['lo']
+        v_ff = {'ego': 10, 'lo': 10}
+        v_ff['ld'] = 1.0 * v_ff['lo']
         v_ff['fd'] = 1.0 * v_ff['lo']
         # Deviation from minimum safe gap
-        delta_x = {'lo': 0.0, 'ld': -2.0, 'fd': 0.0}
+        delta_x = {'lo': 0.0, 'ld': 4.0, 'fd': 0.0}
         self.create_base_lane_change_initial_state(
             v_ff, delta_x)
         # self.vehicle_group.make_all_connected()
@@ -252,8 +252,8 @@ class LaneChangeScenario(SimulationScenario):
     def __init__(self, lc_veh_class: Type[BaseVehicle], n_orig: int = 3,
                  n_dest: int = 2):
         super().__init__()
-        self.lc_veh_id = 1  # lane changing vehicle
 
+        self.lc_intention_time = 0.0
         if n_orig == 3:
             orig_veh_classes = [fsv.ClosedLoopVehicle, lc_veh_class,
                                 fsv.ClosedLoopVehicle]
@@ -294,9 +294,37 @@ class LaneChangeScenario(SimulationScenario):
         self.vehicle_group.initialize_state_matrices(len(time))
         self.vehicle_group.update_surrounding_vehicles()
         for i in range(len(time) - 1):
-            if i == 0:
+            if np.isclose(time[i], self.lc_intention_time):
                 self.vehicle_group.set_single_vehicle_lane_change_direction(
                     'ego', 1)
+            self.simulate_one_time_step(time[i+1])
+
+    # def run_ocp_solution(self) -> None:
+    #     """
+    #     Calls the control libraries function for running the dynamic system
+    #     given the optimal control problem solution
+    #     :return: Nothing. Results are stored internally
+    #     """
+    #     self.ocp_response = self.controller.get_ocp_response()
+
+
+class ModeSwitchTests(LaneChangeScenario):
+
+    def run(self, final_time):
+        self.tf = final_time
+        ego_id = self.vehicle_group.get_vehicle_id_by_name('ego')
+        lo_id = self.vehicle_group.get_vehicle_id_by_name('lo')
+        ld_id = self.vehicle_group.get_vehicle_id_by_name('ld')
+        ego_modes = {ego_id: [(0.0, lo_id), (3.0, ld_id)]}
+        dt = 1e-2
+        time = np.arange(0, self.tf, dt)
+        self.vehicle_group.initialize_state_matrices(len(time))
+        self.vehicle_group.update_surrounding_vehicles()
+        for i in range(len(time) - 1):
+            if np.isclose(time[i], 2.0, atol=dt/10):
+                self.vehicle_group.set_single_vehicle_lane_change_direction(
+                    'ego', 1)
+                self.vehicle_group.set_ocp_leader_sequence(ego_modes)
             self.simulate_one_time_step(time[i+1])
 
 
@@ -378,35 +406,30 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
         Puts the states computed by the ocp solver tool (and saved) in a df
         """
         return self.controller._ocp_interface.to_dataframe(
+            # self.controller.ocp_result.time,
+            # self.controller.ocp_result.states,
+            # self.controller.ocp_result.inputs,
             self.ocp_response.time,
             self.ocp_response.states,
-            self.ocp_response.inputs)
+            self.ocp_response.inputs
+        )
 
     def solve(self, max_iter: int = 100):
         self.controller = opt_ctrl.VehicleOptimalController(self.tf)
-        self.controller._ocp_solver_max_iter = max_iter
+        self.controller.set_max_iter(max_iter)
         self.controller.find_lane_change_trajectory(
             0.0, self.vehicle_group.vehicles, [])
-        return self.controller.ocp_result
+        # return self.controller.ocp_result
 
-    def run_ocp_solution(self, result: opt.OptimalControlResult):
+    def run_ocp_solution(self) -> None:
         """
         Calls the control libraries function for running the dynamic system
         given the optimal control problem solution
-        :param result: Dictionary ['time': x, 'result': x] containing the
-         control time points and result obtained by the optimal control solver
         :return: Nothing. Results are stored internally
         """
-        time_pts, inputs = result.time, result.inputs
+        self.ocp_response = self.controller.get_ocp_response()
 
-        # Simulate the system dynamics (open loop)
-        response = ct.input_output_response(
-            self.controller._dynamic_system, time_pts, inputs,
-            self.vehicle_group.get_full_initial_state_vector(),
-            t_eval=np.arange(0, time_pts[-1], 0.1))
-        self.ocp_response = response
-
-    def run(self, result: opt.OptimalControlResult):
+    def run(self, params=None):
         """
         Given the optimal control problem solution, runs the open loop system.
         Difference to method 'run' is that we directly (re)simulate the dynamics
@@ -414,9 +437,10 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
         """
         # It is good to run our simulator with the ocp solution and to confirm
         # it yields the same response as the control library simulation
-        self.run_ocp_solution(result)
+        self.run_ocp_solution()
 
         dt = 1e-2
+        result = self.controller.ocp_result
         time = np.arange(0, result.time[-1], dt)
         inputs = np.zeros([result.inputs.shape[0], len(time)])
         veh_ids = self.vehicle_group.sorted_vehicle_ids

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC
-from typing import Dict, List
+from typing import Dict, List, Tuple, Union
 
 import numpy as np
 
@@ -461,13 +461,20 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
 
     _input_names = ['phi']
 
-    def __init__(self, vehicle: FourStateVehicle):
+    def __init__(self, vehicle: Union[SafeAccelOpenLoopLCVehicle,
+                                      SafeAccelOptimalLCVehicle,
+                                      ClosedLoopVehicle]):
         super().__init__(vehicle)
-
         # Controller parameters
         self.h = vehicle.h  # time headway [s]
         # TODO: concentrate all accel computation functions in the control class
         self.long_controller = vehicle.long_controller
+
+        # The solver always assumes t0 = 0, but we might be calling it at t > 0
+        offset = vehicle.get_current_time()
+        self.ocp_leader_switch_times = [t - offset for t
+                                        in vehicle.ocp_leader_switch_times]
+        self.ocp_leader_sequence = vehicle.ocp_leader_sequence
 
     def get_input_limits(self) -> (List[float], List[float]):
         return [-self.phi_max], [self.phi_max]

@@ -37,8 +37,9 @@ class VehicleOptimalController:
             self._ocp_horizon)
         self._set_ocp_costs()
         self._set_input_constraints()
-        self._set_safety_constraints([vehicles[veh_id]
-                                      for veh_id in lc_veh_ids])
+        lc_vehs = [vehicles[veh_id] for veh_id in lc_veh_ids]
+        self._set_safety_constraints(lc_vehs)
+        # self._set_terminal_constraints(lc_vehs)
         self._solve_ocp()
 
     def has_solution(self) -> bool:
@@ -47,9 +48,13 @@ class VehicleOptimalController:
     def get_desired_state(self):
         return self._ocp_desired_state
 
+    def set_max_iter(self, value) -> None:
+        self._ocp_solver_max_iter = value
+
     def get_input(self, time: float, veh_ids: Union[int, List[int]]):
         """
-
+        Gets the optimal input found by the solver at the given time by linear
+        interpolation
         :param time: Current simulation time
         :param veh_ids: Ids of vehicles for which we want the inputs
         :return: Dictionary with veh ids as keys and inputs as values if
@@ -69,19 +74,30 @@ class VehicleOptimalController:
             n_optimal_inputs = ego_inputs.shape[0]
             current_inputs[v_id] = []
             for i in range(n_optimal_inputs):
+                # TODO: zero order hold instead of interpolation?
                 current_inputs[v_id].append(np.interp(
                     delta_t, self._ocp_time, ego_inputs[i]))
+                # idx = np.searchsorted(self._ocp_time, delta_t)
+                # current_inputs[v_id].append(ego_inputs[i][idx])
 
         if single_veh_ctrl:
             return current_inputs[veh_ids[0]]
         else:
             return current_inputs
 
+    def get_ocp_response(self):
+        """
+        Gets the states as computed by the optimal control solver tool
+        """
+        time_pts, inputs = self.ocp_result.time, self.ocp_result.inputs
+        return ct.input_output_response(
+            self._dynamic_system, time_pts, inputs,
+            self._ocp_initial_state,
+            # t_eval=np.arange(0, time_pts[-1], 0.01)
+        )
+
     def _set_ocp_dynamics(self):
-        params = {'vehicle_group': self._ocp_interface,
-                  'mode_sequence': []}
-        # TODO list of tuples: mode end time and mode. Maybe reverse order of
-        #  time, so we can just pop elements as the time passes
+        params = {'vehicle_group': self._ocp_interface}
         input_names = self._ocp_interface.create_input_names()
         output_names = self._ocp_interface.create_output_names()
         n_states = self._ocp_interface.n_states
@@ -99,7 +115,7 @@ class VehicleOptimalController:
         uf = self._ocp_interface.get_desired_input()
 
         state_cost_matrix = self._ocp_interface.create_state_cost_matrix(
-            y_cost=0.0, theta_cost=1e-1)
+            y_cost=0.1, theta_cost=10)
 
         input_cost_matrix = np.diag([0.01] * self._ocp_interface.n_inputs)
         self._running_cost = opt.quadratic_cost(
@@ -112,6 +128,19 @@ class VehicleOptimalController:
         self._terminal_cost = opt.quadratic_cost(
             self._dynamic_system, terminal_cost_matrix, 0,
             x0=self._ocp_desired_state)
+
+    def _set_terminal_constraints(self, lc_vehicles):
+        rows = np.zeros([2 * len(lc_vehicles), self._ocp_interface.n_states
+                        + self._ocp_interface.n_inputs])
+        for i in range(len(lc_vehicles)):
+            veh = lc_vehicles[i]
+            rows[2 * i, self._ocp_interface.get_a_vehicle_state_index(
+                veh.id, 'y')] = 1
+            rows[2 * i + 1, self._ocp_interface.get_a_vehicle_state_index(
+                veh.id, 'theta')] = 1
+        self._terminal_constraints = LinearConstraint(
+            rows, lb=np.array([3.9, -0.01]), ub=np.array([4.1, 0.01]))
+        # opt.state_range_constraint(self._dynamic_system, )
 
     def _set_input_constraints(self):
         input_lower_bounds, input_upper_bounds = (
@@ -128,7 +157,8 @@ class VehicleOptimalController:
             d = np.zeros(self._ocp_interface.n_states
                          + self._ocp_interface.n_inputs)
             d[self._ocp_interface.get_a_vehicle_state_index(veh.id, 'y')] = 1
-            stay_in_lane = LinearConstraint(d, lb=-1, ub=5)
+            stay_in_lane = LinearConstraint(d, lb=veh.get_y() - 1,
+                                            ub=veh.target_y + 1)
             self._constraints.append(stay_in_lane)
             if veh.has_orig_lane_leader():
                 orig_lane_safety = NonlinearConstraint(
@@ -137,7 +167,7 @@ class VehicleOptimalController:
                         lc_veh_id=veh.id,
                         other_id=veh.get_orig_lane_leader_id(),
                         is_other_behind=False),
-                    -epsilon, epsilon)
+                    -epsilon, epsilon, keep_feasible=True)
                 self._constraints.append(orig_lane_safety)
             if veh.has_dest_lane_leader():
                 dest_lane_leader_safety = NonlinearConstraint(
@@ -146,7 +176,7 @@ class VehicleOptimalController:
                         lc_veh_id=veh.id,
                         other_id=veh.get_dest_lane_leader_id(),
                         is_other_behind=False),
-                    -epsilon, epsilon)
+                    -epsilon, epsilon, keep_feasible=True)
                 self._constraints.append(dest_lane_leader_safety)
             if veh.has_dest_lane_follower():
                 dest_lane_follower_safety = NonlinearConstraint(
@@ -164,7 +194,7 @@ class VehicleOptimalController:
         n_ctrl_pts = min(round(self._ocp_horizon), 10)  # empirical
         time_pts = np.linspace(0, self._ocp_horizon,
                                int(round(self._ocp_horizon)) + 1, endpoint=True)
-        # time_pts = np.array([0, 1.5, 2.0, 4.0, 5.0, 7.0, 8.0, 9.0, 10.0])
+        time_pts = np.array([0, 1.5, 1.75] + [i for i in range(3, 11)])
         # TODO: try providing 'relevant' time points, such as when we know the
         #  input can become non-zero
         result = opt.solve_ocp(

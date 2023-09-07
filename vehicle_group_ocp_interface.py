@@ -22,12 +22,11 @@ def vehicles_derivatives(t, states, inputs, params):
     """
     vehicle_group_interface: VehicleGroupInterface = params['vehicle_group']
 
-    return vehicle_group_interface.compute_derivatives(states, inputs, params)
+    return vehicle_group_interface.compute_derivatives(t, states, inputs)
 
 
 def vehicle_output(t, x, u, params):
     return x  # return (full state)
-
 
 
 class VehicleGroupInterface:
@@ -201,12 +200,12 @@ class VehicleGroupInterface:
                 veh_costs.extend([0, cost, cost, 0])
         return np.diag(veh_costs)
 
-    def compute_derivatives(self, states, inputs, params):
+    def compute_derivatives(self, t, states, inputs):
         """
         Computes the states derivatives
+        :param t: used to get the current leader
         :param states: Current states of all vehicles
         :param inputs: Current inputs of all vehicles
-        :param params:
         :return:
         """
         dxdt = []
@@ -215,9 +214,9 @@ class VehicleGroupInterface:
             ego_states = self.get_vehicle_state_vector_by_id(vehicle.id, states)
             ego_inputs = self.get_vehicle_inputs_vector_by_id(
                 vehicle.id, inputs)
-            if vehicle.has_leader():
+            if vehicle.has_leader(t):
                 leader_states = self.get_vehicle_state_vector_by_id(
-                    vehicle.get_current_leader_id(), states)
+                    vehicle.get_current_leader_id(t), states)
             else:
                 leader_states = None
             dxdt.extend(vehicle.compute_derivatives(ego_states, ego_inputs,

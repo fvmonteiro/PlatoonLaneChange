@@ -21,6 +21,12 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
         super().__init__()
         self._set_model(self._state_names, self._input_names)
 
+    def set_ocp_leader_sequence(self, leader_sequence):
+        """
+        Does nothing because these vehicles do not have optimal controllers
+        """
+        pass
+
     def update_mode(self, vehicles: Dict[int, base.BaseVehicle]):
         pass
 
