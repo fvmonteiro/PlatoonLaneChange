@@ -126,7 +126,7 @@ def plot_initial_and_final_states(data: pd.DataFrame, axis=None):
                marker='>', c=cmap.colors[0:n_vehs], alpha=0.6)
     min_y = data['y'].min()
     max_y = data['y'].max()
-    ax.axhline(y=(min_y + max_y) / 2, linestyle='--', color='black')
+    ax.axhline(y=const.LANE_WIDTH / 2, linestyle='--', color='black')
     ax.set(xlabel=_get_variable_with_unit('x'),
            ylabel=_get_variable_with_unit('y'),
            ylim=(min_y - 2, max_y + 2))

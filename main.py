@@ -23,7 +23,7 @@ def run_fast_lane_change():
     analysis.plot_lane_change(data)
 
 
-def run_base_opc_scenario(n_per_lane, max_iter=100):
+def run_base_opc_scenario(max_iter=100):
     v_ff = 10
     tf = 10
 
@@ -74,33 +74,35 @@ def load_and_plot_latest_scenario():
     # analysis.check_constraint_satisfaction(data, 1)
 
 
-def run_cbf_lc_scenario(n_orig=3, n_dest=2):
+def run_lane_change_scenario(scenario: scenarios.LaneChangeScenario):
     tf = 15
-    scenario = scenarios.LaneChangeScenario.closed_loop(n_orig, n_dest)
     scenario.run(tf)
     data = scenario.response_to_dataframe()
-    analysis.plot_initial_and_final_states(data)
-    analysis.plot_constrained_lane_change(data, 'ego')
-
-
-def run_internal_optimal_controller(n_orig=3, n_dest=2):
-    tf = 15
-    scenario = scenarios.LaneChangeScenario.optimal_control(n_orig, n_dest)
-    scenario.run(tf)
-    data = scenario.response_to_dataframe()
-    scenario.save_response_data(file_name)
-    analysis.plot_initial_and_final_states(data)
-    analysis.plot_constrained_lane_change(data, 'ego')
-
-
-def run_mode_switch_test(n_orig, n_dest):
-    tf = 15
-    scenario = scenarios.ModeSwitchTests.optimal_control(n_orig, n_dest)
-    scenario.run(tf)
-    data = scenario.response_to_dataframe()
-    scenario.save_response_data(file_name)
     # analysis.plot_initial_and_final_states(data)
     analysis.plot_constrained_lane_change(data, 'ego')
+
+
+def run_cbf_lc_scenario(n_orig: int, n_dest: int):
+    scenario = scenarios.LaneChangeScenario.closed_loop(n_orig, n_dest)
+    run_lane_change_scenario(scenario)
+
+
+def run_internal_optimal_controller(n_orig: int, n_dest: int):
+    scenario = scenarios.LaneChangeScenario.optimal_control(n_orig, n_dest)
+    run_lane_change_scenario(scenario)
+
+
+def run_mode_switch_test(n_orig: int, n_dest: int):
+    tf = 15
+    test = scenarios.ModeSwitchTests()
+    test.run(tf, n_orig, n_dest)
+    for data in test.data:
+        analysis.plot_constrained_lane_change(data, 'ego')
+
+
+def run_platoon_test(n_orig: int, n_dest: int):
+    scenario = scenarios.LaneChangeScenario.platoon_lane_change(n_orig, n_dest)
+    run_lane_change_scenario(scenario)
 
 
 def main():
@@ -108,12 +110,13 @@ def main():
 
     # run_no_lc_scenario()
     # run_fast_lane_change()
-    # run_base_opc_scenario([1], max_iter=400)
+    # run_base_opc_scenario(max_iter=400)
     # run_constraints_scenario()
-    n_orig, n_dest = 1, 1
+    n_orig, n_dest = 1, 0
     # run_cbf_lc_scenario(n_orig, n_dest)
     # run_internal_optimal_controller(n_orig, n_dest)
-    run_mode_switch_test(n_orig, n_dest)
+    # run_mode_switch_test(n_orig, n_dest)
+    run_platoon_test(n_orig, n_dest)
     # load_and_plot_latest_scenario()
 
     end_time = time.time()

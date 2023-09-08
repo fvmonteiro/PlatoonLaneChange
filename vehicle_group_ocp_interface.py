@@ -51,7 +51,15 @@ class VehicleGroupInterface:
         self.create_vehicle_interfaces(vehicles)
 
         # Sanity check:
-        print("OPC mode:", system_operating_mode.SystemMode(vehicles))
+        print("OCP leader sequences:")
+        for veh in self.vehicles.values():
+            print(veh.get_name(), end=": ")
+            for t, lead_id in zip(veh.ocp_leader_switch_times,
+                                  veh.ocp_leader_sequence):
+                print('(t={}, l={})'.format(
+                    t, self.vehicles[lead_id].get_name()
+                    if lead_id >= 0 else lead_id), end="; ")
+            print()
 
     def create_vehicle_interfaces(
             self, vehicles: Dict[int, base.BaseVehicle]):
@@ -60,7 +68,7 @@ class VehicleGroupInterface:
             # vehicle_interface = get_interface_for_vehicle(
             #     vehicles[veh_id])
             vehicle_interface = vehicles[veh_id].get_ocp_interface()
-            self.sorted_vehicle_ids.append(vehicle_interface.id)
+            self.sorted_vehicle_ids.append(vehicle_interface.get_id())
             self.vehicles[veh_id] = vehicle_interface
             self.state_idx_map[veh_id] = self.n_states
             self.input_idx_map[veh_id] = self.n_inputs
@@ -103,7 +111,7 @@ class VehicleGroupInterface:
         state_indices = []
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
-            state_indices.append(self.state_idx_map[vehicle.id]
+            state_indices.append(self.state_idx_map[vehicle.get_id()]
                                  + vehicle.state_idx[state_name])
         return state_indices
 
@@ -211,9 +219,10 @@ class VehicleGroupInterface:
         dxdt = []
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
-            ego_states = self.get_vehicle_state_vector_by_id(vehicle.id, states)
+            ego_states = self.get_vehicle_state_vector_by_id(vehicle.get_id(),
+                                                             states)
             ego_inputs = self.get_vehicle_inputs_vector_by_id(
-                vehicle.id, inputs)
+                vehicle.get_id(), inputs)
             if vehicle.has_leader(t):
                 leader_states = self.get_vehicle_state_vector_by_id(
                     vehicle.get_current_leader_id(t), states)
@@ -271,9 +280,9 @@ class VehicleGroupInterface:
     def to_dataframe(self, time, states, inputs) -> pd.DataFrame:
         data_per_vehicle = []
         for vehicle in self.vehicles.values():
-            ego_states = self.get_vehicle_state_vector_by_id(vehicle.id,
+            ego_states = self.get_vehicle_state_vector_by_id(vehicle.get_id(),
                                                              states)
-            ego_inputs = self.get_vehicle_inputs_vector_by_id(vehicle.id,
+            ego_inputs = self.get_vehicle_inputs_vector_by_id(vehicle.get_id(),
                                                               inputs)
             vehicle_df = vehicle.to_dataframe(time, ego_states, ego_inputs)
             data_per_vehicle.append(vehicle_df)

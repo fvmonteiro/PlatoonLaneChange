@@ -1,9 +1,8 @@
 from abc import ABC, abstractmethod
 import pickle
-from typing import List, Type, Union
+from typing import List, Tuple, Type, Union
 
 import control as ct
-import control.optimal as opt
 import numpy as np
 import pandas as pd
 
@@ -13,6 +12,7 @@ import platoon
 from vehicle_group import VehicleGroup
 from vehicle_models.base_vehicle import BaseVehicle
 import vehicle_models.four_state_vehicles as fsv
+import system_operating_mode as som
 
 
 class SimulationScenario(ABC):
@@ -20,9 +20,7 @@ class SimulationScenario(ABC):
         self.n_per_lane = []
         self.vehicle_group = VehicleGroup()
         BaseVehicle.reset_vehicle_counter()
-        # Simulation parameters
         self.tf = None
-        # self.initial_state = None
 
     def create_uniform_vehicles(
             self, n_per_lane: List[int], vehicle_class: Type[BaseVehicle],
@@ -126,7 +124,7 @@ class SimulationScenario(ABC):
         v_ff['ld'] = 1.0 * v_ff['lo']
         v_ff['fd'] = 1.0 * v_ff['lo']
         # Deviation from minimum safe gap
-        delta_x = {'lo': 0.0, 'ld': 4.0, 'fd': 0.0}
+        delta_x = {'lo': 0.0, 'ld': 0.0, 'fd': 0.0}
         self.create_base_lane_change_initial_state(
             v_ff, delta_x)
         # self.vehicle_group.make_all_connected()
@@ -197,7 +195,7 @@ class VehicleFollowingScenario(SimulationScenario):
         self.tf = final_time
         dt = 1e-2
         time = np.arange(0, self.tf, dt)
-        self.vehicle_group.initialize_state_matrices(len(time))
+        self.vehicle_group.prepare_to_start_simulation(len(time))
         self.vehicle_group.update_surrounding_vehicles()
         for i in range(len(time) - 1):
             self.simulate_one_time_step(time[i+1])
@@ -233,7 +231,7 @@ class FastLaneChange(SimulationScenario):
         time = np.arange(0, self.tf, dt)
         ego = self.vehicle_group.vehicles[0]
         inputs = {}
-        self.vehicle_group.initialize_state_matrices(len(time))
+        self.vehicle_group.prepare_to_start_simulation(len(time))
         self.vehicle_group.update_surrounding_vehicles()
         t_c = 1.08
         for i in range(len(time) - 1):
@@ -243,7 +241,7 @@ class FastLaneChange(SimulationScenario):
                 phi = -ego.phi_max
             else:
                 phi = 0
-            inputs[ego.id] = np.array([phi])
+            inputs[ego.get_id()] = np.array([phi])
             self.simulate_one_time_step(time[i+1], inputs)
 
 
@@ -253,7 +251,9 @@ class LaneChangeScenario(SimulationScenario):
                  n_dest: int = 2):
         super().__init__()
 
-        self.lc_intention_time = 0.0
+        self.lc_intention_time = 1.0
+        if n_orig > 3:
+            raise ValueError("Too many origin lane vehicles (above 3)")
         if n_orig == 3:
             orig_veh_classes = [fsv.ClosedLoopVehicle, lc_veh_class,
                                 fsv.ClosedLoopVehicle]
@@ -266,9 +266,26 @@ class LaneChangeScenario(SimulationScenario):
             [orig_veh_classes, [fsv.ClosedLoopVehicle] * n_dest])
         self.create_vehicle_group(veh_classes)
         self.create_initial_state()
+        self.leader_sequence = dict()  # used when iterating over the OCP
+
+    @staticmethod
+    def create_platoons(platoon_assignment: List[List[fsv.PlatoonVehicle]]):
+        """
+        Creates platoons and include vehicles in them
+        :param platoon_assignment:
+        :return:
+        """
+        for platoon_vehicles in platoon_assignment:
+            new_platoon = platoon.Platoon()
+            new_platoon.add_vehicles(platoon_vehicles)
+            # for veh in sorted(platoon_vehicles,
+            #                   key=lambda x: x.get_x(),
+            #                   reverse=True):
+            #     new_platoon.add_vehicle(veh.get_id())
+            #     veh.set_platoon(new_platoon)
 
     @classmethod
-    def closed_loop(cls, n_orig: int = 3, n_dest: int = 2):
+    def closed_loop(cls, n_orig: int, n_dest: int):
         """
         Creates a scenario instance where all vehicles have longitudinal and
         lateral feedback controllers.
@@ -280,8 +297,20 @@ class LaneChangeScenario(SimulationScenario):
         return cls(fsv.ClosedLoopVehicle, n_orig, n_dest)
 
     @classmethod
-    def optimal_control(cls, n_orig: int = 3, n_dest: int = 2):
+    def optimal_control(cls, n_orig: int, n_dest: int):
         return cls(fsv.SafeAccelOptimalLCVehicle, n_orig, n_dest)
+
+    @classmethod
+    def platoon_lane_change(cls, n_orig: int, n_dest: int):
+        scenario = cls(fsv.PlatoonVehicle, n_orig, n_dest)
+        # LaneChangeScenario.create_platoons(
+        #     [scenario.vehicle_group.get_platoon_vehicles()])
+        return scenario
+
+    def get_initial_system_mode(self):
+        self.vehicle_group.prepare_to_start_simulation(1)
+        self.vehicle_group.update_surrounding_vehicles()
+        return self.vehicle_group.mode_sequence[:]
 
     def create_initial_state(self):
         self.test_scenario()
@@ -291,10 +320,11 @@ class LaneChangeScenario(SimulationScenario):
         self.tf = final_time
         dt = 1e-2
         time = np.arange(0, self.tf, dt)
-        self.vehicle_group.initialize_state_matrices(len(time))
+        self.vehicle_group.prepare_to_start_simulation(len(time))
         self.vehicle_group.update_surrounding_vehicles()
+        self.vehicle_group.set_ocp_leader_sequence(self.leader_sequence)
         for i in range(len(time) - 1):
-            if np.isclose(time[i], self.lc_intention_time):
+            if np.isclose(time[i], self.lc_intention_time, atol=dt / 10):
                 self.vehicle_group.set_single_vehicle_lane_change_direction(
                     'ego', 1)
             self.simulate_one_time_step(time[i+1])
@@ -308,71 +338,86 @@ class LaneChangeScenario(SimulationScenario):
     #     self.ocp_response = self.controller.get_ocp_response()
 
 
-class ModeSwitchTests(LaneChangeScenario):
-
-    def run(self, final_time):
-        self.tf = final_time
-        ego_id = self.vehicle_group.get_vehicle_id_by_name('ego')
-        lo_id = self.vehicle_group.get_vehicle_id_by_name('lo')
-        ld_id = self.vehicle_group.get_vehicle_id_by_name('ld')
-        ego_modes = {ego_id: [(0.0, lo_id), (3.0, ld_id)]}
-        dt = 1e-2
-        time = np.arange(0, self.tf, dt)
-        self.vehicle_group.initialize_state_matrices(len(time))
-        self.vehicle_group.update_surrounding_vehicles()
-        for i in range(len(time) - 1):
-            if np.isclose(time[i], 2.0, atol=dt/10):
-                self.vehicle_group.set_single_vehicle_lane_change_direction(
-                    'ego', 1)
-                self.vehicle_group.set_ocp_leader_sequence(ego_modes)
-            self.simulate_one_time_step(time[i+1])
-
-
-class PlatoonLaneChangeScenario(SimulationScenario):
+class ModeSwitchTests:
 
     def __init__(self):
-        super().__init__()
-        self.lc_veh_id = 1  # lane changing vehicle
+        self.scenario_type = LaneChangeScenario.optimal_control
+        self.data: List[pd.DataFrame] = []
 
-        lc_veh_class = fsv.PlatoonVehicle
-        n_dest_lane_vehs = 2
-        veh_classes = (
-            [[fsv.ClosedLoopVehicle, lc_veh_class, fsv.ClosedLoopVehicle],
-             [fsv.ClosedLoopVehicle] * n_dest_lane_vehs])
-        self.create_vehicle_group(veh_classes)
-        self.create_initial_state()
-        PlatoonLaneChangeScenario.create_platoons([[]])
+    def run(self, final_time, n_orig, n_dest):
+        scenario = self.scenario_type(n_orig, n_dest)
+        mode_sequence = scenario.get_initial_system_mode()
+        solved = False
+        counter = 0
+        while not solved and counter < 3:
+            counter += 1
+            print("==== Attempt {} with mode sequence: {}====".format(
+                counter, ModeSwitchTests.mode_sequence_to_str(mode_sequence)))
 
-    def create_initial_state(self):
-        self.test_scenario()
-        self.vehicle_group.make_all_connected()
+            scenario.leader_sequence = som.mode_sequence_to_leader_sequence(
+                mode_sequence)
+            scenario.run(final_time)
+            self.data.append(scenario.response_to_dataframe())
+            solved = ModeSwitchTests.compare_mode_sequences(
+                mode_sequence, scenario.vehicle_group.mode_sequence)
+
+            if not solved:
+                # Preparing for the next iteration: we save the simulated
+                # mode sequence and restart the scenario
+                mode_sequence = scenario.vehicle_group.mode_sequence[:]
+                scenario = self.scenario_type(n_orig, n_dest)
 
     @staticmethod
-    def create_platoons(platoon_assignment: List[List[fsv.PlatoonVehicle]]):
-        """
-        Creates platoons and include vehicles in them
-        :param platoon_assignment:
-        :return:
-        """
-        for platoon_vehicles in platoon_assignment:
-            new_platoon = platoon.Platoon()
-            for veh in sorted(platoon_vehicles,
-                              key=lambda x: x.get_x(),
-                              reverse=True):
-                new_platoon.add_vehicle(veh.id)
-                veh.set_platoon(new_platoon)
+    def compare_mode_sequences(s1: List[Tuple[float, som.SystemMode]],
+                               s2: List[Tuple[float, som.SystemMode]]) -> bool:
 
-    def run(self, final_time):
-        self.tf = final_time
-        dt = 1e-2
-        time = np.arange(0, self.tf, dt)
-        self.vehicle_group.initialize_state_matrices(len(time))
-        self.vehicle_group.update_surrounding_vehicles()
-        for i in range(len(time) - 1):
-            if i == 0:
-                self.vehicle_group.set_single_vehicle_lane_change_direction(
-                    self.lc_veh_id, 1)
-            self.simulate_one_time_step(time[i + 1])
+        if len(s1) != len(s2):
+            return False
+        for i in range(len(s1)):
+            t1, mode1 = s1[i]
+            t2, mode2 = s2[i]
+            if not (np.abs(t1-t2) <= 0.1 and mode1 == mode2):
+                return False
+        return True
+
+    @staticmethod
+    def mode_sequence_to_str(s: List[Tuple[float, som.SystemMode]]):
+        ret = ""
+        for t, m in s:
+            ret += "(" + str(t) + ": " + str(m) + ") "
+        return ret
+
+
+# class PlatoonLaneChangeScenario(SimulationScenario):
+#
+#     def __init__(self):
+#         super().__init__()
+#         self.lc_veh_id = 1  # lane changing vehicle
+#
+#         lc_veh_class = fsv.PlatoonVehicle
+#         n_dest_lane_vehs = 2
+#         veh_classes = (
+#             [[fsv.ClosedLoopVehicle, lc_veh_class, fsv.ClosedLoopVehicle],
+#              [fsv.ClosedLoopVehicle] * n_dest_lane_vehs])
+#         self.create_vehicle_group(veh_classes)
+#         self.create_initial_state()
+#         PlatoonLaneChangeScenario.create_platoons([[]])
+#
+#     def create_initial_state(self):
+#         self.test_scenario()
+#         self.vehicle_group.make_all_connected()
+#
+#     def run(self, final_time):
+#         self.tf = final_time
+#         dt = 1e-2
+#         time = np.arange(0, self.tf, dt)
+#         self.vehicle_group.initialize_state_matrices(len(time))
+#         self.vehicle_group.update_surrounding_vehicles()
+#         for i in range(len(time) - 1):
+#             if i == 0:
+#                 self.vehicle_group.set_single_vehicle_lane_change_direction(
+#                     self.lc_veh_id, 1)
+#             self.simulate_one_time_step(time[i + 1])
 
 
 class ExternalOptimalControlScenario(SimulationScenario, ABC):
@@ -446,7 +491,7 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
         veh_ids = self.vehicle_group.sorted_vehicle_ids
         for i in range(len(result.inputs)):
             inputs[i, :] = np.interp(time, result.time, result.inputs[i])
-        self.vehicle_group.initialize_state_matrices(len(time))
+        self.vehicle_group.prepare_to_start_simulation(len(time))
         for i in range(len(time) - 1):
             current_inputs = self.controller.get_input(time[i], veh_ids)
             self.vehicle_group.update_vehicle_modes()

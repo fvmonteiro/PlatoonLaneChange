@@ -5,15 +5,12 @@ import pandas as pd
 
 # import platoon
 import vehicle_models.base_vehicle as base
+import vehicle_models.four_state_vehicles as fsv
 import system_operating_mode as som
 
 
 class VehicleGroup:
     """ Class to help manage groups of vehicles """
-
-    # The full system (all vehicles) mode is defined by follower/leader
-    # pairs.
-    mode: som.SystemMode
 
     def __init__(self):
         self.vehicles: Dict[int, base.BaseVehicle] = {}
@@ -22,7 +19,15 @@ class VehicleGroup:
         self.sorted_vehicle_ids = None
         self.n_vehs = 0
         self.name_to_id: Dict[str, int] = {}
-        # self.ocp_mode_sequence: List[Tuple[int, Dict[int, int]]] = []
+        # The full system (all vehicles) mode is defined by follower/leader
+        # pairs.
+        self.mode_sequence: List[Tuple[float, som.SystemMode]] = []
+
+    def get_current_mode(self) -> som.SystemMode:
+        try:
+            return self.mode_sequence[-1][1]
+        except IndexError:
+            return som.SystemMode({})
 
     def get_free_flow_speeds(self):
         v_ff = np.zeros(self.n_vehs)
@@ -61,6 +66,14 @@ class VehicleGroup:
     def get_vehicle_by_name(self, name: str) -> base.BaseVehicle:
         return self.vehicles[self.name_to_id[name]]
 
+    def get_platoon_vehicles(self) -> List[fsv.PlatoonVehicle]:
+        platoon_vehs: List[fsv.PlatoonVehicle] = []
+        for veh_id in self.sorted_vehicle_ids:
+            veh = self.vehicles[veh_id]
+            if isinstance(veh, fsv.PlatoonVehicle):
+                platoon_vehs.append(veh)
+        return platoon_vehs
+
     def get_initial_desired_gaps(self, v_ref: List[float] = None):
         gaps = []
         for veh_id in self.sorted_vehicle_ids:
@@ -70,6 +83,16 @@ class VehicleGroup:
                 v = v_ref[veh_id]
             gaps.append(self.vehicles[veh_id].compute_desired_gap(v))
         return gaps
+
+    # def get_initial_group_mode(self):
+    #     # Split in lanes
+    #     lanes = {veh.get_current_lane() for veh in self.vehicles.values()}
+    #
+    #     for l in lanes:
+    #         vehs_in_lanes = [veh for veh in self.vehicles.values()
+    #                          if veh.get_current_lane() == l]
+    #     # Order per lane, set leaders
+    #     # Merge both 'lanes' in a single dict
 
     def set_a_vehicle_free_flow_speed(self, veh_id, v_ff):
         self.vehicles[veh_id].set_free_flow_speed(v_ff)
@@ -98,7 +121,7 @@ class VehicleGroup:
     def set_vehicle_names(self, names: List[str]):
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
-            vehicle.name = names[veh_id]
+            vehicle._name = names[veh_id]
             self.name_to_id[names[veh_id]] = veh_id
 
     def set_ocp_leader_sequence(
@@ -118,12 +141,17 @@ class VehicleGroup:
         """
         d = {}
         for veh_id in self.sorted_vehicle_ids:
-            d[self.vehicles[veh_id].name] = values[veh_id]
+            d[self.vehicles[veh_id].get_name()] = values[veh_id]
         return d
 
-    def initialize_state_matrices(self, n_samples: int):
+    def prepare_to_start_simulation(self, n_samples: int):
+        """
+        Sets all internal states, inputs and other simulation-related variables
+        to zero.
+        """
+        self.mode_sequence = []
         for vehicle in self.vehicles.values():
-            vehicle.initialize_simulation_logs(n_samples)
+            vehicle.prepare_to_start_simulation(n_samples)
 
     def make_all_connected(self):
         for vehicle in self.vehicles.values():
@@ -142,8 +170,8 @@ class VehicleGroup:
         self.n_vehs = len(vehicle_classes)
         for veh_class in vehicle_classes:
             vehicle = veh_class()
-            self.sorted_vehicle_ids.append(vehicle.id)
-            self.vehicles[vehicle.id] = vehicle
+            self.sorted_vehicle_ids.append(vehicle.get_id())
+            self.vehicles[vehicle.get_id()] = vehicle
 
     # def create_platoons(self,
     #                     platoon_assignment: List[List[fsv.PlatoonVehicle]]):
@@ -186,14 +214,16 @@ class VehicleGroup:
             ego_vehicle.find_cooperation_requests(self.vehicles.values())
             ego_vehicle.update_target_leader(self.vehicles)
         new_mode = som.SystemMode(self.vehicles)
-        try:
-            if new_mode != self.mode:
+        if self.get_current_mode() != new_mode:
+            time = self.vehicles[0].get_current_time()
+            if len(self.mode_sequence) == 0:
+                # print("Initial mode: {}".format(
+                #     new_mode))
+                pass
+            else:
                 print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
-                    self.vehicles[0].get_current_time(),
-                    self.mode, new_mode))
-        except AttributeError:
-            print("Initial mode:\n{}".format(new_mode))
-        self.mode = new_mode
+                    time, self.get_current_mode(), new_mode))
+            self.mode_sequence.append((time, new_mode))
 
     def determine_inputs(
             self, open_loop_controls: Dict[int, Dict[str, float]]):
