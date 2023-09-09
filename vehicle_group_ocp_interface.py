@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 import vehicle_models.base_vehicle as base
-import system_operating_mode
+# import system_operating_mode
 
 
 # ========= Functions passed to the optimal control library methods ========== #
@@ -53,6 +53,8 @@ class VehicleGroupInterface:
         # Sanity check:
         print("OCP leader sequences:")
         for veh in self.vehicles.values():
+            if len(veh.ocp_leader_switch_times) == 0:
+                continue
             print(veh.get_name(), end=": ")
             for t, lead_id in zip(veh.ocp_leader_switch_times,
                                   veh.ocp_leader_sequence):
@@ -176,7 +178,7 @@ class VehicleGroupInterface:
             except KeyError:  # three-state vehicles have v as an input
                 vf = veh.select_input_from_vector(veh.get_desired_input(), 'v')
             xf = veh.select_state_from_vector(veh_states, 'x') + vf * tf
-            yf = veh.target_y
+            yf = veh.get_target_y()
             thetaf = 0.0
             desired_state.extend(veh.create_state_vector(xf, yf, thetaf, vf))
         return np.array(desired_state)

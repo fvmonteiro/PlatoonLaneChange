@@ -133,17 +133,28 @@ class VehicleOptimalController:
                 x0=self._ocp_desired_state)
 
     def _set_terminal_constraints(self, lc_vehicles: List[base.BaseVehicle]):
-        rows = np.zeros([2 * len(lc_vehicles), self._ocp_interface.n_states
-                        + self._ocp_interface.n_inputs])
+        dim = [2 * len(lc_vehicles),
+               self._ocp_interface.n_states + self._ocp_interface.n_inputs]
+        rows = np.zeros(dim)
+        lower_boundaries = np.zeros(dim[0])
+        upper_boundaries = np.zeros(dim[0])
+        y_margin = 1e-1
+        theta_margin = 1e-2
         for i in range(len(lc_vehicles)):
             veh = lc_vehicles[i]
-            rows[2 * i, self._ocp_interface.get_a_vehicle_state_index(
+            y_idx = 2 * i
+            theta_idx = 2 * i + 1
+            rows[y_idx, self._ocp_interface.get_a_vehicle_state_index(
                 veh.get_id(), 'y')] = 1
-            rows[2 * i + 1, self._ocp_interface.get_a_vehicle_state_index(
+            rows[theta_idx, self._ocp_interface.get_a_vehicle_state_index(
                 veh.get_id(), 'theta')] = 1
+            lower_boundaries[y_idx] = veh.get_target_y() - y_margin
+            lower_boundaries[theta_idx] = -theta_margin
+            upper_boundaries[y_idx] = veh.get_target_y() + y_margin
+            upper_boundaries[theta_idx] = theta_margin
+
         self._terminal_constraints = LinearConstraint(
-            rows, lb=np.array([3.9, -0.01]), ub=np.array([4.1, 0.01]))
-        # opt.state_range_constraint(self._dynamic_system, )
+            rows, lb=lower_boundaries, ub=upper_boundaries)
 
     def _set_input_constraints(self):
         input_lower_bounds, input_upper_bounds = (
@@ -162,7 +173,7 @@ class VehicleOptimalController:
             d[self._ocp_interface.get_a_vehicle_state_index(
                 veh.get_id(), 'y')] = 1
             stay_in_lane = LinearConstraint(d, lb=veh.get_y() - 1,
-                                            ub=veh.target_y + 1)
+                                            ub=veh.get_target_y() + 1)
             self._constraints.append(stay_in_lane)
             if veh.has_orig_lane_leader():
                 orig_lane_safety = NonlinearConstraint(

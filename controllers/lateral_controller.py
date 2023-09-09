@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 
 import constants as const
@@ -52,7 +54,7 @@ class LaneChangingController(LateralController):
         y0 = self.vehicle.get_y()
         vy0 = 0
         ay0 = 0
-        yf = self.vehicle.target_y
+        yf = self.vehicle.get_target_y()
         vyf = vy0
         ayf = ay0
 

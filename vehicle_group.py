@@ -225,6 +225,10 @@ class VehicleGroup:
                     time, self.get_current_mode(), new_mode))
             self.mode_sequence.append((time, new_mode))
 
+    def update_platoons(self):
+        for ego_vehicle in self.vehicles.values():
+            ego_vehicle.analyze_platoons(self.vehicles)
+
     def determine_inputs(
             self, open_loop_controls: Dict[int, Dict[str, float]]):
         """

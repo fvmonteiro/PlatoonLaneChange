@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, Iterable, List, Tuple, Type
+from typing import Dict, Iterable, List, Tuple, Type, Union
 import warnings
 
 import numpy as np
 import pandas as pd
 
 import constants as const
+# import platoon
 import vehicle_operating_modes.base_operating_modes as modes
 # import vehicle_ocp_interface as vi
 
@@ -32,7 +33,6 @@ class BaseVehicle(ABC):
     _desired_future_follower_id: int
     _long_adjust_start_time: float
     _lc_start_time: float
-    _platoon_id: int
     # For when we want to predefine who should be followed. Used in
     # optimal control problems
     ocp_leader_switch_times: List[float]
@@ -46,14 +46,14 @@ class BaseVehicle(ABC):
         self.free_flow_speed = None
         self.initial_state = None
         self.target_lane = None
-        self.target_y = None
+        # self.target_y = None
         self.state_names, self.input_names = None, None
         self._n_states, self._n_inputs = None, None
         self._state_idx, self._input_idx = {}, {}
         # self._desired_future_follower_id = -1
         # self._long_adjust_start_time = -np.inf
         # self._lc_start_time = -np.inf
-        # self._platoon_id = -1
+        self._platoon = None
         #
         # # For when we want to predefine who should be followed. Used in
         # # optimal control problems
@@ -120,6 +120,9 @@ class BaseVehicle(ABC):
     def get_current_lane(self) -> int:
         return round(self.get_y() / const.LANE_WIDTH)
 
+    def get_target_y(self) -> float:
+        return self.target_lane * const.LANE_WIDTH
+
     def get_states(self) -> np.ndarray:
         return self._states
 
@@ -169,8 +172,8 @@ class BaseVehicle(ABC):
                               side='right')
         return self.ocp_leader_sequence[idx-1]
 
-    def get_platoon_id(self) -> int:
-        return self._platoon_id
+    def get_platoon(self):
+        return self._platoon
 
     def set_free_flow_speed(self, v_ff: float):
         self.free_flow_speed = v_ff
@@ -178,7 +181,8 @@ class BaseVehicle(ABC):
     def set_initial_state(self, x: float, y: float, theta: float,
                           v: float = None):
         self.initial_state = self.create_state_vector(x, y, theta, v)
-        # self._states = self.initial_state
+        self._states = self.initial_state
+        self.target_lane = self.get_current_lane()
         # self.target_lane = round(self.get_y() / const.LANE_WIDTH)
         # self.target_y = self.get_y()
 
@@ -194,9 +198,7 @@ class BaseVehicle(ABC):
         self._mode.set_ego_vehicle(self)
 
     def set_lane_change_direction(self, lc_direction):
-        self.target_lane = (
-                    round(self.get_y() / const.LANE_WIDTH)
-                    + lc_direction)
+        self.target_lane = self.get_current_lane() + lc_direction
 
     def set_current_leader_id(self, veh_id):
         """
@@ -224,15 +226,10 @@ class BaseVehicle(ABC):
         simulated again
         """
         self.initialize_simulation_logs(n_samples)
-        # TODO: maybe the settings below can be in set_initial_state()
-        self._states = self.initial_state
-        self.target_lane = self.get_current_lane()
-        self.target_y = self.get_y()
         # TODO: maybe all the settings below can be in the constructor
         self._desired_future_follower_id = -1
         self._long_adjust_start_time = -np.inf
         self._lc_start_time = -np.inf
-        self._platoon_id = -1
         # For when we want to predefine who should be followed. Used in
         # optimal control problems
         self.ocp_leader_switch_times: List[float] = []
@@ -251,9 +248,6 @@ class BaseVehicle(ABC):
 
         self._time[self._iter_counter] = 0.0
         self._states_history[:, self._iter_counter] = self.initial_state
-
-    def update_target_y(self):
-        self.target_y = self.target_lane * const.LANE_WIDTH
 
     def reset_lane_change_start_time(self):
         self._lc_start_time = -np.inf
@@ -306,8 +300,8 @@ class BaseVehicle(ABC):
     def make_connected(self):
         self._is_connected = True
 
-    def is_in_a_platoon(self):
-        return self.get_platoon_id() >= 0
+    def is_in_a_platoon(self) -> bool:
+        return not (self.get_platoon() is None)
 
     def find_orig_lane_leader(self, vehicles: Iterable[BaseVehicle]):
         ego_x = self.get_x()
@@ -355,6 +349,9 @@ class BaseVehicle(ABC):
                     new_incoming_vehicle_id = other_vehicle._id
                     incoming_veh_x = other_x
         self._incoming_vehicle_id[self._iter_counter] = new_incoming_vehicle_id
+
+    def analyze_platoons(self, vehicles: Dict[int, BaseVehicle]):
+        pass
 
     def request_cooperation(self):
         if self._is_connected:
@@ -569,7 +566,6 @@ class BaseVehicleInterface(ABC):
         self._destination_follower_id: int = vehicle.get_dest_lane_follower_id()
         self._leader_id = vehicle.get_current_leader_id()
         self.target_lane = vehicle.target_lane
-        self.target_y = vehicle.target_y
         # The vehicle's current state is the starting point for the ocp
         self.initial_state = vehicle.get_states()
 
@@ -584,11 +580,14 @@ class BaseVehicleInterface(ABC):
         return (self.__class__.__name__ + ": id=" + str(self._id)
                 + "V_f=" + str(self.free_flow_speed))
 
-    def get_id(self):
+    def get_id(self) -> int:
         return self._id
 
-    def get_name(self):
+    def get_name(self) -> str:
         return self._name
+
+    def get_target_y(self) -> float:
+        return self.target_lane * const.LANE_WIDTH
 
     # TODO: maybe most of these methods could be class methods since they don't
     #  depend on any 'internal' value of the instance

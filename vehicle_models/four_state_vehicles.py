@@ -202,7 +202,8 @@ class OptimalControlVehicle(FourStateVehicle):
 
     def _set_up_longitudinal_adjustments_control(
             self, vehicles: Dict[int, base.BaseVehicle]) -> None:
-        self.update_target_y()
+        # self.update_target_y()
+        pass
 
     def _set_up_lane_change_control(self):
         pass
@@ -290,7 +291,7 @@ class ClosedLoopVehicle(FourStateVehicle):
                 and is_safe_to_dest_lane_follower)
 
     def is_lane_change_complete(self):
-        return (np.abs(self.get_y() - self.target_y) < 1e-2
+        return (np.abs(self.get_y() - self.get_target_y()) < 1e-2
                 and np.abs(self.get_theta()) < 1e-3)
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
@@ -320,7 +321,7 @@ class ClosedLoopVehicle(FourStateVehicle):
         pass
 
     def _set_up_lane_change_control(self):
-        self.update_target_y()
+        # self.update_target_y()
         self.lc_controller.start(self._lc_start_time,
                                  self._lc_duration)
 
@@ -340,8 +341,6 @@ class PlatoonVehicle(SafeAccelOpenLoopLCVehicle):
     but the lane change control is defined by the platoon.
     Note: not yet sure who this class should inherit from
     """
-
-    _platoon: platoon.Platoon
 
     def __init__(self):
         super().__init__()
@@ -382,10 +381,15 @@ class PlatoonVehicle(SafeAccelOpenLoopLCVehicle):
         if self._platoon.is_lane_changing(t):
             if self._is_platoon_leader():
                 self._platoon.retrieve_all_inputs(t)
-            phi = self._platoon.get_input_for_vehicle(self._id)
+            phi = self._platoon.get_input_for_vehicle(self._id)[0]
         else:
             phi = self.lk_controller.compute_steering_wheel_angle()
         self._inputs[self._input_idx['phi']] = phi
+
+    def _set_up_longitudinal_adjustments_control(
+            self, vehicles: Dict[int, base.BaseVehicle]) -> None:
+        # self.update_target_y()
+        pass
 
     def _set_up_lane_change_control(self):
         self._platoon.set_lc_start_time(self._lc_start_time)
@@ -393,31 +397,28 @@ class PlatoonVehicle(SafeAccelOpenLoopLCVehicle):
     def _is_platoon_leader(self):
         return self._id == self._platoon.get_platoon_leader_id()
 
-    # ========================= Not in use =================================== #
-    # Methods if we want platoon vehicles to manage platoons.
-    # [Aug 23] For now, it is easier to create platoons in the scenarios
-    # def analyze_platoons(self, vehicles: Dict[int, base.BaseVehicle],
-    #                      platoons: Dict[int, platoon.Platoon],
-    #                      platoon_lc_strategy=None):
-    #
-    #     # [Aug 23] We are only simulating simple scenarios. At the start of
-    #     # the simulation, every vehicle will either create its own platoon
-    #     # or join the platoon of the vehicle ahead. Vehicles do not leave or
-    #     # join platoons afterward
-    #
-    #     if not self.is_in_a_platoon():
-    #         if (self.has_orig_lane_leader()
-    #                 and vehicles[
-    #                     self.get_orig_lane_leader_id()].is_in_a_platoon()):
-    #             leader_platoon_id = vehicles[
-    #                 self.get_orig_lane_leader_id()].get_platoon_id()
-    #             platoons[leader_platoon_id].add_vehicle(self._id)
-    #         else:
-    #             self._create_platoon(platoons)
+    def analyze_platoons(self, vehicles: Dict[int, base.BaseVehicle]):
 
-    # def _create_platoon(self, platoons: Dict[int, platoon.Platoon]):
-    #     new_platoon = platoon.Platoon(self.get_id())
-    #     platoons[new_platoon.id] = new_platoon
+        # [Aug 23] We are only simulating simple scenarios. At the start of
+        # the simulation, every vehicle will either create its own platoon
+        # or join the platoon of the vehicle ahead. Vehicles do not leave or
+        # join platoons afterward
+
+        if not self.is_in_a_platoon():
+            if (self.has_orig_lane_leader()
+                    and vehicles[
+                        self.get_orig_lane_leader_id()].is_in_a_platoon()):
+                leader_platoon = vehicles[
+                    self.get_orig_lane_leader_id()].get_platoon()
+                leader_platoon.add_vehicle(self)
+                self.set_platoon(leader_platoon)
+            else:
+                self.set_platoon(platoon.Platoon(self))
+
+    def _create_platoon(self):
+        self.set_platoon(platoon.Platoon(self))
+        # platoons[new_platoon.id] = new_platoon
+        # self._platoon
 
 
 class FourStateVehicleInterface(base.BaseVehicleInterface, ABC):
