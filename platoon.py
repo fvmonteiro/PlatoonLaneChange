@@ -18,7 +18,7 @@ class Platoon:
     _solver_wait_time: float = 10.0
 
     def __init__(self, first_vehicle: fsv.PlatoonVehicle):
-        self.id: int = Platoon._counter
+        self._id: int = Platoon._counter
         Platoon._counter += 1
         # self.vehicle_ids.append(platoon_leader_id)
         self._lc_start_time: float = -np.inf
@@ -72,7 +72,7 @@ class Platoon:
         )
         if is_cool_down_period_done:
             self._solver_attempt_time = t
-            print("t={:.2f}, veh:{}. Calling ocp solver...".format(t, self.id))
+            print("t={:.2f}, veh:{}. Calling ocp solver...".format(t, self._id))
             self._lc_controller.find_lane_change_trajectory(
                 t, all_vehicles, [veh.get_id() for veh in self.vehicles]
             )

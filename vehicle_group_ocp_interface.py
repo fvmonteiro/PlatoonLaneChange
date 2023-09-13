@@ -196,18 +196,25 @@ class VehicleGroupInterface:
         """
         veh_costs = []
         for veh_id in self.sorted_vehicle_ids:
-            veh_costs.extend(self.vehicles[veh_id].create_state_vector(
-                x_cost, y_cost, theta_cost, v_cost))
+            veh = self.vehicles[veh_id]
+            if veh.n_inputs > 0 or True:
+                veh_costs.extend(self.vehicles[veh_id].create_state_vector(
+                    x_cost, y_cost, theta_cost, v_cost))
+            else:
+                veh_costs.extend([0.0] * veh.n_states)
         return np.diag(veh_costs)
 
     def create_terminal_cost_matrix(self, cost):
         veh_costs = []
         for veh_id in self.sorted_vehicle_ids:
             veh = self.vehicles[veh_id]
-            if 'v' in veh.input_names or 'a' in veh.input_names:
-                veh_costs.extend([cost] * veh.n_states)
+            if veh.n_inputs > 0 or True:
+                if 'v' in veh.input_names or 'a' in veh.input_names:
+                    veh_costs.extend([cost] * veh.n_states)
+                else:
+                    veh_costs.extend([0, cost, cost, 0])
             else:
-                veh_costs.extend([0, cost, cost, 0])
+                veh_costs.extend([0.0] * veh.n_states)
         return np.diag(veh_costs)
 
     def compute_derivatives(self, t, states, inputs):
@@ -234,8 +241,8 @@ class VehicleGroupInterface:
                                                     leader_states))
         return np.array(dxdt)
 
-    def lane_changing_safety_constraint(self, states, inputs, lc_veh_id,
-                                        other_id, is_other_behind,
+    def lane_changing_safety_constraint(self, states, inputs, lc_veh_id: int,
+                                        other_id: int, is_other_behind: bool,
                                         make_smooth: bool = True):
         if other_id < 0:  # no risk
             return 0
@@ -254,8 +261,6 @@ class VehicleGroupInterface:
                                                            leader_states)
         phi = self.get_a_vehicle_input_by_id(lc_veh_id, inputs, 'phi')
         margin = 1e-1
-        # TODO: possible issue. If gap error becomes less than zero during
-        #  the maneuver, then phi is forced to zero.
         if make_smooth:
             return self.smooth_min_0(gap_error + margin) * phi
         else:

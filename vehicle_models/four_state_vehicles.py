@@ -170,7 +170,7 @@ class OptimalControlVehicle(FourStateVehicle):
             print("t={:.2f}, veh:{}. Calling ocp solver...".format(t, self._id))
             self.opt_controller.find_lane_change_trajectory(t, vehicles,
                                                             [self._id])
-        return self.opt_controller.has_solution()
+        return True  # self.opt_controller.has_solution()
 
     def is_lane_changing(self) -> bool:
         delta_t = self.get_current_time() - self._lc_start_time

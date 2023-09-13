@@ -240,11 +240,11 @@ class BaseVehicle(ABC):
         self._time = np.zeros(n_samples)
         self._states_history = np.zeros([self._n_states, n_samples])
         self._inputs_history = np.zeros([self._n_inputs, n_samples])
-        self._orig_leader_id = np.zeros(n_samples)
-        self._destination_leader_id = np.zeros(n_samples)
-        self._destination_follower_id = np.zeros(n_samples)
-        self._incoming_vehicle_id = np.zeros(n_samples)
-        self._leader_id = np.zeros(n_samples)
+        self._orig_leader_id = np.zeros(n_samples, dtype=int)
+        self._destination_leader_id = np.zeros(n_samples, dtype=int)
+        self._destination_follower_id = np.zeros(n_samples, dtype=int)
+        self._incoming_vehicle_id = np.zeros(n_samples, dtype=int)
+        self._leader_id = np.zeros(n_samples, dtype=int)
 
         self._time[self._iter_counter] = 0.0
         self._states_history[:, self._iter_counter] = self.initial_state

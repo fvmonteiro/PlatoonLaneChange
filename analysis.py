@@ -105,12 +105,16 @@ def compare_desired_and_actual_final_states(desired_data, simulated_data):
     fig.show()
 
 
-def plot_initial_and_final_states(data: pd.DataFrame, axis=None):
+def plot_initial_and_final_states(data: pd.DataFrame, axis=None,
+                                  custom_colors: bool = False):
     """
 
     :param data: Dataframe containing only initial and desired final state
      for each vehicle
     :param axis: Axis on which to do the plot [optional]
+    :param custom_colors: Whether to use the default colors (one per vehicle
+     and up to 10 vehicles) or our custom defined colors based on the vehicle's
+     name
     """
     if axis is None:
         fig, ax = plt.subplots()
@@ -118,12 +122,22 @@ def plot_initial_and_final_states(data: pd.DataFrame, axis=None):
         ax = axis
         fig = plt.gcf()
 
-    cmap = plt.get_cmap("tab10")
-    n_vehs = data['id'].nunique()
-    ax.scatter(data=data[data['t'] == data['t'].min()], x='x', y='y',
-               marker='>', c=cmap.colors[0:n_vehs])
-    ax.scatter(data=data[data['t'] == data['t'].max()], x='x', y='y',
-               marker='>', c=cmap.colors[0:n_vehs], alpha=0.6)
+    if not custom_colors:
+        cmap = plt.get_cmap("tab10")
+        n_vehs = data['id'].nunique()
+        ax.scatter(data=data[data['t'] == data['t'].min()], x='x', y='y',
+                   marker='>', c=cmap.colors[0:n_vehs])
+        ax.scatter(data=data[data['t'] == data['t'].max()], x='x', y='y',
+                   marker='>', c=cmap.colors[0:n_vehs], alpha=0.6)
+    else:
+        for veh_id in data['id'].unique():
+            veh_data = data[data['id'] == veh_id]
+            veh_name = veh_data['name'].iloc[0]
+            color = _get_color_by_name(veh_name)
+            ax.scatter(data=veh_data[veh_data['t'] == veh_data['t'].min()],
+                       x='x', y='y', marker='>', color=color)
+            ax.scatter(data=veh_data[veh_data['t'] == veh_data['t'].max()],
+                       x='x', y='y', marker='>', color=color, alpha=0.6)
     min_y = data['y'].min()
     max_y = data['y'].max()
     ax.axhline(y=const.LANE_WIDTH / 2, linestyle='--', color='black')
@@ -173,7 +187,8 @@ def plot_constrained_lane_change(data: pd.DataFrame,
             y_low, y_high = np.floor(y_low - 0.5), np.ceil(y_high + 0.5)
         ax[i + 1].set(xlabel=_get_variable_with_unit(x),
                       ylabel=_get_variable_with_unit(y),
-                      xlim=(0, x_high), ylim=(y_low, y_high))
+                      xlim=(0, x_high),
+                      ylim=(y_low, y_high))
     fig.tight_layout()
     fig.show()
 
@@ -257,3 +272,17 @@ def _get_variable_with_unit(variable: str):
         return variable + ' [' + const.UNIT_MAP[variable] + ']'
     except KeyError:
         return variable
+
+
+def _get_color_by_name(veh_name: str):
+    if veh_name == 'p1':
+        color = const.COLORS['dark_blue']
+    elif veh_name == 'ego' or veh_name.startswith('p'):
+        color = const.COLORS['blue']
+    elif veh_name in {'lo', 'lo1', 'ld', 'ld1', 'fd', 'fd1'}:
+        color = const.COLORS['red']
+    elif veh_name.startswith('ld') or veh_name.startswith('fd'):
+        color = const.COLORS['orange']
+    else:
+        color = const.COLORS['gray']
+    return color

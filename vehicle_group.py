@@ -133,6 +133,9 @@ class VehicleGroup:
         for veh_id, sequence in leader_sequence.items():
             self.vehicles[veh_id].set_ocp_leader_sequence(sequence)
 
+    def has_vehicle_with_name(self, veh_name: str):
+        return veh_name in self.name_to_id
+
     def map_values_to_names(self, values) -> Dict[str, Any]:
         """
         Receives variables ordered in the same order as the vehicles were
