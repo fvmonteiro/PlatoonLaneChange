@@ -90,8 +90,8 @@ def main():
     # run_no_lc_scenario()
     # run_base_scenario([1], max_iter=400)
     # run_constraints_scenario()
-    run_cbf_lc_scenario()
-    # run_internal_optimal_controller()
+    # run_cbf_lc_scenario()
+    run_internal_optimal_controller()
     # load_and_plot_latest_scenario()
 
     end_time = time.time()

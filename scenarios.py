@@ -99,7 +99,7 @@ class SimulationScenario(ABC):
         # We assume all vehicles have the same parameters, so all safe gaps are
         # the same
         sample_veh = self.vehicle_group.vehicles[0]
-        safe_gap = sample_veh.compute_safe_gap(v_ff['lo'])
+        safe_gap = sample_veh.compute_desired_gap(v_ff['lo'])
         # Initial states
         x_ego = 0
         y_ego = 0
@@ -121,7 +121,7 @@ class SimulationScenario(ABC):
         v_ff['ld'] = 1.0 * v_ff['lo']
         v_ff['fd'] = 1.0 * v_ff['lo']
         # Deviation from minimum safe gap
-        delta_x = {'lo': -0.0, 'ld': 1.0, 'fd': -0.0}
+        delta_x = {'lo': 0.0, 'ld': 0.0, 'fd': 0.0}
         self.create_base_lane_change_initial_state(
             v_ff, delta_x)
 
@@ -214,7 +214,7 @@ class LaneChangeScenario(SimulationScenario):
         self.vehicle_group.initialize_state_matrices(len(time))
         self.vehicle_group.update_surrounding_vehicles()
         for i in range(len(time) - 1):
-            if i == 0:
+            if i == 100:
                 self.vehicle_group.set_lane_change_direction_by_id(
                     self.lc_veh_id, 1)
             self.simulate_one_time_step(time[i+1])

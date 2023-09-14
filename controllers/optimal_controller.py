@@ -93,9 +93,9 @@ class VehicleOptimalController:
         uf = self._ocp_interface.get_desired_input()
 
         state_cost_matrix = self._ocp_interface.create_state_cost_matrix(
-            theta_cost=0.1)
+            y_cost=0.01, theta_cost=0)
 
-        input_cost_matrix = np.diag([0.1] * self._ocp_interface.n_inputs)
+        input_cost_matrix = np.diag([0.01] * self._ocp_interface.n_inputs)
         self._running_cost = opt.quadratic_cost(
             self._dynamic_system, state_cost_matrix, input_cost_matrix,
             self._ocp_desired_state, uf)
