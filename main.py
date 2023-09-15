@@ -80,6 +80,7 @@ def run_lane_change_scenario(scenario: scenarios.LaneChangeScenario):
     tf = 15
     scenario.run(tf)
     data = scenario.response_to_dataframe()
+    scenario.save_response_data(file_name)
     # analysis.plot_initial_and_final_states(data)
     analysis.plot_constrained_lane_change(data, 'ego')
 
@@ -130,8 +131,8 @@ def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
 
 def main():
 
-    has_lo, has_fo = False, False
-    has_ld, has_fd = False, True
+    has_lo, has_fo = False, True
+    has_ld, has_fd = False, False
 
     start_time = time.time()
 
@@ -140,13 +141,11 @@ def main():
     # run_base_opc_scenario(max_iter=400)
     # run_constraints_scenario(has_lo, has_fo, has_ld, has_fd)
     # run_cbf_lc_scenario(has_lo, has_fo, has_ld, has_fd)
-    # run_internal_optimal_controller(has_lo, has_fo, has_ld, has_fd)
-    run_mode_switch_test(has_lo, has_fo, has_ld, has_fd)
+    run_internal_optimal_controller(has_lo, has_fo, has_ld, has_fd)
+    # run_mode_switch_test(has_lo, has_fo, has_ld, has_fd)
     # run_platoon_base_test(n_orig, n_dest)
     # run_platoon_test(n_platoon=1, n_orig_ahead=0, n_orig_behind=1,
     #                  n_dest_ahead=0, n_dest_behind=0)
-    # 0.12622690233651648
-    # 0.12622690232372863
     # load_and_plot_latest_scenario()
 
     end_time = time.time()

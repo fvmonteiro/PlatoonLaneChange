@@ -73,7 +73,7 @@ class Platoon:
         if is_cool_down_period_done:
             self._solver_attempt_time = t
             print("t={:.2f}, veh:{}. Calling ocp solver...".format(t, self._id))
-            self._lc_controller.find_lane_change_trajectory(
+            self._lc_controller.find_multiple_vehicle_trajectory(
                 t, all_vehicles, [veh.get_id() for veh in self.vehicles]
             )
         self.trajectory_exists = True  # self._lc_controller.has_solution()

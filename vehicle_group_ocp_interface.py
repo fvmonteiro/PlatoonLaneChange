@@ -32,7 +32,14 @@ def vehicle_output(t, x, u, params):
 class VehicleGroupInterface:
     """ Class to help manage groups of vehicles """
 
-    def __init__(self, vehicles: Dict[int, base.BaseVehicle]):
+    def __init__(self, vehicles: Dict[int, base.BaseVehicle],
+                 ego_id: int = None):
+        """
+
+        :param vehicles: All simulation vehicles
+        :param ego_id: If given, assumes this vehicle as the center of
+         the system, i.e., its (x, y) = (0, 0)
+        """
         # TODO: make vehicles a  list?
         #  The order of vehicles must be fixed anyway
         self.vehicles: Dict[int, base.BaseVehicleInterface] = {}
@@ -48,7 +55,7 @@ class VehicleGroupInterface:
         # vector
         self.input_idx_map: Dict[int, int] = {}
 
-        self.create_vehicle_interfaces(vehicles)
+        self.create_vehicle_interfaces(vehicles, ego_id)
 
         # Sanity check:
         print("OCP leader sequences:")
@@ -64,11 +71,23 @@ class VehicleGroupInterface:
             print()
 
     def create_vehicle_interfaces(
-            self, vehicles: Dict[int, base.BaseVehicle]):
+            self, vehicles: Dict[int, base.BaseVehicle], ego_id: int = None
+    ) -> None:
+        """
+
+        :param vehicles: All simulation vehicles
+        :param ego_id: If given, assumes this vehicle as the center of
+         the system, i.e., its (x, y) = (0, 0)
+        :return:
+        """
+        if ego_id is None:
+            shift_map = {'x': 0., 'y': 0.}
+        else:
+            shift_map = {'x': vehicles[ego_id].get_x(),
+                         'y': vehicles[ego_id].get_y()}
+
         self.sorted_vehicle_ids = []
         for veh_id in sorted(vehicles.keys()):
-            # vehicle_interface = get_interface_for_vehicle(
-            #     vehicles[veh_id])
             vehicle_interface = vehicles[veh_id].get_ocp_interface()
             self.sorted_vehicle_ids.append(vehicle_interface.get_id())
             self.vehicles[veh_id] = vehicle_interface
@@ -103,7 +122,7 @@ class VehicleGroupInterface:
         """
         initial_state = []
         for veh_id in self.sorted_vehicle_ids:
-            initial_state.extend(self.vehicles[veh_id].initial_state)
+            initial_state.extend(self.vehicles[veh_id].get_initial_state())
         return np.array(initial_state)
 
     def get_state_indices(self, state_name: str) -> List[int]:
@@ -172,7 +191,7 @@ class VehicleGroupInterface:
         desired_state = []
         for veh_id in self.sorted_vehicle_ids:
             veh = self.vehicles[veh_id]
-            veh_states = veh.initial_state
+            veh_states = veh.get_initial_state()
             try:
                 vf = veh.select_state_from_vector(veh_states, 'v')
             except KeyError:  # three-state vehicles have v as an input
@@ -197,7 +216,7 @@ class VehicleGroupInterface:
         veh_costs = []
         for veh_id in self.sorted_vehicle_ids:
             veh = self.vehicles[veh_id]
-            if veh.n_inputs > 0 or True:
+            if veh.n_inputs > 0 or True:  # TODO: cost only for controlled vehs?
                 veh_costs.extend(self.vehicles[veh_id].create_state_vector(
                     x_cost, y_cost, theta_cost, v_cost))
             else:
@@ -208,7 +227,7 @@ class VehicleGroupInterface:
         veh_costs = []
         for veh_id in self.sorted_vehicle_ids:
             veh = self.vehicles[veh_id]
-            if veh.n_inputs > 0 or True:
+            if veh.n_inputs > 0 or True:  # TODO: cost only for controlled vehs?
                 if 'v' in veh.input_names or 'a' in veh.input_names:
                     veh_costs.extend([cost] * veh.n_states)
                 else:

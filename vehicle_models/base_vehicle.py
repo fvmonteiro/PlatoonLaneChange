@@ -567,7 +567,7 @@ class BaseVehicleInterface(ABC):
         self._leader_id = vehicle.get_current_leader_id()
         self.target_lane = vehicle.target_lane
         # The vehicle's current state is the starting point for the ocp
-        self.initial_state = vehicle.get_states()
+        self._initial_state = vehicle.get_states()
 
         # Only set for some vehicle types
         self.ocp_leader_switch_times: List[float] = []
@@ -585,6 +585,9 @@ class BaseVehicleInterface(ABC):
 
     def get_name(self) -> str:
         return self._name
+
+    def get_initial_state(self):
+        return self._initial_state
 
     def get_target_y(self) -> float:
         return self.target_lane * const.LANE_WIDTH
@@ -625,6 +628,15 @@ class BaseVehicleInterface(ABC):
         state_vector[self.state_idx['theta']] = theta
         self._set_speed(v, state_vector)
         return state_vector
+
+    def shift_initial_state(self, shift: Dict[str, float]):
+        """
+        Shifts the initial state based on the given values
+        :param shift: Dictionary with state name and shift value
+        :return:
+        """
+        for state_name, value in shift.items():
+            self._initial_state[self.state_idx[state_name]] += value
 
     def compute_safe_gap(self, v_ego):
         return self.safe_h * v_ego + self.c

@@ -168,8 +168,8 @@ class OptimalControlVehicle(FourStateVehicle):
         if has_vehicle_configuration_changed or is_cool_down_period_done:
             self._solver_attempt_time = t
             print("t={:.2f}, veh:{}. Calling ocp solver...".format(t, self._id))
-            self.opt_controller.find_lane_change_trajectory(t, vehicles,
-                                                            [self._id])
+            self.opt_controller.find_single_vehicle_trajectory(t, vehicles,
+                                                               self._id)
         return True  # self.opt_controller.has_solution()
 
     def is_lane_changing(self) -> bool:

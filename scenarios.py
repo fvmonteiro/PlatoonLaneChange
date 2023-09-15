@@ -81,7 +81,7 @@ class SimulationScenario(ABC):
         ref_gaps = self.vehicle_group.map_values_to_names(
             self.vehicle_group.get_initial_desired_gaps(v0)
         )
-        x_ego = max(ref_gaps.get('fd', 0), ref_gaps.get('fo', 0))
+        x_ego = 0  # max(ref_gaps.get('fd', 0), ref_gaps.get('fo', 0))
         x0 = [x_ego + ref_gaps['ego'] - delta_x['lo']] if has_lo else []
         x0.append(x_ego)
         x0.extend([x_ego - ref_gaps['fo']] if has_fo else [])
@@ -570,7 +570,7 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
     def solve(self, max_iter: int = 100):
         self.controller = opt_ctrl.VehicleOptimalController(self.tf)
         self.controller.set_max_iter(max_iter)
-        self.controller.find_lane_change_trajectory(
+        self.controller.find_multiple_vehicle_trajectory(
             0.0, self.vehicle_group.vehicles,
             [self.vehicle_group.get_vehicle_id_by_name('ego')])
         # return self.controller.ocp_result
