@@ -46,11 +46,13 @@ def run_base_opc_scenario(n_per_lane, max_iter=100):
     analysis.plot_lane_change(data)
 
 
-def run_constraints_scenario():
+def run_constraints_scenario(has_lo: bool, has_fo: bool,
+                             has_ld: bool, has_fd: bool):
     tf = 10
 
     # Set-up
-    scenario = scenarios.LaneChangeWithConstraints()
+    scenario = scenarios.LaneChangeWithConstraints(has_lo, has_fo, has_ld,
+                                                   has_fd)
     scenario.set_boundary_conditions(tf)
     # Solve
     print("Calling OCP solver")
@@ -105,9 +107,9 @@ def main():
 
     # run_no_lc_scenario()
     # run_base_scenario([1], max_iter=400)
-    # run_constraints_scenario()
+    run_constraints_scenario(has_lo, has_fo, has_ld, has_fd)
     # run_cbf_lc_scenario(has_lo, has_fo, has_ld, has_fd)
-    run_internal_optimal_controller(has_lo, has_fo, has_ld, has_fd)
+    # run_internal_optimal_controller(has_lo, has_fo, has_ld, has_fd)
     # load_and_plot_latest_scenario()
 
     end_time = time.time()

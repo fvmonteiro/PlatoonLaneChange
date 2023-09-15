@@ -20,9 +20,15 @@ class VehicleGroup:
         self.vehicles: Dict[int, base.BaseVehicle] = {}
         # Often, we need to iterate over all vehicles in the order they were
         # created. The list below makes that easy
-        self.sorted_vehicle_ids = None
+        self.sorted_vehicle_ids: List[int] = []
         self.n_vehs = 0
         self.name_to_id: Dict[str, int] = {}
+
+    def __str__(self):
+        veh_strings = []
+        for veh_id in self.sorted_vehicle_ids:
+            veh_strings.append(str(self.vehicles[veh_id]))
+        return ', '.join(veh_strings)
 
     def get_free_flow_speeds(self):
         v_ff = np.zeros(self.n_vehs)

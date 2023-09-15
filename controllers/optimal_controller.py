@@ -19,7 +19,7 @@ class VehicleOptimalController:
     _ocp_desired_state: np.ndarray
 
     _constraints = []
-    _ocp_solver_max_iter = 200
+    _ocp_solver_max_iter = 300
 
     def __init__(self, ocp_horizon: float):
         self._ocp_horizon: float = ocp_horizon

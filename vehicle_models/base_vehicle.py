@@ -71,7 +71,8 @@ class BaseVehicle(ABC):
         return self.__class__.__name__ + ' id=' + str(self.id)
 
     def __str__(self):
-        return self.__class__.__name__ + ": " + str(self.name)
+        return (self.__class__.__name__ + ' id=' + str(self.id)
+                + ' (' + str(self.name) + ')')
 
     @staticmethod
     def reset_vehicle_counter():

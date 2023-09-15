@@ -40,56 +40,6 @@ class SimulationScenario(ABC):
                              item in sublist]
         self.vehicle_group.create_vehicle_array(flat_vehicle_list)
 
-    def create_base_lane_change_initial_state(self, has_lo: bool, has_fo: bool,
-                                              has_ld: bool, has_fd: bool):
-        """
-        Creates an initial state for up to 5 vehicles: the lane changing one,
-        leader and follower at the origin lane, and leader and follower at the
-        destination lane
-        """
-        all_names = ['lo'] if has_lo else []
-        all_names.append('ego')
-        all_names.extend(['fo'] if has_fo else [])
-        all_names.extend(['ld'] if has_ld else [])
-        all_names.extend(['fd'] if has_fd else [])
-        self.vehicle_group.set_vehicle_names(all_names)
-
-        # Parameters:
-        # 1. Deviation from reference gap: positive values lead to
-        # smaller-than-desired initial gaps.
-        delta_x = {'lo': 0.0, 'ld': 0.0, 'fd': 0.0}
-        # 2. Free-flow speeds
-        v_ff = {'ego': 10, 'lo': 10}
-        v_ff['fo'] = v_ff['ego']
-        v_ff['ld'] = 1.0 * v_ff['lo']
-        v_ff['fd'] = 1.0 * v_ff['lo']
-
-        ordered_v_ff = [v_ff['lo']] if has_lo else []
-        ordered_v_ff.append(v_ff['ego'])
-        ordered_v_ff.extend([v_ff['fo']] if has_fo else [])
-        ordered_v_ff.extend([v_ff['ld']] if has_ld else [])
-        ordered_v_ff.extend([v_ff['fd']] if has_fd else [])
-        self.vehicle_group.set_free_flow_speeds(ordered_v_ff)
-
-        # Initial states
-        v_orig = ordered_v_ff[0]
-        v_dest = ordered_v_ff[-1]
-        n_orig, n_dest = self.n_per_lane[0], self.n_per_lane[1]
-        v0 = [v_orig] * n_orig + [v_dest] * n_dest
-        ref_gaps = self.vehicle_group.map_values_to_names(
-            self.vehicle_group.get_initial_desired_gaps(v0)
-        )
-        x_ego = max(ref_gaps.get('fd', 0), ref_gaps.get('fo', 0))
-        x0 = [x_ego + ref_gaps['ego'] - delta_x['lo']] if has_lo else []
-        x0.append(x_ego)
-        x0.extend([x_ego - ref_gaps['fo']] if has_fo else [])
-        x0.extend([x_ego + ref_gaps['ego'] - delta_x['ld']] if has_ld else [])
-        x0.extend([x_ego - ref_gaps['fd'] + delta_x['fd']] if has_fd else [])
-        y_orig, y_dest = 0, LANE_WIDTH
-        y0 = [y_orig] * n_orig + [y_dest] * n_dest
-        theta0 = [0.] * (n_orig + n_dest)
-        self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
-
     def set_free_flow_speeds(self,
                              free_flow_speeds: Union[float, List, np.ndarray]):
         self.vehicle_group.set_free_flow_speeds(free_flow_speeds)
@@ -131,6 +81,56 @@ class SimulationScenario(ABC):
         # self.initial_state =
         # self.vehicle_group.get_full_initial_state_vector()
 
+    def create_base_lane_change_initial_state(self, has_lo: bool, has_fo: bool,
+                                              has_ld: bool, has_fd: bool):
+        """
+        Creates an initial state for up to 5 vehicles: the lane changing one,
+        leader and follower at the origin lane, and leader and follower at the
+        destination lane
+        """
+        all_names = ['lo'] if has_lo else []
+        all_names.append('ego')
+        all_names.extend(['fo'] if has_fo else [])
+        all_names.extend(['ld'] if has_ld else [])
+        all_names.extend(['fd'] if has_fd else [])
+        self.vehicle_group.set_vehicle_names(all_names)
+
+        # Parameters:
+        # 1. Deviation from reference gap: positive values lead to
+        # smaller-than-desired initial gaps.
+        delta_x = {'lo': 0.0, 'ld': 0.0, 'fd': 0.0}
+        # 2. Free-flow speeds
+        v_ff = {'ego': 10, 'lo': 10}
+        v_ff['fo'] = v_ff['ego']
+        v_ff['ld'] = 1.0 * v_ff['lo']
+        v_ff['fd'] = 1.0 * v_ff['lo']
+
+        ordered_v_ff = [v_ff['lo']] if has_lo else []
+        ordered_v_ff.append(v_ff['ego'])
+        ordered_v_ff.extend([v_ff['fo']] if has_fo else [])
+        ordered_v_ff.extend([v_ff['ld']] if has_ld else [])
+        ordered_v_ff.extend([v_ff['fd']] if has_fd else [])
+        self.vehicle_group.set_free_flow_speeds(ordered_v_ff)
+
+        # Initial states
+        v_orig = ordered_v_ff[0]
+        v_dest = ordered_v_ff[-1]
+        n_orig, n_dest = self.n_per_lane[0], self.n_per_lane[1]
+        v0 = [v_orig] * n_orig + [v_dest] * n_dest
+        ref_gaps = self.vehicle_group.map_values_to_names(
+            self.vehicle_group.get_initial_desired_gaps(v0)
+        )
+        x_ego = 0  # max(ref_gaps.get('fd', 0), ref_gaps.get('fo', 0))
+        x0 = [x_ego + ref_gaps['ego'] - delta_x['lo']] if has_lo else []
+        x0.append(x_ego)
+        x0.extend([x_ego - ref_gaps['fo']] if has_fo else [])
+        x0.extend([x_ego + ref_gaps['ego'] - delta_x['ld']] if has_ld else [])
+        x0.extend([x_ego - ref_gaps['fd'] + delta_x['fd']] if has_fd else [])
+        y_orig, y_dest = 0, LANE_WIDTH
+        y0 = [y_orig] * n_orig + [y_dest] * n_dest
+        theta0 = [0.] * (n_orig + n_dest)
+        self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
+
     # TODO: [Sept 14] delete after tests
     def create_base_lane_change_initial_state_old(self, v_ff, delta_x):
         """
@@ -150,31 +150,35 @@ class SimulationScenario(ABC):
 
         # We assume all vehicles have the same parameters, so all safe gaps are
         # the same
-        sample_veh = self.vehicle_group.vehicles[0]
-        safe_gap = sample_veh.compute_desired_gap(v_ff['lo'])
+        v0 = [v_ff['lo'], v_ff['lo'], v_ff['lo'],
+              v_ff['lo'], v_ff['lo']]
+        ref_gaps = self.vehicle_group.map_values_to_names(
+            self.vehicle_group.get_initial_desired_gaps(v0)
+        )
         # Initial states
-        x_ego = 0
+        x_ego = 0  # max(ref_gaps.get('fd', 0), ref_gaps.get('fo', 0))
         y_ego = 0
-        x0 = [x_ego + safe_gap - delta_x['lo'], x_ego, x_ego - safe_gap,
-              x_ego + safe_gap - delta_x['ld'],
-              x_ego - safe_gap + delta_x['fd']]
+        x0 = [x_ego + ref_gaps['ego'] - delta_x['lo'],
+              x_ego,
+              x_ego - ref_gaps['fo'],
+              x_ego + ref_gaps['ego'] - delta_x['ld'],
+              x_ego - ref_gaps['fd'] + delta_x['fd']]
         y0 = [y_ego, y_ego, y_ego,
               target_y, target_y]
         theta0 = [0., 0., 0., 0., 0.]
-        v0 = [v_ff['lo'], v_ff['lo'], v_ff['lo'],
-              v_ff['lo'], v_ff['lo']]
+
         self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
         # self.initial_state =
         # self.vehicle_group.get_full_initial_state_vector()
 
     def test_scenario(self):
         # Free-flow speeds
-        v_ff = {'ego': 10, 'lo': 10}
+        v_ff = {'ego': 10., 'lo': 10.}
         v_ff['ld'] = 1.0 * v_ff['lo']
         v_ff['fd'] = 1.0 * v_ff['lo']
         # Deviation from minimum safe gap
         delta_x = {'lo': 0.0, 'ld': 0.0, 'fd': 0.0}
-        self.create_base_lane_change_initial_state(
+        self.create_base_lane_change_initial_state_old(
             v_ff, delta_x)
 
     def response_to_dataframe(self) -> pd.DataFrame:
@@ -311,7 +315,11 @@ class LaneChangeScenario(SimulationScenario):
         self.n_per_lane = [n_orig, n_dest]
         veh_classes = orig_veh_classes + (fsv.ClosedLoopVehicle,) * n_dest
         self.vehicle_group.create_vehicle_array(list(veh_classes))
+        self.create_base_lane_change_initial_state(has_lo, has_fo,
+                                                   has_ld, has_fd)
         self.create_initial_state()
+        print(self.vehicle_group)
+        print(self.vehicle_group.get_full_initial_state_vector())
 
     @classmethod
     def closed_loop(cls, has_lo: bool, has_fo: bool,
@@ -537,22 +545,35 @@ class LaneChangeWithConstraints(ExternalOptimalControlScenario):
     Used to test how to code safety constraints
     """
 
-    def __init__(self):
+    def __init__(self, has_lo: bool, has_fo: bool, has_ld: bool, has_fd: bool):
         super().__init__()
         self.lc_veh_id = 1  # lane changing vehicle
 
-        n_dest_lane_vehs = 2
-        veh_classes = (
-            [[fsv.ClosedLoopVehicle,
-              fsv.SafeAccelOpenLoopLCVehicle,  # lane changing veh
-              fsv.ClosedLoopVehicle],
-             [fsv.ClosedLoopVehicle] * n_dest_lane_vehs])
-        self.create_vehicle_group(veh_classes)
+        lc_veh_class = fsv.SafeAccelOpenLoopLCVehicle
+        self._has_lo, self._has_fo, self._has_ld, self._has_fd = (
+            has_lo, has_fo, has_ld, has_fd
+        )
+        orig_veh_classes = (lc_veh_class,)
+        if has_lo:
+            orig_veh_classes = (fsv.ClosedLoopVehicle,) + orig_veh_classes
+        if has_fo:
+            orig_veh_classes = orig_veh_classes + (fsv.ClosedLoopVehicle,)
 
+        n_orig = 1 + has_lo + has_fo
+        n_dest = has_ld + has_fd
+        self.n_per_lane = [n_orig, n_dest]
+        veh_classes = orig_veh_classes + (fsv.ClosedLoopVehicle,) * n_dest
+        self.vehicle_group.create_vehicle_array(list(veh_classes))
+        self.create_base_lane_change_initial_state(has_lo, has_fo,
+                                                   has_ld, has_fd)
+        self.create_initial_state()
+        print(self.vehicle_group)
+        print(self.vehicle_group.get_full_initial_state_vector())
         self.min_lc_x = 20  # only used for initial tests
 
     def create_initial_state(self):
-        self.test_scenario()
+        self.create_base_lane_change_initial_state(self._has_lo, self._has_fo,
+                                                   self._has_ld, self._has_fd)
 
     def set_desired_lane_changes(self):
         lc_vehicle = self.vehicle_group.vehicles[self.lc_veh_id]
