@@ -1,5 +1,5 @@
 import pickle
-from typing import List
+from typing import List, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -77,7 +77,7 @@ def compute_all_relative_values(data: pd.DataFrame):
 
 def check_constraint_satisfaction(data: pd.DataFrame, lc_id: int):
     compute_all_relative_values(data)
-    data['safe_gap'] = data['v'] + 1
+    data['safe_gap'] = compute_default_safe_gap(data['v'])
     data['gap_error'] = data['gap_to_orig_lane_leader'] - data['safe_gap']
     data['constraint'] = np.minimum(data['gap_error'], 0) * data['phi']
     plot_scenario_results(['t', 't', 't'], ['constraint', 'phi', 'gap_error'],
@@ -91,7 +91,7 @@ def load_simulated_scenario(pickle_file_name: str):
 
 
 def compute_default_safe_gap(vel):
-    return const.safe_time_headway * vel + const.standstill_distance
+    return const.SAFE_LC_TIME_HEADWAY * vel + const.STANDSTILL_DISTANCE
 
 
 def compare_desired_and_actual_final_states(desired_data, simulated_data):
@@ -111,6 +111,7 @@ def plot_initial_and_final_states(data: pd.DataFrame, axis=None):
 
     :param data: Dataframe containing only initial and desired final state
      for each vehicle
+    :param axis: Axis on which to do the plot [optional]
     """
     if axis is None:
         fig, ax = plt.subplots()
@@ -150,43 +151,18 @@ def plot_lane_change(data: pd.DataFrame):
     plot_scenario_results(x_axes, y_axes, data)
 
 
-def plot_constrained_lane_change(data: pd.DataFrame, lc_veh_id: int):
+def plot_constrained_lane_change(data: pd.DataFrame,
+                                 lc_veh_id_or_name: Union[int, str]):
     compute_all_relative_values(data)
 
     sns.set_style('whitegrid')
-    x_axes = ['x', 't', 't']
+    x_axes = ['t', 't', 't']
     y_axes = ['y', 'v', 'phi']
-
-    lc_vehicle_data = data[data['id'] == lc_veh_id]
 
     fig, ax = plt.subplots(len(y_axes) + 1)
     fig.set_size_inches(9, 6)
-    ego_safe_gap = compute_default_safe_gap(lc_vehicle_data['v'].to_numpy())
 
-    gap = lc_vehicle_data['gap_to_orig_lane_leader'].to_numpy()
-    orig_lane_error = gap - ego_safe_gap
-    ax[0].plot(lc_vehicle_data['t'], orig_lane_error, label='ego to lo')
-
-    gap = lc_vehicle_data['gap_to_dest_lane_leader'].to_numpy()
-    dest_lane_error = gap - ego_safe_gap
-    ax[0].plot(lc_vehicle_data['t'], dest_lane_error, label='ego to ld')
-
-    dest_follower_ids = lc_vehicle_data['dest_lane_follower_id'].unique()
-    dest_follower_id = [veh_id for veh_id in dest_follower_ids if veh_id >= 0]
-    if len(dest_follower_id) > 1:
-        print("Hey! Time to deal with multiple dest lane followers")
-    follower_data = data[data['id'] == dest_follower_id[0]]
-    foll_safe_gap = compute_default_safe_gap(follower_data['v'].to_numpy())
-    gap = lc_vehicle_data['gap_to_dest_lane_follower'].to_numpy()
-    dest_lane_error = gap - foll_safe_gap
-    ax[0].plot(lc_vehicle_data['t'], dest_lane_error, label='fd to ego')
-
-    ax[0].legend()
-    low, high = ax[0].get_ylim()
-    low, high = max(low, -2), min(high, 2)
-    ax[0].set(xlabel=_get_variable_with_unit('t'),
-              ylabel=_get_variable_with_unit('gap_error'),
-              ylim=(low, high))
+    plot_gap_errors(data, lc_veh_id_or_name, ax[0])
 
     for i, (x, y) in enumerate(zip(x_axes, y_axes)):
         show_legend = True if i == len(x_axes) - 1 else False
@@ -200,6 +176,44 @@ def plot_constrained_lane_change(data: pd.DataFrame, lc_veh_id: int):
                       ylim=(low, high))
     fig.tight_layout()
     fig.show()
+
+
+def plot_gap_errors(data: pd.DataFrame,
+                    veh_id_or_name: Union[int, str], ax=None):
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    if isinstance(veh_id_or_name, str):
+        lc_vehicle_data = data[data['name'] == veh_id_or_name]
+    else:
+        lc_vehicle_data = data[data['id'] == veh_id_or_name]
+    ego_safe_gap = compute_default_safe_gap(lc_vehicle_data['v'].to_numpy())
+
+    gap = lc_vehicle_data['gap_to_orig_lane_leader'].to_numpy()
+    orig_lane_error = gap - ego_safe_gap
+    ax.plot(lc_vehicle_data['t'], orig_lane_error, label='ego to lo')
+
+    gap = lc_vehicle_data['gap_to_dest_lane_leader'].to_numpy()
+    dest_lane_error = gap - ego_safe_gap
+    ax.plot(lc_vehicle_data['t'], dest_lane_error, label='ego to ld')
+
+    dest_follower_ids = lc_vehicle_data['dest_lane_follower_id'].unique()
+    dest_follower_id = [veh_id for veh_id in dest_follower_ids if veh_id >= 0]
+    if len(dest_follower_id) > 1:
+        print("Hey! Time to deal with multiple dest lane followers")
+    if len(dest_follower_id) > 0:
+        follower_data = data[data['id'] == dest_follower_id[0]]
+        foll_safe_gap = compute_default_safe_gap(follower_data['v'].to_numpy())
+        gap = lc_vehicle_data['gap_to_dest_lane_follower'].to_numpy()
+        dest_lane_error = gap - foll_safe_gap
+        ax.plot(lc_vehicle_data['t'], dest_lane_error, label='fd to ego')
+
+    ax.legend()
+    low, high = ax.get_ylim()
+    # low, high = max(low, -2), min(high, 2)
+    ax.set(xlabel=_get_variable_with_unit('t'),
+           ylabel=_get_variable_with_unit('gap_error'),
+           ylim=(low, high))
 
 
 def plot_vehicle_following(data: pd.DataFrame):
@@ -239,6 +253,6 @@ def plot_scenario_results(x_axes: List[str], y_axes: List[str],
 
 def _get_variable_with_unit(variable: str):
     try:
-        return variable + ' [' + const.units[variable] + ']'
+        return variable + ' [' + const.UNIT_MAP[variable] + ']'
     except KeyError:
         return variable

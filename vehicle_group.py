@@ -1,4 +1,4 @@
-from typing import Dict, Iterable, List, Type, Union
+from typing import Any, Dict, Iterable, List, Type, Union
 
 import numpy as np
 import pandas as pd
@@ -54,10 +54,15 @@ class VehicleGroup:
     def get_vehicle_by_name(self, name: str) -> base.BaseVehicle:
         return self.vehicles[self.name_to_id[name]]
 
-    def get_free_flow_desired_gaps(self):
+    def get_initial_desired_gaps(self, v_ref: List[float] = None):
         gaps = []
         for veh_id in self.sorted_vehicle_ids:
-            gaps.append(self.vehicles[veh_id].free_flow_speed)
+            if v_ref is None:
+                v = self.vehicles[veh_id].free_flow_speed
+            else:
+                v = v_ref[veh_id]
+            gaps.append(self.vehicles[veh_id].compute_desired_gap(v))
+        return gaps
 
     def set_a_vehicle_free_flow_speed(self, veh_id, v_ff):
         self.vehicles[veh_id].set_free_flow_speed(v_ff)
@@ -75,7 +80,12 @@ class VehicleGroup:
             vehicle.set_initial_state(x0[veh_id], y0[veh_id],
                                       theta0[veh_id], v0[veh_id])
 
-    def set_lane_change_direction_by_id(self, veh_id: int, lc_direction: int):
+    def set_single_vehicle_lane_change_direction(
+            self, veh_id_or_name: Union[int, str], lc_direction: int):
+        if isinstance(veh_id_or_name, str):
+            veh_id = self.name_to_id[veh_id_or_name]
+        else:
+            veh_id = veh_id_or_name
         self.vehicles[veh_id].set_lane_change_direction(lc_direction)
 
     def set_vehicle_names(self, names: List[str]):
@@ -83,6 +93,17 @@ class VehicleGroup:
             vehicle = self.vehicles[veh_id]
             vehicle.name = names[veh_id]
             self.name_to_id[names[veh_id]] = veh_id
+
+    def map_values_to_names(self, values) -> Dict[str, Any]:
+        """
+        Receives variables ordered in the same order as the vehicles were
+        created and returns the variables in a dictionary with vehicle names as
+        keys
+        """
+        d = {}
+        for veh_id in self.sorted_vehicle_ids:
+            d[self.vehicles[veh_id].name] = values[veh_id]
+        return d
 
     def initialize_state_matrices(self, n_samples: int):
         for vehicle in self.vehicles.values():
@@ -92,7 +113,8 @@ class VehicleGroup:
         for vehicle in self.vehicles.values():
             vehicle.make_connected()
 
-    def create_vehicle_array(self, vehicle_classes: List[Type[base.BaseVehicle]]):
+    def create_vehicle_array(self,
+                             vehicle_classes: List[Type[base.BaseVehicle]]):
         """
 
         Populates the list of vehicles following the given classes

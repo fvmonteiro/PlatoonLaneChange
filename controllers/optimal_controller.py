@@ -7,7 +7,7 @@ import control as ct
 import control.optimal as opt
 import control.flatsys as flat
 import numpy as np
-from scipy.optimize import NonlinearConstraint
+from scipy.optimize import LinearConstraint, NonlinearConstraint
 
 import vehicle_models.base_vehicle as base
 import vehicle_group_ocp_interface as vgi
@@ -21,8 +21,8 @@ class VehicleOptimalController:
     _constraints = []
     _ocp_solver_max_iter = 200
 
-    def __init__(self, ocp_horizon):
-        self._ocp_horizon = ocp_horizon
+    def __init__(self, ocp_horizon: float):
+        self._ocp_horizon: float = ocp_horizon
         self._terminal_constraints = None
         self._start_time = -np.inf
 
@@ -78,7 +78,8 @@ class VehicleOptimalController:
             return current_inputs
 
     def _set_ocp_dynamics(self):
-        params = {'vehicle_group': self._ocp_interface}
+        params = {'vehicle_group': self._ocp_interface,
+                  'mode_sequence': []}  # based on future commits, won't be used
         input_names = self._ocp_interface.create_input_names()
         output_names = self._ocp_interface.create_output_names()
         n_states = self._ocp_interface.n_states
@@ -118,6 +119,14 @@ class VehicleOptimalController:
         # Safety constraints
         epsilon = 1e-10
         for veh in lc_vehicles:
+            # TODO: [Sept 14] tests indicate this constraint reduces the number
+            #  of iterations required for convergence. We're keeping it out for
+            #  now while investigating other sources of change
+            # d = np.zeros(self._ocp_interface.n_states
+            #              + self._ocp_interface.n_inputs)
+            # d[self._ocp_interface.get_a_vehicle_state_index(veh.id, 'y')] = 1
+            # stay_in_lane = LinearConstraint(d, lb=-1, ub=5)
+            # self._constraints.append(stay_in_lane)
             if veh.has_orig_lane_leader():
                 orig_lane_safety = NonlinearConstraint(
                     partial(
@@ -151,6 +160,10 @@ class VehicleOptimalController:
         u0 = self._ocp_interface.get_desired_input()
         n_ctrl_pts = min(round(self._ocp_horizon), 10)  # empirical
         time_pts = np.linspace(0, self._ocp_horizon, n_ctrl_pts, endpoint=True)
+        # Let's keep at most 10 control points for now [Sept 14]
+        # time_pts = np.linspace(0, self._ocp_horizon,
+        #                        int(round(self._ocp_horizon)) + 1,
+        #                        endpoint=True)
         result = opt.solve_ocp(
             self._dynamic_system, time_pts, self._ocp_initial_state,
             cost=self._running_cost,

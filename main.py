@@ -7,11 +7,27 @@ import scenarios
 file_name = 'data.pickle'  # temp
 
 
-def run_base_scenario(n_per_lane, max_iter=100):
+def run_no_lc_scenario():
+    tf = 10
+    scenario = scenarios.VehicleFollowingScenario(2)
+    scenario.create_initial_state()
+    scenario.run(tf)
+    analysis.plot_vehicle_following(scenario.response_to_dataframe())
+
+
+def run_fast_lane_change():
+    tf = 5
+    scenario = scenarios.FastLaneChange()
+    scenario.run(tf)
+    data = scenario.response_to_dataframe()
+    analysis.plot_lane_change(data)
+
+
+def run_base_opc_scenario(n_per_lane, max_iter=100):
     v_ff = 10
     tf = 10
 
-    base_scenario = scenarios.ExampleScenarioExternal()
+    scenario = scenarios.ExampleScenarioExternal()
     # vehicles = [
     #     [vehicle_models.three_state_vehicles.ThreeStateVehicleRearWheel],
     #     [vehicle_models.three_state_vehicles.ThreeStateVehicleRearWheel]
@@ -20,22 +36,14 @@ def run_base_scenario(n_per_lane, max_iter=100):
         [vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle,
          vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle]
     ]
-    base_scenario.create_vehicle_group(vehicles)
-    base_scenario.set_free_flow_speeds(v_ff)
-    base_scenario.set_boundary_conditions(tf)
-    result = base_scenario.solve(max_iter)
-    base_scenario.run(result)
-    base_scenario.save_response_data(file_name)
-    data = base_scenario.response_to_dataframe()
+    scenario.create_vehicle_group(vehicles)
+    scenario.set_free_flow_speeds(v_ff)
+    scenario.set_boundary_conditions(tf)
+    result = scenario.solve(max_iter)
+    scenario.run(result)
+    scenario.save_response_data(file_name)
+    data = scenario.response_to_dataframe()
     analysis.plot_lane_change(data)
-
-
-def run_no_lc_scenario():
-    tf = 10
-    scenario = scenarios.VehicleFollowingScenario(2)
-    scenario.create_initial_state()
-    scenario.run(tf)
-    analysis.plot_vehicle_following(scenario.response_to_dataframe())
 
 
 def run_constraints_scenario():
@@ -66,32 +74,40 @@ def load_and_plot_latest_scenario():
     # analysis.check_constraint_satisfaction(data, 1)
 
 
-def run_cbf_lc_scenario():
+def run_lane_change_scenario(scenario: scenarios.LaneChangeScenario):
     tf = 15
-    scenario = scenarios.LaneChangeScenario.closed_loop()
     scenario.run(tf)
     data = scenario.response_to_dataframe()
+    scenario.save_response_data(file_name)
     analysis.plot_initial_and_final_states(data)
-    analysis.plot_constrained_lane_change(data, scenario.lc_veh_id)
+    analysis.plot_constrained_lane_change(data, 'ego')
 
 
-def run_internal_optimal_controller():
-    tf = 15
-    scenario = scenarios.LaneChangeScenario.optimal_control()
-    scenario.run(tf)
-    data = scenario.response_to_dataframe()
-    analysis.plot_initial_and_final_states(data)
-    analysis.plot_constrained_lane_change(data, scenario.lc_veh_id)
+def run_cbf_lc_scenario(has_lo: bool, has_fo: bool,
+                        has_ld: bool, has_fd: bool):
+    scenario = scenarios.LaneChangeScenario.closed_loop(has_lo, has_fo,
+                                                        has_ld, has_fd)
+    run_lane_change_scenario(scenario)
+
+
+def run_internal_optimal_controller(has_lo: bool, has_fo: bool,
+                                    has_ld: bool, has_fd: bool):
+    scenario = scenarios.LaneChangeScenario.optimal_control(has_lo, has_fo,
+                                                            has_ld, has_fd)
+    run_lane_change_scenario(scenario)
 
 
 def main():
+    has_lo, has_fo = True, True
+    has_ld, has_fd = True, True
+
     start_time = time.time()
 
     # run_no_lc_scenario()
     # run_base_scenario([1], max_iter=400)
     # run_constraints_scenario()
-    # run_cbf_lc_scenario()
-    run_internal_optimal_controller()
+    # run_cbf_lc_scenario(has_lo, has_fo, has_ld, has_fd)
+    run_internal_optimal_controller(has_lo, has_fo, has_ld, has_fd)
     # load_and_plot_latest_scenario()
 
     end_time = time.time()

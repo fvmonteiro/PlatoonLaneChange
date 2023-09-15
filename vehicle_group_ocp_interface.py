@@ -9,6 +9,7 @@ import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
 import vehicle_models.three_state_vehicles as tsv
 import vehicle_ocp_interface as vi
+import system_operating_mode
 
 
 # ========= Functions passed to the optimal control library methods ========== #
@@ -68,7 +69,9 @@ class VehicleGroupInterface:
         self.input_idx_map: Dict[int, int] = {}
 
         self.create_vehicle_interfaces(vehicles)
-        # self.mode = vehicle_group.mode
+
+        # Sanity check:
+        print("OPC mode:", system_operating_mode.SystemMode(vehicles))
 
     def create_vehicle_interfaces(
             self, vehicles: Dict[int, base.BaseVehicle]):
@@ -113,12 +116,22 @@ class VehicleGroupInterface:
         return np.array(initial_state)
 
     def get_state_indices(self, state_name: str) -> List[int]:
+        """
+        Get all the indices for a certain state within the full state vector
+        """
         state_indices = []
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
             state_indices.append(self.state_idx_map[vehicle.id]
                                  + vehicle.state_idx[state_name])
         return state_indices
+
+    def get_a_vehicle_state_index(self, veh_id: int, state_name: str) -> int:
+        """
+        Get the index of a state for a vehicle within the full state vector
+        """
+        return (self.state_idx_map[veh_id]
+                + self.vehicles[veh_id].state_idx[state_name])
 
     def get_vehicle_state_vector_by_id(self, veh_id, states):
         start_idx = self.state_idx_map[veh_id]
@@ -179,8 +192,8 @@ class VehicleGroupInterface:
             desired_state.extend(veh.create_state_vector(xf, yf, thetaf, vf))
         return np.array(desired_state)
 
-    def create_state_cost_matrix(self, x_cost=0, y_cost=0,
-                                 theta_cost=0, v_cost=0):
+    def create_state_cost_matrix(self, x_cost: float = 0, y_cost: float = 0,
+                                 theta_cost: float = 0, v_cost: float = 0):
         """
         Creates a diagonal cost function where each state of all vehicles gets
         the same weight
@@ -245,12 +258,11 @@ class VehicleGroupInterface:
         leader_states = (
             self.get_vehicle_state_vector_by_id(
                 leader_id, states))
-        gap_error = follower_veh.compute_gap_error(follower_states,
-                                                   leader_states)
-        phi = self.get_a_vehicle_input_by_id(
-            lc_veh_id, inputs, 'phi')
+        gap_error = follower_veh.compute_error_to_safe_gap(follower_states,
+                                                           leader_states)
+        phi = self.get_a_vehicle_input_by_id(lc_veh_id, inputs, 'phi')
         margin = 1e-1
-        # TODO: possible issue. When gap error becomes less than zero during
+        # TODO: possible issue. If gap error becomes less than zero during
         #  the maneuver, then phi is forced to zero.
         if make_smooth:
             return self.smooth_min_0(gap_error + margin) * phi

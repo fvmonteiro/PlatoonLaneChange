@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 import controllers.optimal_controller as opt_ctrl
-from constants import lane_width
+from constants import LANE_WIDTH
 import platoon
 from vehicle_group import VehicleGroup
 from vehicle_models.base_vehicle import BaseVehicle
@@ -17,8 +17,8 @@ import vehicle_models.four_state_vehicles as fsv
 
 class SimulationScenario(ABC):
     def __init__(self):
-        self.n_per_lane = []
-        self.vehicle_group = VehicleGroup()
+        self.n_per_lane: List[int] = []
+        self.vehicle_group: VehicleGroup = VehicleGroup()
         BaseVehicle.reset_vehicle_counter()
         # Simulation parameters
         self.tf = None
@@ -32,12 +32,63 @@ class SimulationScenario(ABC):
             [vehicle_class] * sum(n_per_lane))
         self.vehicle_group.set_free_flow_speeds(free_flow_speed)
 
-    def create_vehicle_group(self, vehicle_classes: List[List[Type[BaseVehicle]]]):
+    def create_vehicle_group(self,
+                             vehicle_classes: List[List[Type[BaseVehicle]]]):
         for i in range(len(vehicle_classes)):
             self.n_per_lane.append(len(vehicle_classes[i]))
         flat_vehicle_list = [item for sublist in vehicle_classes for
                              item in sublist]
         self.vehicle_group.create_vehicle_array(flat_vehicle_list)
+
+    def create_base_lane_change_initial_state(self, has_lo: bool, has_fo: bool,
+                                              has_ld: bool, has_fd: bool):
+        """
+        Creates an initial state for up to 5 vehicles: the lane changing one,
+        leader and follower at the origin lane, and leader and follower at the
+        destination lane
+        """
+        all_names = ['lo'] if has_lo else []
+        all_names.append('ego')
+        all_names.extend(['fo'] if has_fo else [])
+        all_names.extend(['ld'] if has_ld else [])
+        all_names.extend(['fd'] if has_fd else [])
+        self.vehicle_group.set_vehicle_names(all_names)
+
+        # Parameters:
+        # 1. Deviation from reference gap: positive values lead to
+        # smaller-than-desired initial gaps.
+        delta_x = {'lo': 0.0, 'ld': 0.0, 'fd': 0.0}
+        # 2. Free-flow speeds
+        v_ff = {'ego': 10, 'lo': 10}
+        v_ff['fo'] = v_ff['ego']
+        v_ff['ld'] = 1.0 * v_ff['lo']
+        v_ff['fd'] = 1.0 * v_ff['lo']
+
+        ordered_v_ff = [v_ff['lo']] if has_lo else []
+        ordered_v_ff.append(v_ff['ego'])
+        ordered_v_ff.extend([v_ff['fo']] if has_fo else [])
+        ordered_v_ff.extend([v_ff['ld']] if has_ld else [])
+        ordered_v_ff.extend([v_ff['fd']] if has_fd else [])
+        self.vehicle_group.set_free_flow_speeds(ordered_v_ff)
+
+        # Initial states
+        v_orig = ordered_v_ff[0]
+        v_dest = ordered_v_ff[-1]
+        n_orig, n_dest = self.n_per_lane[0], self.n_per_lane[1]
+        v0 = [v_orig] * n_orig + [v_dest] * n_dest
+        ref_gaps = self.vehicle_group.map_values_to_names(
+            self.vehicle_group.get_initial_desired_gaps(v0)
+        )
+        x_ego = max(ref_gaps.get('fd', 0), ref_gaps.get('fo', 0))
+        x0 = [x_ego + ref_gaps['ego'] - delta_x['lo']] if has_lo else []
+        x0.append(x_ego)
+        x0.extend([x_ego - ref_gaps['fo']] if has_fo else [])
+        x0.extend([x_ego + ref_gaps['ego'] - delta_x['ld']] if has_ld else [])
+        x0.extend([x_ego - ref_gaps['fd'] + delta_x['fd']] if has_fd else [])
+        y_orig, y_dest = 0, LANE_WIDTH
+        y0 = [y_orig] * n_orig + [y_dest] * n_dest
+        theta0 = [0.] * (n_orig + n_dest)
+        self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
 
     def set_free_flow_speeds(self,
                              free_flow_speeds: Union[float, List, np.ndarray]):
@@ -69,7 +120,7 @@ class SimulationScenario(ABC):
             gap = self.vehicle_group.vehicles[0].free_flow_speed + 1
         x0, y0, theta0, v0 = [], [], [], []
         for lane in range(len(self.n_per_lane)):
-            lane_center = lane * lane_width
+            lane_center = lane * LANE_WIDTH
             n = self.n_per_lane[lane]
             for i in range(n):
                 x0.append(gap * (n - i - 1))
@@ -80,7 +131,8 @@ class SimulationScenario(ABC):
         # self.initial_state =
         # self.vehicle_group.get_full_initial_state_vector()
 
-    def create_base_lane_change_initial_state(self, v_ff, delta_x):
+    # TODO: [Sept 14] delete after tests
+    def create_base_lane_change_initial_state_old(self, v_ff, delta_x):
         """
         Creates an initial state for 5 vehicles: 3 at the origin lane, with
         the lane changing one between other two, and 2 at the destination lane.
@@ -91,7 +143,7 @@ class SimulationScenario(ABC):
         # TODO: how to ensure proper vehicle 'sync' between creates vehicles
         #  and the initial states
         self.vehicle_group.set_vehicle_names(['lo', 'ego', 'fo', 'ld', 'fd'])
-        target_y = lane_width
+        target_y = LANE_WIDTH
         ordered_v_ff = [v_ff['lo'], v_ff['ego'], v_ff['ego'],
                         v_ff['ld'], v_ff['fd']]
         self.set_free_flow_speeds(ordered_v_ff)
@@ -128,9 +180,11 @@ class SimulationScenario(ABC):
     def response_to_dataframe(self) -> pd.DataFrame:
         return self.vehicle_group.to_dataframe()
 
-    def simulate_one_time_step(self, new_time):
+    def simulate_one_time_step(self, new_time, open_loop_controls=None):
+        if open_loop_controls is None:
+            open_loop_controls = {}
         self.vehicle_group.update_vehicle_modes()
-        self.vehicle_group.determine_inputs({})
+        self.vehicle_group.determine_inputs(open_loop_controls)
         self.vehicle_group.compute_derivatives()
         self.vehicle_group.update_states(new_time)
         self.vehicle_group.update_surrounding_vehicles()
@@ -182,29 +236,127 @@ class VehicleFollowingScenario(SimulationScenario):
             self.simulate_one_time_step(time[i+1])
 
 
+class FastLaneChange(SimulationScenario):
+
+    def __init__(self):
+        super().__init__()
+        vehicle_classes = ([[fsv.SafeAccelOpenLoopLCVehicle]])
+        self.create_vehicle_group(vehicle_classes)
+        self.create_initial_state()
+
+    def create_initial_state(self):
+        v_ff = 10
+        self.set_free_flow_speeds(v_ff)
+
+        # Initial states
+        x0 = [0.]
+        y0 = [0.]
+        theta0 = [0.]
+        v0 = [v_ff]
+        self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
+
+    def run(self, final_time):
+        """
+
+        :param final_time: Total simulation time
+        :return:
+        """
+        self.tf = final_time
+        dt = 1e-2
+        time = np.arange(0, self.tf, dt)
+        ego = self.vehicle_group.vehicles[0]
+        inputs = {}
+        self.vehicle_group.initialize_state_matrices(len(time))
+        self.vehicle_group.update_surrounding_vehicles()
+        t_c = 1.08
+        for i in range(len(time) - 1):
+            if time[i] <= t_c:  # ego.get_y() <= 2 * LANE_WIDTH / 3:
+                phi = ego.phi_max
+            elif time[i] <= 2 * t_c:  # np.abs(ego.get_theta()) >= 1e-4:
+                phi = -ego.phi_max
+            else:
+                phi = 0
+            inputs[ego.id] = np.array([phi])
+            self.simulate_one_time_step(time[i+1], inputs)
+
+
 class LaneChangeScenario(SimulationScenario):
 
-    def __init__(self, lc_veh_class: Type[BaseVehicle]):
-        super().__init__()
-        self.lc_veh_id = 1  # lane changing vehicle
+    def __init__(self, lc_veh_class: Type[BaseVehicle], has_lo: bool,
+                 has_fo: bool, has_ld: bool, has_fd: bool):
+        """
 
-        n_dest_lane_vehs = 2
-        veh_classes = (
-            [[fsv.ClosedLoopVehicle, lc_veh_class, fsv.ClosedLoopVehicle],
-             [fsv.ClosedLoopVehicle] * n_dest_lane_vehs])
-        self.create_vehicle_group(veh_classes)
+        :param lc_veh_class:
+        :param has_lo: if True, includes the origin lane leader
+        :param has_fo: if True, includes the origin lane follower
+        :param has_ld: if True, includes the destination lane leader
+        :param has_fd: if True, includes the destination lane follower
+        """
+        super().__init__()
+
+        self.lc_intention_time = 1.0
+
+        # self.leader_sequence = dict()  # used when iterating over the OCP
+        self._has_lo, self._has_fo, self._has_ld, self._has_fd = (
+            has_lo, has_fo, has_ld, has_fd
+        )
+        orig_veh_classes = (lc_veh_class,)
+        if has_lo:
+            orig_veh_classes = (fsv.ClosedLoopVehicle,) + orig_veh_classes
+        if has_fo:
+            orig_veh_classes = orig_veh_classes + (fsv.ClosedLoopVehicle,)
+
+        n_orig = 1 + has_lo + has_fo
+        n_dest = has_ld + has_fd
+        self.n_per_lane = [n_orig, n_dest]
+        veh_classes = orig_veh_classes + (fsv.ClosedLoopVehicle,) * n_dest
+        self.vehicle_group.create_vehicle_array(list(veh_classes))
         self.create_initial_state()
 
     @classmethod
-    def closed_loop(cls):
-        return cls(fsv.ClosedLoopVehicle)
+    def closed_loop(cls, has_lo: bool, has_fo: bool,
+                    has_ld: bool, has_fd: bool):
+        """
+        Creates a scenario instance where all vehicles have longitudinal and
+        lateral feedback controllers.
+        :param has_lo: if True, includes the origin lane leader
+        :param has_fo: if True, includes the origin lane follower
+        :param has_ld: if True, includes the destination lane leader
+        :param has_fd: if True, includes the destination lane follower
+        """
+        return cls(fsv.ClosedLoopVehicle, has_lo, has_fo, has_ld, has_fd)
 
     @classmethod
-    def optimal_control(cls):
-        return cls(fsv.SafeAccelOptimalLCVehicle)
+    def optimal_control(cls, has_lo: bool, has_fo: bool,
+                        has_ld: bool, has_fd: bool):
+        """
+
+        :param has_lo: if True, includes the origin lane leader
+        :param has_fo: if True, includes the origin lane follower
+        :param has_ld: if True, includes the destination lane leader
+        :param has_fd: if True, includes the destination lane follower
+        :return:
+        """
+        return cls(fsv.SafeAccelOptimalLCVehicle,
+                   has_lo, has_fo, has_ld, has_fd)
+
+    @classmethod
+    def platoon_lane_change(cls, has_lo: bool, has_fo: bool,
+                            has_ld: bool, has_fd: bool):
+        """
+        Only tests platoons with a single vehicle. Used for initial tests.
+        :param has_lo: if True, includes the origin lane leader
+        :param has_fo: if True, includes the origin lane follower
+        :param has_ld: if True, includes the destination lane leader
+        :param has_fd: if True, includes the destination lane follower
+        """
+        scenario = cls(fsv.PlatoonVehicle, has_lo, has_fo, has_ld, has_fd)
+        return scenario
 
     def create_initial_state(self):
-        self.test_scenario()
+        self.create_base_lane_change_initial_state(self._has_lo, self._has_fo,
+                                                   self._has_ld, self._has_fd)
+        # self.test_scenario()
         # self.vehicle_group.make_all_connected()
 
     def run(self, final_time):
@@ -215,8 +367,8 @@ class LaneChangeScenario(SimulationScenario):
         self.vehicle_group.update_surrounding_vehicles()
         for i in range(len(time) - 1):
             if i == 100:
-                self.vehicle_group.set_lane_change_direction_by_id(
-                    self.lc_veh_id, 1)
+                self.vehicle_group.set_single_vehicle_lane_change_direction(
+                    'ego', 1)
             self.simulate_one_time_step(time[i+1])
 
 
@@ -262,7 +414,7 @@ class PlatoonLaneChangeScenario(SimulationScenario):
         self.vehicle_group.update_surrounding_vehicles()
         for i in range(len(time) - 1):
             if i == 0:
-                self.vehicle_group.set_lane_change_direction_by_id(
+                self.vehicle_group.set_single_vehicle_lane_change_direction(
                     self.lc_veh_id, 1)
             self.simulate_one_time_step(time[i + 1])
 
