@@ -100,16 +100,16 @@ def run_internal_optimal_controller(has_lo: bool, has_fo: bool,
 
 
 def main():
-    has_lo, has_fo = True, True
-    has_ld, has_fd = True, True
+    has_lo, has_fo = False, True
+    has_ld, has_fd = False, False
 
     start_time = time.time()
 
     # run_no_lc_scenario()
     # run_base_scenario([1], max_iter=400)
-    run_constraints_scenario(has_lo, has_fo, has_ld, has_fd)
+    # run_constraints_scenario(has_lo, has_fo, has_ld, has_fd)
     # run_cbf_lc_scenario(has_lo, has_fo, has_ld, has_fd)
-    # run_internal_optimal_controller(has_lo, has_fo, has_ld, has_fd)
+    run_internal_optimal_controller(has_lo, has_fo, has_ld, has_fd)
     # load_and_plot_latest_scenario()
 
     end_time = time.time()

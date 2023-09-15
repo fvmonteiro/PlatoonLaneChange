@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from typing import Dict, List, Union
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
 
 import vehicle_models.base_vehicle as base
-import vehicle_models.four_state_vehicles as fsv
-import vehicle_models.three_state_vehicles as tsv
-import vehicle_ocp_interface as vi
 import system_operating_mode
 
 
@@ -32,30 +29,13 @@ def vehicle_output(t, x, u, params):
     return x  # return (full state)
 
 
-# ================ Support for interface creation ================ #
-# TODO: each vehicle model should return an interface for itself
-def get_interface_for_vehicle(
-        vehicle: Union[base.BaseVehicle, tsv.ThreeStateVehicle,
-                       fsv.OpenLoopVehicle]):
-    interface_map = {
-        fsv.OpenLoopVehicle: vi.OpenLoopVehicleInterfaceInterface,
-        fsv.SafeAccelOpenLoopLCVehicle: vi.SafeAccelVehicleInterface,
-        fsv.OptimalControlVehicle: vi.OpenLoopVehicleInterfaceInterface,
-        fsv.SafeAccelOptimalLCVehicle: vi.SafeAccelVehicleInterface,
-        fsv.ClosedLoopVehicle: vi.ClosedLoopVehicleInterface,
-        tsv.ThreeStateVehicleRearWheel: vi.ThreeStateVehicleRearWheelInterface,
-        tsv.ThreeStateVehicleCG: vi.ThreeStateVehicleCGInterface
-    }
-    return interface_map[type(vehicle)](vehicle)
-
-
 class VehicleGroupInterface:
     """ Class to help manage groups of vehicles """
 
     def __init__(self, vehicles: Dict[int, base.BaseVehicle]):
         # TODO: make vehicles a  list?
         #  The order of vehicles must be fixed anyway
-        self.vehicles: Dict[int, vi.BaseVehicleInterface] = {}
+        self.vehicles: Dict[int, base.BaseVehicleInterface] = {}
         # Often, we need to iterate over all vehicles in the order they were
         # created. The list below make that easy
         self.sorted_vehicle_ids = None
@@ -77,8 +57,9 @@ class VehicleGroupInterface:
             self, vehicles: Dict[int, base.BaseVehicle]):
         self.sorted_vehicle_ids = []
         for veh_id in sorted(vehicles.keys()):
-            vehicle_interface = get_interface_for_vehicle(
-                vehicles[veh_id])
+            # vehicle_interface = get_interface_for_vehicle(
+            #     vehicles[veh_id])
+            vehicle_interface = vehicles[veh_id].get_ocp_interface()
             self.sorted_vehicle_ids.append(vehicle_interface.id)
             self.vehicles[veh_id] = vehicle_interface
             self.state_idx_map[veh_id] = self.n_states
