@@ -71,9 +71,8 @@ def run_constraints_scenario(has_lo: bool, has_fo: bool, has_ld: bool,
 
 def load_and_plot_latest_scenario():
     data = analysis.load_simulated_scenario(file_name)
-    # analysis.plot_constrained_lane_change(data, 'ego')
     analysis.plot_initial_and_final_states(data, custom_colors=True)
-    # analysis.check_constraint_satisfaction(data, 1)
+    analysis.plot_constrained_lane_change(data, 'ego')
 
 
 def run_lane_change_scenario(scenario: scenarios.LaneChangeScenario):
@@ -131,8 +130,8 @@ def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
 
 def main():
 
-    has_lo, has_fo = False, True
-    has_ld, has_fd = False, False
+    has_lo, has_fo = True, True
+    has_ld, has_fd = True, True
 
     start_time = time.time()
 

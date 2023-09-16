@@ -83,12 +83,13 @@ class VehicleGroupInterface:
         if ego_id is None:
             shift_map = {'x': 0., 'y': 0.}
         else:
-            shift_map = {'x': vehicles[ego_id].get_x(),
-                         'y': vehicles[ego_id].get_y()}
+            shift_map = {'x': -vehicles[ego_id].get_x(),
+                         'y': -vehicles[ego_id].get_y()}
 
         self.sorted_vehicle_ids = []
         for veh_id in sorted(vehicles.keys()):
             vehicle_interface = vehicles[veh_id].get_ocp_interface()
+            vehicle_interface.shift_initial_state(shift_map)
             self.sorted_vehicle_ids.append(vehicle_interface.get_id())
             self.vehicles[veh_id] = vehicle_interface
             self.state_idx_map[veh_id] = self.n_states

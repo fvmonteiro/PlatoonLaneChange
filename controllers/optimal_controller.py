@@ -18,7 +18,7 @@ class VehicleOptimalController:
     _initial_state: np.ndarray
     _desired_state: np.ndarray
 
-    _solver_max_iter = 200
+    _solver_max_iter = 300
 
     def __init__(self, ocp_horizon: float):
         self._ocp_horizon: float = ocp_horizon
@@ -53,23 +53,39 @@ class VehicleOptimalController:
          the system, i.e., its (x, y) = (0, 0)
         :return:
         """
-        self._ocp_interface = vgi.VehicleGroupInterface(vehicles)
-        controlled_vehicles = [vehicles[veh_id] for veh_id
-                               in controlled_veh_ids]
-        self._set_up_ocp(time, controlled_vehicles)
-        self._solve_ocp()
-
-    def _set_up_ocp(self, time: float,
-                    controlled_vehicles: List[base.BaseVehicle]):
+        self._ocp_interface = vgi.VehicleGroupInterface(vehicles,
+                                                        center_veh_id)
+        print("OCP initial state:")
+        for veh in self._ocp_interface.vehicles.values():
+            print(veh.get_name(), veh.get_initial_state())
+        # self._set_up_ocp(time, controlled_veh_ids)
         self._start_time = time
         self._set_ocp_dynamics()
         self._set_input_constraints()
         self._initial_state = self._ocp_interface.get_initial_state()
         self._desired_state = self._ocp_interface.create_desired_state(
             self._ocp_horizon)
-        self._set_terminal_constraints(controlled_vehicles)
-        self._set_safety_constraints(controlled_vehicles)
+        print("x0 vs xf:")
+        print(self._initial_state)
+        print(self._desired_state)
+        # self._set_terminal_constraints(controlled_veh_ids)
+        self._set_safety_constraints(controlled_veh_ids)
         self._set_costs()
+        self._solve_ocp()
+
+    # def _set_up_ocp(self, time: float, controlled_veh_ids: List[int]):
+    #     self._start_time = time
+    #     self._set_ocp_dynamics()
+    #     self._set_input_constraints()
+    #     self._initial_state = self._ocp_interface.get_initial_state()
+    #     self._desired_state = self._ocp_interface.create_desired_state(
+    #         self._ocp_horizon)
+    #     print("x0 vs xf:")
+    #     print(self._initial_state)
+    #     print(self._desired_state)
+    #     # self._set_terminal_constraints(controlled_veh_ids)
+    #     self._set_safety_constraints(controlled_veh_ids)
+    #     self._set_costs()
 
     def has_solution(self) -> bool:
         return self._ocp_has_solution
@@ -158,18 +174,20 @@ class VehicleOptimalController:
                 self._dynamic_system, terminal_cost_matrix, 0,
                 x0=self._desired_state)
 
-    def _set_terminal_constraints(self, lc_vehicles: List[base.BaseVehicle]):
+    def _set_terminal_constraints(self, controlled_veh_ids: List[int]):
         # TODO: set terminal constraints for all vehicles?
-        lc_vehicles = self._ocp_interface.vehicles
-        dim = [2 * len(lc_vehicles),
+        controlled_vehicles = self._ocp_interface.vehicles
+        # controlled_vehicles = [self._ocp_interface.vehicles[veh_id]
+        #                        for veh_id in controlled_veh_ids]
+        dim = [2 * len(controlled_vehicles),
                self._ocp_interface.n_states + self._ocp_interface.n_inputs]
         rows = np.zeros(dim)
         lower_boundaries = np.zeros(dim[0])
         upper_boundaries = np.zeros(dim[0])
         y_margin = 1e-1
         theta_margin = 1e-2
-        for i in range(len(lc_vehicles)):
-            veh = lc_vehicles[i]
+        for i in range(len(controlled_vehicles)):
+            veh = controlled_vehicles[i]
             y_idx = 2 * i
             theta_idx = 2 * i + 1
             rows[y_idx, self._ocp_interface.get_a_vehicle_state_index(
@@ -191,17 +209,19 @@ class VehicleOptimalController:
             self._dynamic_system, input_lower_bounds,
             input_upper_bounds)])
 
-    def _set_safety_constraints(self, lc_vehicles: List[base.BaseVehicle]):
+    def _set_safety_constraints(self, controlled_veh_ids: List[int]):
         # Safety constraints
         # TODO 1: play with keep_feasible param for constraints
         # TODO 2: keep stay_in_lane constraint?
+        controlled_vehicles = [self._ocp_interface.vehicles[veh_id]
+                               for veh_id in controlled_veh_ids]
         epsilon = 1e-10
-        for veh in lc_vehicles:
+        for veh in controlled_vehicles:
             d = np.zeros(self._ocp_interface.n_states
                          + self._ocp_interface.n_inputs)
             d[self._ocp_interface.get_a_vehicle_state_index(
                 veh.get_id(), 'y')] = 1
-            stay_in_lane = LinearConstraint(d, lb=veh.get_y() - 1,
+            stay_in_lane = LinearConstraint(d, lb=veh.get_y0() - 1,
                                             ub=veh.get_target_y() + 1)
             # self._constraints.append(stay_in_lane)
             if veh.has_orig_lane_leader():

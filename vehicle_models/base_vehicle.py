@@ -124,7 +124,7 @@ class BaseVehicle(ABC):
         return self.target_lane * const.LANE_WIDTH
 
     def get_states(self) -> np.ndarray:
-        return self._states
+        return self._states.copy()
 
     def get_state_history(self) -> np.ndarray:
         return self._states_history
@@ -541,6 +541,8 @@ class BaseVehicle(ABC):
         pass
 
 
+# TODO: still must figure out a way to prevent so much repeat code between
+#  vehicles and their interfaces with the opc solver
 class BaseVehicleInterface(ABC):
 
     def __init__(self, vehicle: BaseVehicle):
@@ -589,15 +591,38 @@ class BaseVehicleInterface(ABC):
     def get_initial_state(self):
         return self._initial_state
 
+    def get_y0(self):
+        return self.select_state_from_vector(self._initial_state, 'y')
+
+    def get_orig_lane_leader_id(self):
+        return self._orig_leader_id
+
+    def get_dest_lane_leader_id(self):
+        return self._destination_leader_id
+
+    def get_dest_lane_follower_id(self):
+        return self._destination_follower_id
+
     def get_target_y(self) -> float:
         return self.target_lane * const.LANE_WIDTH
 
+    def has_orig_lane_leader(self):
+        return self._orig_leader_id >= 0
+
+    def has_dest_lane_leader(self):
+        return self._destination_leader_id >= 0
+
+    def has_dest_lane_follower(self):
+        return self._destination_follower_id >= 0
+
     # TODO: maybe most of these methods could be class methods since they don't
     #  depend on any 'internal' value of the instance
-    def select_state_from_vector(self, states: List, state_name: str) -> float:
+    def select_state_from_vector(self, states: np.ndarray,
+                                 state_name: str) -> float:
         return states[self.state_idx[state_name]]
 
-    def select_input_from_vector(self, inputs: List, input_name: str) -> float:
+    def select_input_from_vector(self, inputs: np.ndarray,
+                                 input_name: str) -> float:
         return inputs[self.input_idx[input_name]]
 
     def select_vel_from_vector(self, states, inputs):
