@@ -591,6 +591,9 @@ class BaseVehicleInterface(ABC):
     def get_initial_state(self):
         return self._initial_state
 
+    def get_x0(self):
+        return self.select_state_from_vector(self._initial_state, 'x')
+
     def get_y0(self):
         return self.select_state_from_vector(self._initial_state, 'y')
 
@@ -617,21 +620,22 @@ class BaseVehicleInterface(ABC):
 
     # TODO: maybe most of these methods could be class methods since they don't
     #  depend on any 'internal' value of the instance
-    def select_state_from_vector(self, states: np.ndarray,
+    def select_state_from_vector(self, states: Union[np.ndarray, List],
                                  state_name: str) -> float:
         return states[self.state_idx[state_name]]
 
-    def select_input_from_vector(self, inputs: np.ndarray,
+    def select_input_from_vector(self, inputs: Union[np.ndarray, List],
                                  input_name: str) -> float:
         return inputs[self.input_idx[input_name]]
 
-    def select_vel_from_vector(self, states, inputs):
+    def select_vel_from_vector(self, states: Union[np.ndarray, List],
+                               inputs: Union[np.ndarray, List]):
         try:
             return states[self.state_idx['v']]
         except KeyError:
             return inputs[self.input_idx['v']]
 
-    def get_current_leader_id(self, time):
+    def get_current_leader_id(self, time: float):
         """
         The 'current' leader is the vehicle being used to define this vehicle's
          acceleration
@@ -661,7 +665,9 @@ class BaseVehicleInterface(ABC):
         :return:
         """
         for state_name, value in shift.items():
-            self._initial_state[self.state_idx[state_name]] += value
+            original = self._initial_state[self.state_idx[state_name]]
+            shifted = np.round(original + value, 4)
+            self._initial_state[self.state_idx[state_name]] = shifted
 
     def compute_safe_gap(self, v_ego):
         return self.safe_h * v_ego + self.c

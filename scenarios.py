@@ -81,7 +81,7 @@ class SimulationScenario(ABC):
         ref_gaps = self.vehicle_group.map_values_to_names(
             self.vehicle_group.get_initial_desired_gaps(v0)
         )
-        x_ego = 13  # max(ref_gaps.get('fd', 0), ref_gaps.get('fo', 0))
+        x_ego = 0  # max(ref_gaps.get('fd', 0), ref_gaps.get('fo', 0))
         x0 = [x_ego + ref_gaps['ego'] - delta_x['lo']] if has_lo else []
         x0.append(x_ego)
         x0.extend([x_ego - ref_gaps['fo']] if has_fo else [])

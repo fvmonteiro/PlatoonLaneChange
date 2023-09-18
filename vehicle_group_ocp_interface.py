@@ -126,6 +126,17 @@ class VehicleGroupInterface:
             initial_state.extend(self.vehicles[veh_id].get_initial_state())
         return np.array(initial_state)
 
+    def get_initial_guess(self, time_points: np.ndarray):
+        # estimated_safe_time: float):
+        n_ctrl_points = len(time_points)
+        initial_guess = []
+        for veh_id in self.sorted_vehicle_ids:
+            min_phi, max_phi = self.vehicles[veh_id].get_input_limits()
+            initial_guess.extend(max_phi * 2
+                                 + [0.] * (n_ctrl_points - 4)
+                                 + min_phi * 2 if max_phi else [])
+        return np.array(initial_guess).reshape(-1, n_ctrl_points)
+
     def get_state_indices(self, state_name: str) -> List[int]:
         """
         Get all the indices for a certain state within the full state vector

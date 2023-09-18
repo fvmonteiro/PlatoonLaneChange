@@ -58,6 +58,7 @@ class VehicleOptimalController:
         print("OCP initial state:")
         for veh in self._ocp_interface.vehicles.values():
             print(veh.get_name(), veh.get_initial_state())
+            # print(veh.get_x0(), veh.get_y0())
         # self._set_up_ocp(time, controlled_veh_ids)
         self._start_time = time
         self._set_ocp_dynamics()
@@ -72,20 +73,6 @@ class VehicleOptimalController:
         self._set_safety_constraints(controlled_veh_ids)
         self._set_costs()
         self._solve_ocp()
-
-    # def _set_up_ocp(self, time: float, controlled_veh_ids: List[int]):
-    #     self._start_time = time
-    #     self._set_ocp_dynamics()
-    #     self._set_input_constraints()
-    #     self._initial_state = self._ocp_interface.get_initial_state()
-    #     self._desired_state = self._ocp_interface.create_desired_state(
-    #         self._ocp_horizon)
-    #     print("x0 vs xf:")
-    #     print(self._initial_state)
-    #     print(self._desired_state)
-    #     # self._set_terminal_constraints(controlled_veh_ids)
-    #     self._set_safety_constraints(controlled_veh_ids)
-    #     self._set_costs()
 
     def has_solution(self) -> bool:
         return self._ocp_has_solution
@@ -171,7 +158,7 @@ class VehicleOptimalController:
             terminal_cost_matrix = (
                 self._ocp_interface.create_terminal_cost_matrix(p))
             self._terminal_cost = opt.quadratic_cost(
-                self._dynamic_system, terminal_cost_matrix, 0,
+                self._dynamic_system, terminal_cost_matrix, None,
                 x0=self._desired_state)
 
     def _set_terminal_constraints(self, controlled_veh_ids: List[int]):
@@ -253,13 +240,14 @@ class VehicleOptimalController:
                 self._constraints.append(dest_lane_follower_safety)
 
     def _solve_ocp(self):
-
-        u0 = self._ocp_interface.get_desired_input()
-        n_ctrl_pts = min(round(self._ocp_horizon), 10)  # empirical
-        time_pts = np.linspace(0, self._ocp_horizon, n_ctrl_pts, endpoint=True)
-        # time_pts = np.array([0, 1.5, 1.75] + [i for i in range(3, 11)])
         # TODO: try providing 'relevant' time points, such as when we know the
         #  input can become non-zero
+        # TODO: initial control guess all zeros or some value?
+
+        n_ctrl_pts = min(round(self._ocp_horizon), 10)  # empirical
+        time_pts = np.linspace(0, self._ocp_horizon, n_ctrl_pts, endpoint=True)
+        # u0 = self._ocp_interface.get_desired_input()
+        u0 = self._ocp_interface.get_initial_guess(time_pts)
         result = opt.solve_ocp(
             self._dynamic_system, time_pts, self._initial_state,
             cost=self._running_cost,
@@ -287,3 +275,21 @@ class VehicleOptimalController:
         if result.success and result.cost > 4 * 1e3:
             print("but high cost indicates no LC.")
             self._ocp_has_solution = False
+
+    def detail_costs(self):
+        """
+        Attempt to figure out where cost differences between apparently equal
+        configurations come from. However, the opc solver costs and the costs
+        computed here always differ.
+        :return:
+        """
+        ocp_states = self.ocp_result.states
+        ocp_inputs = self.ocp_result.inputs
+        running_cost = sum(
+            self._running_cost(ocp_states[:, i], ocp_inputs[:, i])
+            for i in range(ocp_states.shape[1]))
+        terminal_cost = self._terminal_cost(ocp_states[:, -1], 0)
+        print("Computed costs:")
+        print("\tL={}, T={}, total={}".format(running_cost, terminal_cost,
+                                              running_cost + terminal_cost))
+
