@@ -36,7 +36,7 @@ class SystemMode:
 
 
 def mode_sequence_to_leader_sequence(
-        mode_sequence: List[Tuple[float, SystemMode]]
+        mode_sequence: ModeSequence
 ) -> Dict[int, List[Tuple[float, int]]]:
     """
     Transforms a list of (time, mode) tuples into a dictionary where vehicle
@@ -47,3 +47,8 @@ def mode_sequence_to_leader_sequence(
         for foll_id, lead_id in mode.vehicle_pairs.items():
             leader_sequence[foll_id].append((time, lead_id))
     return leader_sequence
+
+
+# Alias for easier typing hints
+ModeSequence = List[Tuple[float, SystemMode]]
+

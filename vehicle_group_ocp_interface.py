@@ -5,8 +5,8 @@ from typing import Dict, List
 import numpy as np
 import pandas as pd
 
+import system_operating_mode as som
 import vehicle_models.base_vehicle as base
-# import system_operating_mode
 
 
 # ========= Functions passed to the optimal control library methods ========== #
@@ -69,34 +69,6 @@ class VehicleGroupInterface:
                     t, self.vehicles[lead_id].get_name()
                     if lead_id >= 0 else lead_id), end="; ")
             print()
-
-    def create_vehicle_interfaces(
-            self, vehicles: Dict[int, base.BaseVehicle], ego_id: int = None
-    ) -> None:
-        """
-
-        :param vehicles: All simulation vehicles
-        :param ego_id: If given, assumes this vehicle as the center of
-         the system, i.e., its (x, y) = (0, 0)
-        :return:
-        """
-        if ego_id is None:
-            shift_map = {'x': 0., 'y': 0.}
-        else:
-            shift_map = {'x': -vehicles[ego_id].get_x(),
-                         'y': -vehicles[ego_id].get_y()}
-
-        self.sorted_vehicle_ids = []
-        for veh_id in sorted(vehicles.keys()):
-            vehicle_interface = vehicles[veh_id].get_ocp_interface()
-            vehicle_interface.shift_initial_state(shift_map)
-            self.sorted_vehicle_ids.append(vehicle_interface.get_id())
-            self.vehicles[veh_id] = vehicle_interface
-            self.state_idx_map[veh_id] = self.n_states
-            self.input_idx_map[veh_id] = self.n_inputs
-            self.n_states += vehicle_interface.n_states
-            self.n_inputs += vehicle_interface.n_inputs
-        self.n_vehs = len(self.vehicles)
 
     def get_input_limits(self):
         lower_bounds = []
@@ -175,6 +147,11 @@ class VehicleGroupInterface:
         vehicle = self.vehicles[veh_id]
         return vehicle.select_input_from_vector(vehicle_inputs, input_name)
 
+    def set_mode_sequence(self, mode_sequence: som.ModeSequence):
+        leader_sequences = som.mode_sequence_to_leader_sequence(mode_sequence)
+        for foll_id, sequence in leader_sequences.items():
+            self.vehicles[foll_id].set_leader_sequence(sequence)
+
     def create_input_names(self) -> List[str]:
         input_names = []
         for veh_id in self.sorted_vehicle_ids:
@@ -183,6 +160,34 @@ class VehicleGroupInterface:
             input_names.extend([name + str_id for name
                                 in vehicle.input_names])
         return input_names
+
+    def create_vehicle_interfaces(
+            self, vehicles: Dict[int, base.BaseVehicle], ego_id: int = None
+    ) -> None:
+        """
+
+        :param vehicles: All simulation vehicles
+        :param ego_id: If given, assumes this vehicle as the center of
+         the system, i.e., its (x, y) = (0, 0)
+        :return:
+        """
+        if ego_id is None:
+            shift_map = {'x': 0., 'y': 0.}
+        else:
+            shift_map = {'x': -vehicles[ego_id].get_x(),
+                         'y': -vehicles[ego_id].get_y()}
+
+        self.sorted_vehicle_ids = []
+        for veh_id in sorted(vehicles.keys()):
+            vehicle_interface = vehicles[veh_id].get_ocp_interface()
+            vehicle_interface.shift_initial_state(shift_map)
+            self.sorted_vehicle_ids.append(vehicle_interface.get_id())
+            self.vehicles[veh_id] = vehicle_interface
+            self.state_idx_map[veh_id] = self.n_states
+            self.input_idx_map[veh_id] = self.n_inputs
+            self.n_states += vehicle_interface.n_states
+            self.n_inputs += vehicle_interface.n_inputs
+        self.n_vehs = len(self.vehicles)
 
     def create_output_names(self) -> List[str]:
         output_names = []

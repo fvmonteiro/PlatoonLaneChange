@@ -8,6 +8,7 @@ import numpy as np
 import controllers.longitudinal_controller as long_ctrl
 import controllers.lateral_controller as lat_ctrl
 import controllers.optimal_controller as opt_ctrl
+import controllers.bi_level_controller as bilevel_ctrl
 import platoon
 import vehicle_models.base_vehicle as base
 import vehicle_operating_modes.concrete_vehicle_modes as modes
@@ -133,8 +134,12 @@ class OptimalControlVehicle(FourStateVehicle):
         self._ocp_horizon = 10.0  # [s]
         self._solver_attempt_time = -np.inf
 
-        self.opt_controller = opt_ctrl.VehicleOptimalController(
-            self._ocp_horizon)
+        self.opt_controller: bilevel_ctrl.BiLevelLCController = (
+            bilevel_ctrl.BiLevelLCController(self._ocp_horizon)
+        )
+        # self.opt_controller: opt_ctrl.VehicleOptimalController = (
+        #     opt_ctrl.VehicleOptimalController(self._ocp_horizon)
+        # )
 
     def update_mode(self, vehicles: Dict[int, base.BaseVehicle]):
         if self.has_lane_change_intention():
@@ -168,7 +173,7 @@ class OptimalControlVehicle(FourStateVehicle):
         if has_vehicle_configuration_changed or is_cool_down_period_done:
             self._solver_attempt_time = t
             print("t={:.2f}, veh:{}. Calling ocp solver...".format(t, self._id))
-            self.opt_controller.find_single_vehicle_trajectory(t, vehicles,
+            self.opt_controller.find_single_vehicle_trajectory(vehicles,
                                                                self._id)
         return True  # self.opt_controller.has_solution()
 
@@ -471,18 +476,19 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
         super().__init__(vehicle)
         # Controller parameters
         self.h = vehicle.h  # time headway [s]
-        # TODO: concentrate all accel computation functions in the control class
         self.long_controller = vehicle.long_controller
 
+        # TODO [Sept 18] moving this to set_leader_sequence method
         # The solver always assumes t0 = 0, but we might be calling it at t > 0
-        offset = vehicle.get_current_time()
-        self.ocp_leader_switch_times = [t - offset for t
-                                        in vehicle.ocp_leader_switch_times]
-        self.ocp_leader_sequence = vehicle.ocp_leader_sequence
+        # offset = vehicle.get_current_time()
+        # self.ocp_leader_switch_times = [t - offset for t
+        #                                 in vehicle.ocp_leader_switch_times]
+        # self.ocp_leader_sequence = vehicle.ocp_leader_sequence
 
     def get_input_limits(self) -> (List[float], List[float]):
         return [-self.phi_max], [self.phi_max]
 
+    # TODO: concentrate all accel computation functions in the control class
     def compute_acceleration(self, ego_states, inputs, leader_states) -> float:
         """
         Computes acceleration for the ego vehicle following a leader

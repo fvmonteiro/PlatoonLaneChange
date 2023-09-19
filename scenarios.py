@@ -571,7 +571,7 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
         self.controller = opt_ctrl.VehicleOptimalController(self.tf)
         self.controller.set_max_iter(max_iter)
         self.controller.find_multiple_vehicle_trajectory(
-            0.0, self.vehicle_group.vehicles,
+            self.vehicle_group.vehicles,
             [self.vehicle_group.get_vehicle_id_by_name('ego')])
         # return self.controller.ocp_result
 

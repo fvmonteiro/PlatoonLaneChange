@@ -21,7 +21,7 @@ class VehicleGroup:
         self.name_to_id: Dict[str, int] = {}
         # The full system (all vehicles) mode is defined by follower/leader
         # pairs.
-        self.mode_sequence: List[Tuple[float, som.SystemMode]] = []
+        self.mode_sequence: som.ModeSequence = []
 
     def get_current_mode(self) -> som.SystemMode:
         try:

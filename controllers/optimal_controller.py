@@ -9,6 +9,7 @@ import control.flatsys as flat
 import numpy as np
 from scipy.optimize import LinearConstraint, NonlinearConstraint
 
+import system_operating_mode as som
 import vehicle_models.base_vehicle as base
 import vehicle_group_ocp_interface as vgi
 
@@ -27,9 +28,10 @@ class VehicleOptimalController:
         self._constraints = []
         self._start_time = -np.inf
 
-    def find_single_vehicle_trajectory(self, time: float,
+    def find_single_vehicle_trajectory(self,
                                        vehicles: Dict[int, base.BaseVehicle],
-                                       ego_id: int):
+                                       ego_id: int,
+                                       mode_sequence: som.ModeSequence = None):
         """
         Solves the OPC assuming only the vehicle calling this function will
         perform a lane change
@@ -38,12 +40,13 @@ class VehicleOptimalController:
         :param ego_id: ID of the vehicle calling the method
         :return: nothing
         """
-        self.find_multiple_vehicle_trajectory(time, vehicles, [ego_id], ego_id)
+        self.find_multiple_vehicle_trajectory(vehicles, [ego_id], ego_id,
+                                              mode_sequence)
 
-    def find_multiple_vehicle_trajectory(self, time: float,
-                                         vehicles: Dict[int, base.BaseVehicle],
-                                         controlled_veh_ids: List[int],
-                                         center_veh_id: int = None):
+    def find_multiple_vehicle_trajectory(
+            self, vehicles: Dict[int, base.BaseVehicle],
+            controlled_veh_ids: List[int], center_veh_id: int = None,
+            mode_sequence: som.ModeSequence = None):
         """
         Solves the OPC for all listed controlled vehicles
         :param time: Current simulation time
@@ -55,12 +58,15 @@ class VehicleOptimalController:
         """
         self._ocp_interface = vgi.VehicleGroupInterface(vehicles,
                                                         center_veh_id)
+        if mode_sequence is not None:
+            self._ocp_interface.set_mode_sequence(mode_sequence)
+
         print("OCP initial state:")
         for veh in self._ocp_interface.vehicles.values():
             print(veh.get_name(), veh.get_initial_state())
             # print(veh.get_x0(), veh.get_y0())
         # self._set_up_ocp(time, controlled_veh_ids)
-        self._start_time = time
+        self._start_time = list(vehicles.values())[0].get_current_time()
         self._set_ocp_dynamics()
         self._set_input_constraints()
         self._initial_state = self._ocp_interface.get_initial_state()
@@ -246,8 +252,8 @@ class VehicleOptimalController:
 
         n_ctrl_pts = min(round(self._ocp_horizon), 10)  # empirical
         time_pts = np.linspace(0, self._ocp_horizon, n_ctrl_pts, endpoint=True)
-        # u0 = self._ocp_interface.get_desired_input()
-        u0 = self._ocp_interface.get_initial_guess(time_pts)
+        u0 = self._ocp_interface.get_desired_input()
+        # u0 = self._ocp_interface.get_initial_guess(time_pts)
         result = opt.solve_ocp(
             self._dynamic_system, time_pts, self._initial_state,
             cost=self._running_cost,

@@ -210,12 +210,12 @@ class BaseVehicle(ABC):
         """
         self._leader_id[self._iter_counter] = veh_id
 
+    # TODO [9/18/23] delete. Mode sequence should belong in the interfaces
     def set_ocp_leader_sequence(self, leader_sequence: List[Tuple[float, int]]):
         """
         For optimal control problems, sets the desired/tested
         sequence of leaders throughout the solver horizon
         """
-
         for t, l_id in leader_sequence:
             self.ocp_leader_switch_times.append(t)
             self.ocp_leader_sequence.append(l_id)
@@ -609,6 +609,14 @@ class BaseVehicleInterface(ABC):
     def get_target_y(self) -> float:
         return self.target_lane * const.LANE_WIDTH
 
+    def set_leader_sequence(self, leader_sequence: List[Tuple[float, int]]
+                            ) -> None:
+        self.ocp_leader_switch_times = []
+        self.ocp_leader_sequence = []
+        for t, l_id in leader_sequence:
+            self.ocp_leader_switch_times.append(t)
+            self.ocp_leader_sequence.append(l_id)
+
     def has_orig_lane_leader(self):
         return self._orig_leader_id >= 0
 
@@ -641,6 +649,8 @@ class BaseVehicleInterface(ABC):
          acceleration
         :return:
         """
+        # TODO: no need to search everytime. Store current index in a variable
+        #  and just check if time > switch_times[idx+1]
         if len(self.ocp_leader_sequence) == 0:
             return self._leader_id
         idx = np.searchsorted(self.ocp_leader_switch_times, time, side='right')
