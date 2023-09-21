@@ -1,6 +1,7 @@
 import time
 
 import analysis
+from controllers.optimal_controller import configure_optimal_controller
 import vehicle_models
 import scenarios
 
@@ -39,7 +40,7 @@ def run_base_opc_scenario(max_iter=100):
     scenario.create_vehicle_group(vehicles)
     scenario.set_free_flow_speeds(v_ff)
     scenario.set_boundary_conditions(tf)
-    scenario.solve(max_iter)
+    scenario.solve()
     scenario.run()
     scenario.save_response_data(file_name)
     data = scenario.response_to_dataframe()
@@ -56,7 +57,7 @@ def run_constraints_scenario(has_lo: bool, has_fo: bool, has_ld: bool,
     scenario.set_boundary_conditions(tf)
     # Solve
     print("Calling OCP solver")
-    scenario.solve(300)
+    scenario.solve()
     scenario.run()
     # Check results
     scenario.save_response_data(file_name)
@@ -71,7 +72,7 @@ def run_constraints_scenario(has_lo: bool, has_fo: bool, has_ld: bool,
 
 def load_and_plot_latest_scenario():
     data = analysis.load_simulated_scenario(file_name)
-    analysis.plot_initial_and_final_states(data, custom_colors=True)
+    # analysis.plot_initial_and_final_states(data, custom_colors=True)
     analysis.plot_constrained_lane_change(data, 'ego')
 
 
@@ -93,26 +94,15 @@ def run_cbf_lc_scenario(has_lo: bool, has_fo: bool,
 
 def run_internal_optimal_controller(has_lo: bool, has_fo: bool,
                                     has_ld: bool, has_fd: bool):
-    scenario = scenarios.LaneChangeScenario.optimal_control(has_lo, has_fo,
-                                                            has_ld, has_fd)
+    scenario = scenarios.LaneChangeScenario.optimal_control(
+        has_lo, has_fo, has_ld, has_fd)
     run_lane_change_scenario(scenario)
 
 
-def run_mode_switch_test(has_lo: bool, has_fo: bool,
-                         has_ld: bool, has_fd: bool):
-    tf = 15
-    test = scenarios.ModeSwitchTests.single_vehicle_lane_change(
-        has_lo, has_fo, has_ld, has_fd
-    )
-    test.run(tf)
-    for data in test.data:
-        analysis.plot_constrained_lane_change(data, 'ego')
-
-
-def run_platoon_base_test(has_lo: bool, has_fo: bool,
-                          has_ld: bool, has_fd: bool):
-    scenario = scenarios.LaneChangeScenario.platoon_lane_change(has_lo, has_fo,
-                                                                has_ld, has_fd)
+def run_single_vehicle_platoon_test(has_lo: bool, has_fo: bool,
+                                    has_ld: bool, has_fd: bool):
+    scenario = scenarios.LaneChangeScenario.single_vehicle_platoon_lane_change(
+        has_lo, has_fo, has_ld, has_fd)
     run_lane_change_scenario(scenario)
 
 
@@ -124,14 +114,17 @@ def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
     scenario.run(tf)
     scenario.save_response_data(file_name)
     data = scenario.response_to_dataframe()
-    # analysis.plot_initial_and_final_states(data, custom_colors=True)
+    analysis.plot_initial_and_final_states(data, custom_colors=True)
     analysis.plot_constrained_lane_change(data, 'p1')
 
 
 def main():
 
-    has_lo, has_fo = True, True
-    has_ld, has_fd = True, True
+    has_lo, has_fo = False, True
+    has_ld, has_fd = False, False
+
+    configure_optimal_controller(max_iter=1, solver_max_iter=300,
+                                 discretization_step=0.5)
 
     start_time = time.time()
 
@@ -140,11 +133,10 @@ def main():
     # run_base_opc_scenario(max_iter=400)
     # run_constraints_scenario(has_lo, has_fo, has_ld, has_fd)
     # run_cbf_lc_scenario(has_lo, has_fo, has_ld, has_fd)
-    run_internal_optimal_controller(has_lo, has_fo, has_ld, has_fd)
-    # run_mode_switch_test(has_lo, has_fo, has_ld, has_fd)
-    # run_platoon_base_test(n_orig, n_dest)
-    # run_platoon_test(n_platoon=1, n_orig_ahead=0, n_orig_behind=1,
-    #                  n_dest_ahead=0, n_dest_behind=0)
+    # run_internal_optimal_controller(has_lo, has_fo, has_ld, has_fd)
+    # run_single_vehicle_platoon_test(has_lo, has_fo, has_ld, has_fd)
+    run_platoon_test(n_platoon=2, n_orig_ahead=0, n_orig_behind=0,
+                     n_dest_ahead=0, n_dest_behind=0)
     # load_and_plot_latest_scenario()
 
     end_time = time.time()

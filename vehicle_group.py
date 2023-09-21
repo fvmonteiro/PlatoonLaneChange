@@ -16,12 +16,15 @@ class VehicleGroup:
         self.vehicles: Dict[int, base.BaseVehicle] = {}
         # Often, we need to iterate over all vehicles in the order they were
         # created. The list below makes that easy
-        self.sorted_vehicle_ids = None
-        self.n_vehs = 0
+        self.sorted_vehicle_ids: List[int] = []
         self.name_to_id: Dict[str, int] = {}
         # The full system (all vehicles) mode is defined by follower/leader
         # pairs.
         self.mode_sequence: som.ModeSequence = []
+        self._is_verbose = True
+
+    def get_n_vehicles(self):
+        return len(self.vehicles)
 
     def get_current_mode(self) -> som.SystemMode:
         try:
@@ -30,7 +33,7 @@ class VehicleGroup:
             return som.SystemMode({})
 
     def get_free_flow_speeds(self):
-        v_ff = np.zeros(self.n_vehs)
+        v_ff = np.zeros(self.get_n_vehicles())
         for veh_id in self.sorted_vehicle_ids:
             v_ff[veh_id] = self.vehicles[veh_id].free_flow_speed
         return v_ff
@@ -55,6 +58,9 @@ class VehicleGroup:
         for veh_id in self.sorted_vehicle_ids:
             inputs.append(self.vehicles[veh_id].get_input_history())
         return np.vstack(inputs)
+
+    def get_mode_sequence(self):
+        return self.mode_sequence
 
     def get_vehicle_id_by_name(self, name: str) -> int:
         """
@@ -84,22 +90,17 @@ class VehicleGroup:
             gaps.append(self.vehicles[veh_id].compute_desired_gap(v))
         return gaps
 
-    # def get_initial_group_mode(self):
-    #     # Split in lanes
-    #     lanes = {veh.get_current_lane() for veh in self.vehicles.values()}
-    #
-    #     for l in lanes:
-    #         vehs_in_lanes = [veh for veh in self.vehicles.values()
-    #                          if veh.get_current_lane() == l]
-    #     # Order per lane, set leaders
-    #     # Merge both 'lanes' in a single dict
+    def set_verbose(self, value: bool):
+        self._is_verbose = value
+        for vehicle in self.vehicles.values():
+            vehicle.set_verbose(value)
 
     def set_a_vehicle_free_flow_speed(self, veh_id, v_ff):
         self.vehicles[veh_id].set_free_flow_speed(v_ff)
 
     def set_free_flow_speeds(self, values: Union[float, List, np.ndarray]):
         if np.isscalar(values):
-            values = [values] * self.n_vehs
+            values = [values] * self.get_n_vehicles()
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
             vehicle.set_free_flow_speed(values[veh_id])
@@ -121,20 +122,15 @@ class VehicleGroup:
     def set_vehicle_names(self, names: List[str]):
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
-            vehicle._name = names[veh_id]
+            vehicle.set_name(names[veh_id])
             self.name_to_id[names[veh_id]] = veh_id
-
-    def set_ocp_leader_sequence(
-            self, leader_sequence: Dict[int, List[Tuple[float, int]]]):
-        """
-        :param leader_sequence: Dictionary with the leader sequence,
-        defined by tuples (time, leader id), as values and vehicle ids as keys
-        """
-        for veh_id, sequence in leader_sequence.items():
-            self.vehicles[veh_id].set_ocp_leader_sequence(sequence)
 
     def has_vehicle_with_name(self, veh_name: str):
         return veh_name in self.name_to_id
+
+    def make_all_connected(self):
+        for vehicle in self.vehicles.values():
+            vehicle.make_connected()
 
     def map_values_to_names(self, values) -> Dict[str, Any]:
         """
@@ -156,10 +152,6 @@ class VehicleGroup:
         for vehicle in self.vehicles.values():
             vehicle.prepare_to_start_simulation(n_samples)
 
-    def make_all_connected(self):
-        for vehicle in self.vehicles.values():
-            vehicle.make_connected()
-
     def create_vehicle_array(self,
                              vehicle_classes: List[Type[base.BaseVehicle]]):
         """
@@ -170,26 +162,22 @@ class VehicleGroup:
         """
         self.vehicles = {}
         self.sorted_vehicle_ids = []
-        self.n_vehs = len(vehicle_classes)
+        # self.n_vehs = len(vehicle_classes)
         for veh_class in vehicle_classes:
             vehicle = veh_class()
             self.sorted_vehicle_ids.append(vehicle.get_id())
             self.vehicles[vehicle.get_id()] = vehicle
 
-    # def create_platoons(self,
-    #                     platoon_assignment: List[List[fsv.PlatoonVehicle]]):
-    #     """
-    #     Creates platoons and include vehicles in them
-    #     :param platoon_assignment:
-    #     :return:
-    #     """
-    #     for platoon_vehicles in platoon_assignment:
-    #         new_platoon = platoon.Platoon()
-    #         for veh in sorted(platoon_vehicles,
-    #                           key=lambda x: x.get_a_state_by_name('x'),
-    #                           reverse=True):
-    #             new_platoon.add_vehicle(veh.id)
-    #             veh.set_platoon(new_platoon)
+    # TODO: rename to indicate vehicles are reset to restart simulation
+    def populate_with_vehicles(self, vehicles: Dict[int, base.BaseVehicle]):
+        if self.get_n_vehicles() > 0:
+            raise AttributeError("Cannot set vehicles to a vehicle group "
+                                 "that was already initialized")
+        for veh_id in sorted(vehicles.keys()):
+            vehicle = vehicles[veh_id].get_reset_copy()
+            self.sorted_vehicle_ids.append(veh_id)
+            self.vehicles[veh_id] = vehicle
+            self.name_to_id[vehicle.get_name()] = veh_id
 
     def create_full_state_vector(self, x, y, theta, v=None):
         """
@@ -210,6 +198,16 @@ class VehicleGroup:
                 x[veh_id], y[veh_id], theta[veh_id], v[veh_id]))
         return np.array(full_state)
 
+    def simulate_one_time_step(self, new_time, open_loop_controls=None):
+        if open_loop_controls is None:
+            open_loop_controls = {}
+        self.update_platoons()
+        self.update_vehicle_modes()
+        self.determine_inputs(open_loop_controls)
+        self.compute_derivatives()
+        self.update_states(new_time)
+        self.update_surrounding_vehicles()
+
     def update_surrounding_vehicles(self):
         for ego_vehicle in self.vehicles.values():
             ego_vehicle.find_orig_lane_leader(self.vehicles.values())
@@ -219,13 +217,14 @@ class VehicleGroup:
         new_mode = som.SystemMode(self.vehicles)
         if self.get_current_mode() != new_mode:
             time = self.vehicles[0].get_current_time()
-            if len(self.mode_sequence) == 0:
-                # print("Initial mode: {}".format(
-                #     new_mode))
-                pass
-            else:
-                print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
-                    time, self.get_current_mode(), new_mode))
+            if self._is_verbose:
+                if len(self.mode_sequence) == 0:
+                    # print("Initial mode: {}".format(
+                    #     new_mode))
+                    pass
+                else:
+                    print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
+                        time, self.get_current_mode(), new_mode))
             self.mode_sequence.append((time, new_mode))
 
     def update_platoons(self):
@@ -274,5 +273,5 @@ class VehicleGroup:
         for vehicle in self.vehicles.values():
             vehicle_df = vehicle.to_dataframe()
             data_per_vehicle.append(vehicle_df)
-        all_data = pd.concat(data_per_vehicle).reset_index()
+        all_data = pd.concat(data_per_vehicle).reset_index(drop=True)
         return all_data.fillna(0)

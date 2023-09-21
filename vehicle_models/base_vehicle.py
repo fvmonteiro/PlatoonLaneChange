@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import copy
 from typing import Dict, Iterable, List, Tuple, Type, Union
 import warnings
 
@@ -33,10 +34,6 @@ class BaseVehicle(ABC):
     _desired_future_follower_id: int
     _long_adjust_start_time: float
     _lc_start_time: float
-    # For when we want to predefine who should be followed. Used in
-    # optimal control problems
-    ocp_leader_switch_times: List[float]
-    ocp_leader_sequence: List[int]
 
     def __init__(self):
         """
@@ -53,12 +50,7 @@ class BaseVehicle(ABC):
         # self._desired_future_follower_id = -1
         # self._long_adjust_start_time = -np.inf
         # self._lc_start_time = -np.inf
-        self._platoon = None
-        #
-        # # For when we want to predefine who should be followed. Used in
-        # # optimal control problems
-        # self.ocp_leader_switch_times: List[float] = []
-        # self.ocp_leader_sequence: List[int] = []
+        # self._platoon = None
 
         # Some parameters
         self._id: int = BaseVehicle._counter
@@ -79,6 +71,7 @@ class BaseVehicle(ABC):
         self.c = const.STANDSTILL_DISTANCE
 
         self._is_connected = False
+        self._is_verbose = True
 
     def __repr__(self):
         return self.__class__.__name__ + ' id=' + str(self._id)
@@ -163,20 +156,33 @@ class BaseVehicle(ABC):
             # have closed-loop acceleration control
             return self._orig_leader_id[self._iter_counter]
 
-    def get_current_opt_ctrl_leader_id(self) -> int:
-        """
-        The predefined current leader used in the optimal control solver
-        """
-        time = self.get_current_time()
-        idx = np.searchsorted(self.ocp_leader_switch_times, time,
-                              side='right')
-        return self.ocp_leader_sequence[idx-1]
-
     def get_platoon(self):
-        return self._platoon
+        return None
+
+    # TODO: figure out more descriptive name. This is a copy used for iterative
+    #  simulations
+    def get_reset_copy(self):  # -> BaseVehicle:
+        """
+        Returns a copy of the vehicle with initial state equal the vehicle's
+        current state and with no memory.
+        :return:
+        """
+        new_vehicle = copy.deepcopy(self)
+        new_vehicle.set_initial_state(self.get_x(), self.get_y(),
+                                      self.get_theta(), self.get_vel())
+        lc_direction = self.target_lane - new_vehicle.get_current_lane()
+        new_vehicle.set_lane_change_direction(lc_direction)
+        new_vehicle.reset_simulation_logs()
+        return new_vehicle
 
     def set_free_flow_speed(self, v_ff: float):
         self.free_flow_speed = v_ff
+
+    def set_name(self, value: str):
+        self._name = value
+
+    def set_verbose(self, value: bool):
+        self._is_verbose = value
 
     def set_initial_state(self, x: float, y: float, theta: float,
                           v: float = None):
@@ -187,13 +193,14 @@ class BaseVehicle(ABC):
         # self.target_y = self.get_y()
 
     def set_mode(self, mode: modes.VehicleMode):
-        try:
-            print("t={:.2f}, veh {}. From: {} to {}".format(
-                self.get_current_time(), self._id, self._mode, mode))
-        except AttributeError:  # when the mode is set for the first time
-            # print("t=0.0, veh {}. Initial op mode: {}".format(
-            #     self._id, mode))
-            pass
+        if self._is_verbose:
+            try:
+                print("t={:.2f}, veh {}. From: {} to {}".format(
+                    self.get_current_time(), self._id, self._mode, mode))
+            except AttributeError:  # when the mode is set for the first time
+                # print("t=0.0, veh {}. Initial op mode: {}".format(
+                #     self._id, mode))
+                pass
         self._mode = mode
         self._mode.set_ego_vehicle(self)
 
@@ -210,16 +217,6 @@ class BaseVehicle(ABC):
         """
         self._leader_id[self._iter_counter] = veh_id
 
-    # TODO [9/18/23] delete. Mode sequence should belong in the interfaces
-    def set_ocp_leader_sequence(self, leader_sequence: List[Tuple[float, int]]):
-        """
-        For optimal control problems, sets the desired/tested
-        sequence of leaders throughout the solver horizon
-        """
-        for t, l_id in leader_sequence:
-            self.ocp_leader_switch_times.append(t)
-            self.ocp_leader_sequence.append(l_id)
-
     def prepare_to_start_simulation(self, n_samples: int):
         """
         Erases all simulation data and allows the vehicle trajectory to be
@@ -227,27 +224,28 @@ class BaseVehicle(ABC):
         """
         self.initialize_simulation_logs(n_samples)
         # TODO: maybe all the settings below can be in the constructor
+        #  It depends on whether we need to "restart" vehicles
         self._desired_future_follower_id = -1
         self._long_adjust_start_time = -np.inf
         self._lc_start_time = -np.inf
-        # For when we want to predefine who should be followed. Used in
-        # optimal control problems
-        self.ocp_leader_switch_times: List[float] = []
-        self.ocp_leader_sequence: List[int] = []
+
+        # Initial state
+        self._time[self._iter_counter] = 0.0
+        self._states_history[:, self._iter_counter] = self.initial_state
 
     def initialize_simulation_logs(self, n_samples: int):
         self._iter_counter = 0
         self._time = np.zeros(n_samples)
         self._states_history = np.zeros([self._n_states, n_samples])
         self._inputs_history = np.zeros([self._n_inputs, n_samples])
-        self._orig_leader_id = np.zeros(n_samples, dtype=int)
-        self._destination_leader_id = np.zeros(n_samples, dtype=int)
-        self._destination_follower_id = np.zeros(n_samples, dtype=int)
-        self._incoming_vehicle_id = np.zeros(n_samples, dtype=int)
-        self._leader_id = np.zeros(n_samples, dtype=int)
+        self._orig_leader_id = -np.ones(n_samples, dtype=int)
+        self._destination_leader_id = -np.ones(n_samples, dtype=int)
+        self._destination_follower_id = -np.ones(n_samples, dtype=int)
+        self._incoming_vehicle_id = -np.ones(n_samples, dtype=int)
+        self._leader_id = -np.ones(n_samples, dtype=int)
 
-        self._time[self._iter_counter] = 0.0
-        self._states_history[:, self._iter_counter] = self.initial_state
+    def reset_simulation_logs(self):
+        self.initialize_simulation_logs(0)
 
     def reset_lane_change_start_time(self):
         self._lc_start_time = -np.inf
@@ -541,7 +539,7 @@ class BaseVehicle(ABC):
         pass
 
 
-# TODO: still must figure out a way to prevent so much repeat code between
+# TODO: still must figure out a way to prevent so much repeated code between
 #  vehicles and their interfaces with the opc solver
 class BaseVehicleInterface(ABC):
 

@@ -9,64 +9,149 @@ import control.flatsys as flat
 import numpy as np
 from scipy.optimize import LinearConstraint, NonlinearConstraint
 
+import analysis  # only during tests
 import system_operating_mode as som
 import vehicle_models.base_vehicle as base
+import vehicle_group as vg
 import vehicle_group_ocp_interface as vgi
 
 
+def configure_optimal_controller(
+        max_iter: int = None, solver_max_iter: int = None,
+        discretization_step: float = None):
+    """
+    Sets the configurations of the optimal controller that do not vary during
+    the simulation.
+    :param max_iter: Maximum number of times the ocp will be solved until
+     mode sequence convergence (different from max iteration of the solver)
+    :param discretization_step: Fixed discretization step of the opc solver
+    :param solver_max_iter: Maximum number of iterations by the solver
+    :return:
+    """
+    if max_iter:
+        VehicleOptimalController.max_iter = max_iter
+    if solver_max_iter:
+        VehicleOptimalController.solver_max_iter = solver_max_iter
+    if discretization_step:
+        VehicleOptimalController.discretization_step = discretization_step
+
+
 class VehicleOptimalController:
+    """
+    The optimal controller follows the steps:
+    1. Set an operating mode sequence
+    2. Solve the OPC with given mode sequence
+    3. Apply optimal input and simulate system
+    4. Compare assumed operating mode sequence to obtained mode sequence
+    5. Repeat steps 1-4 until convergence or iteration limit is reached
+
+    We can leave the operating mode sequence empty and set the iteration limit
+    to one to obtain a non-iterative optimal controller
+    """
+
     _ocp_interface: vgi.VehicleGroupInterface
     _initial_state: np.ndarray
     _desired_state: np.ndarray
 
-    _solver_max_iter = 300
+    solver_max_iter = 300
+    max_iter = 3
+    discretization_step = 1.0  # [s]
 
-    def __init__(self, ocp_horizon: float):
+    # TODO: make max_iter mandatory?
+    def __init__(self, ocp_horizon: float,):
+        """
+
+        :param ocp_horizon: Fixed time horizon when solving the optimal
+         control problem
+        """
         self._ocp_horizon: float = ocp_horizon
         self._terminal_cost = None
         self._terminal_constraints = None
         self._constraints = []
-        self._start_time = -np.inf
+        self._ocp_has_solution = False
 
-    def find_single_vehicle_trajectory(self,
-                                       vehicles: Dict[int, base.BaseVehicle],
-                                       ego_id: int,
-                                       mode_sequence: som.ModeSequence = None):
+        self._data_per_iteration = []
+
+    def get_horizon(self) -> float:
+        return self._ocp_horizon
+
+    def get_data_per_iteration(self):
+        return self._data_per_iteration
+
+    def find_single_vehicle_trajectory(
+            self, vehicles: Dict[int, base.BaseVehicle],
+            ego_id: int, mode_sequence: som.ModeSequence = None):
         """
         Solves the OPC assuming only the vehicle calling this function will
         perform a lane change
-        :param time: Current simulation time
         :param vehicles: All relevant vehicles
         :param ego_id: ID of the vehicle calling the method
+        :param mode_sequence: Predefined system mode sequence [optional].
         :return: nothing
         """
-        self.find_multiple_vehicle_trajectory(vehicles, [ego_id], ego_id,
-                                              mode_sequence)
+        self.find_multiple_vehicle_trajectory(vehicles,
+                                              [ego_id], mode_sequence)
 
     def find_multiple_vehicle_trajectory(
             self, vehicles: Dict[int, base.BaseVehicle],
-            controlled_veh_ids: List[int], center_veh_id: int = None,
+            controlled_veh_ids: List[int],
             mode_sequence: som.ModeSequence = None):
         """
         Solves the OPC for all listed controlled vehicles
-        :param time: Current simulation time
         :param vehicles: All relevant vehicles
         :param controlled_veh_ids: IDs of controlled vehicles
-        :param center_veh_id: If given, assumes this vehicle as the center of
-         the system, i.e., its (x, y) = (0, 0)
+        :param mode_sequence: Predefined system mode sequence [optional].
         :return:
         """
-        self._ocp_interface = vgi.VehicleGroupInterface(vehicles,
-                                                        center_veh_id)
-        if mode_sequence is not None:
-            self._ocp_interface.set_mode_sequence(mode_sequence)
+        # We put the vehicle below at the origin (0, 0) when solving the opc
+        # to make the solution independent of shifts in initial position
+        center_veh_id = controlled_veh_ids[0]
+        self._ocp_interface = vgi.VehicleGroupInterface(vehicles, center_veh_id)
+        if mode_sequence is None:
+            # TODO: guess a mode change?
+            given_sequence: som.ModeSequence = [(0.0, som.SystemMode(vehicles))]
+        else:
+            given_sequence = mode_sequence
 
-        print("OCP initial state:")
-        for veh in self._ocp_interface.vehicles.values():
-            print(veh.get_name(), veh.get_initial_state())
-            # print(veh.get_x0(), veh.get_y0())
-        # self._set_up_ocp(time, controlled_veh_ids)
-        self._start_time = list(vehicles.values())[0].get_current_time()
+        converged = False
+        counter = 0
+        while not converged and counter < self.max_iter:
+            self._ocp_interface.set_mode_sequence(given_sequence)
+            self._set_ocp_configuration(controlled_veh_ids)
+            self._solve_ocp()
+            simulated_vehicle_group = self.simulate_over_optimization_horizon(
+                vehicles)
+            self._data_per_iteration.append(
+                simulated_vehicle_group.to_dataframe())
+            analysis.plot_constrained_lane_change(
+                self._data_per_iteration[-1], vehicles[center_veh_id].get_id())
+            simulated_sequence = simulated_vehicle_group.get_mode_sequence()
+            print("Input sequence:  {}\nOutput sequence: {}".format(
+                som.mode_sequence_to_str(given_sequence),
+                som.mode_sequence_to_str(simulated_sequence)
+            ))
+            converged = som.compare_mode_sequences(given_sequence,
+                                                   simulated_sequence)
+            print("Converged?", converged)
+            given_sequence = simulated_sequence
+            counter += 1
+
+    # TODO move somewhere else in the class
+    def simulate_over_optimization_horizon(
+            self, vehicles: Dict[int, base.BaseVehicle]):
+        dt = 1e-2
+        time = np.arange(0, self.get_horizon(), dt)
+
+        vehicle_group = vg.VehicleGroup()
+        vehicle_group.populate_with_vehicles(vehicles)
+        vehicle_group.set_verbose(False)
+        vehicle_group.prepare_to_start_simulation(len(time))
+        vehicle_group.update_surrounding_vehicles()
+        for i in range(len(time) - 1):
+            vehicle_group.simulate_one_time_step(time[i + 1])
+        return vehicle_group
+
+    def _set_ocp_configuration(self, controlled_veh_ids: List[int]):
         self._set_ocp_dynamics()
         self._set_input_constraints()
         self._initial_state = self._ocp_interface.get_initial_state()
@@ -78,7 +163,6 @@ class VehicleOptimalController:
         # self._set_terminal_constraints(controlled_veh_ids)
         self._set_safety_constraints(controlled_veh_ids)
         self._set_costs()
-        self._solve_ocp()
 
     def has_solution(self) -> bool:
         return self._ocp_has_solution
@@ -86,19 +170,17 @@ class VehicleOptimalController:
     def get_desired_state(self):
         return self._desired_state
 
-    def set_max_iter(self, value) -> None:
-        self._solver_max_iter = value
-
     def get_input(self, time: float, veh_ids: Union[int, List[int]]):
         """
         Gets the optimal input found by the solver at the given time by linear
         interpolation
-        :param time: Current simulation time
+        :param time: Current time assuming t0 = 0. This means some callers must
+         provide t-t0.
         :param veh_ids: Ids of vehicles for which we want the inputs
         :return: Dictionary with veh ids as keys and inputs as values if
-         multiple veh ids passed, single input vector is single veh id
+         multiple veh ids passed, single input vector if single veh id
         """
-        delta_t = time - self._start_time
+        # delta_t = time - self._start_time
 
         if np.isscalar(veh_ids):
             single_veh_ctrl = True
@@ -113,7 +195,7 @@ class VehicleOptimalController:
             current_inputs[v_id] = []
             for i in range(n_optimal_inputs):
                 current_inputs[v_id].append(np.interp(
-                    delta_t, self._ocp_time, ego_inputs[i]))
+                    time, self._ocp_time, ego_inputs[i]))
                 # idx = np.searchsorted(self._ocp_time, delta_t)
                 # current_inputs[v_id].append(ego_inputs[i][idx])
 
@@ -250,8 +332,10 @@ class VehicleOptimalController:
         #  input can become non-zero
         # TODO: initial control guess all zeros or some value?
 
-        n_ctrl_pts = min(round(self._ocp_horizon), 10)  # empirical
-        time_pts = np.linspace(0, self._ocp_horizon, n_ctrl_pts, endpoint=True)
+        dt = VehicleOptimalController.discretization_step  # [s]
+        time_pts = np.arange(0, self._ocp_horizon, dt)
+        # n_ctrl_pts = 10  # min(round(self._ocp_horizon), 10)  # empirical
+        # time_pts = np.linspace(0, self._ocp_horizon, n_ctrl_pts, endpoint=True)
         u0 = self._ocp_interface.get_desired_input()
         # u0 = self._ocp_interface.get_initial_guess(time_pts)
         result = opt.solve_ocp(
@@ -261,7 +345,7 @@ class VehicleOptimalController:
             terminal_cost=self._terminal_cost,
             terminal_constraints=self._terminal_constraints,
             initial_guess=u0,
-            minimize_options={'maxiter': self._solver_max_iter,
+            minimize_options={'maxiter': self.solver_max_iter,
                               'disp': True},
             # log=False
             # basis=flat.BezierFamily(5, T=self._ocp_horizon)
@@ -281,6 +365,8 @@ class VehicleOptimalController:
         if result.success and result.cost > 4 * 1e3:
             print("but high cost indicates no LC.")
             self._ocp_has_solution = False
+        # TODO: tests only [Sept 20]
+        self._ocp_has_solution = True
 
     def detail_costs(self):
         """

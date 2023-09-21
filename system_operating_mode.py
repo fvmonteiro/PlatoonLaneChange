@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple
+
+import numpy as np
 
 import vehicle_models.base_vehicle as base
 
@@ -35,6 +37,10 @@ class SystemMode:
         return '{' + res + '}'
 
 
+# Alias for easier typing hints
+ModeSequence = List[Tuple[float, SystemMode]]
+
+
 def mode_sequence_to_leader_sequence(
         mode_sequence: ModeSequence
 ) -> Dict[int, List[Tuple[float, int]]]:
@@ -49,6 +55,19 @@ def mode_sequence_to_leader_sequence(
     return leader_sequence
 
 
-# Alias for easier typing hints
-ModeSequence = List[Tuple[float, SystemMode]]
+def mode_sequence_to_str(s: ModeSequence):
+    ret = ""
+    for t, m in s:
+        ret += "(" + str(t) + ": " + str(m) + ") "
+    return ret
 
+
+def compare_mode_sequences(s1: ModeSequence, s2: ModeSequence) -> bool:
+    if len(s1) != len(s2):
+        return False
+    for i in range(len(s1)):
+        t1, mode1 = s1[i]
+        t2, mode2 = s2[i]
+        if not (np.abs(t1 - t2) <= 0.1 and mode1 == mode2):
+            return False
+    return True
