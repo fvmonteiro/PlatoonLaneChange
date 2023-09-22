@@ -1,3 +1,5 @@
+from collections import defaultdict
+import pickle
 import time
 
 import analysis
@@ -118,13 +120,46 @@ def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
     analysis.plot_constrained_lane_change(data, 'p1')
 
 
+def mode_convergence_base_tests():
+    configure_optimal_controller(
+        max_iter=5, solver_max_iter=600, discretization_step=0.2,
+        time_horizon=5.0, has_terminal_constraints=False,
+        has_non_zero_initial_guess=False, has_lateral_constraint=False
+    )
+
+    n_platoon = 1
+    tf = 7
+    results = defaultdict(list)
+    for i in range(1, 3):
+        # All combinations
+        n_ld, n_fd, n_lo, n_fo = (int(b) for b in "{0:04b}".format(i))
+        print("============ Running scenario {} ============\t\n"
+              "n_ld={}, n_fd={}, n_lo={}, n_fo={}".format(
+                  i, n_ld, n_fd, n_lo, n_fo))
+        scenario = scenarios.PlatoonLaneChange(n_platoon,
+                                               n_lo, n_fo, n_ld, n_fd)
+        scenario.run(tf)
+        n_iter = len(scenario.get_opc_results_summary()['iteration'])
+        results['n_ld'].extend([n_ld] * n_iter)
+        results['n_fd'].extend([n_fd] * n_iter)
+        results['n_lo'].extend([n_lo] * n_iter)
+        results['n_fo'].extend([n_fo] * n_iter)
+        for key, values in scenario.get_opc_results_summary().items():
+            results[key].extend(values)
+    with open('result_summary', 'wb') as f:
+        pickle.dump(results, f, pickle.HIGHEST_PROTOCOL)
+
+
 def main():
 
     has_lo, has_fo = False, True
     has_ld, has_fd = False, False
 
-    configure_optimal_controller(max_iter=1, solver_max_iter=300,
-                                 discretization_step=0.5)
+    configure_optimal_controller(max_iter=3, solver_max_iter=500,
+                                 discretization_step=0.2, time_horizon=5.0,
+                                 has_terminal_constraints=False,
+                                 has_non_zero_initial_guess=False,
+                                 has_lateral_constraint=False)
 
     start_time = time.time()
 
@@ -135,9 +170,10 @@ def main():
     # run_cbf_lc_scenario(has_lo, has_fo, has_ld, has_fd)
     # run_internal_optimal_controller(has_lo, has_fo, has_ld, has_fd)
     # run_single_vehicle_platoon_test(has_lo, has_fo, has_ld, has_fd)
-    run_platoon_test(n_platoon=2, n_orig_ahead=0, n_orig_behind=0,
-                     n_dest_ahead=0, n_dest_behind=0)
+    # run_platoon_test(n_platoon=1, n_orig_ahead=0, n_orig_behind=0,
+    #                  n_dest_ahead=0, n_dest_behind=1)
     # load_and_plot_latest_scenario()
+    mode_convergence_base_tests()
 
     end_time = time.time()
     print("Execution time: ", end_time - start_time)

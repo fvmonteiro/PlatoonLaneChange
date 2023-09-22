@@ -161,19 +161,22 @@ class BaseVehicle(ABC):
 
     # TODO: figure out more descriptive name. This is a copy used for iterative
     #  simulations
-    def get_reset_copy(self):  # -> BaseVehicle:
+    def get_reset_copy(self) -> BaseVehicle:
         """
         Returns a copy of the vehicle with initial state equal the vehicle's
         current state and with no memory.
         :return:
         """
         new_vehicle = copy.deepcopy(self)
+        self._reset_copied_vehicle(new_vehicle)
+        return new_vehicle
+
+    def _reset_copied_vehicle(self, new_vehicle: BaseVehicle):
         new_vehicle.set_initial_state(self.get_x(), self.get_y(),
                                       self.get_theta(), self.get_vel())
         lc_direction = self.target_lane - new_vehicle.get_current_lane()
         new_vehicle.set_lane_change_direction(lc_direction)
         new_vehicle.reset_simulation_logs()
-        return new_vehicle
 
     def set_free_flow_speed(self, v_ff: float):
         self.free_flow_speed = v_ff

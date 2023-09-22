@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from functools import partial
 import pickle
-from typing import List, Tuple, Type, Union
+from typing import Dict, List, Type, Union
 
 import control as ct
 import numpy as np
@@ -19,9 +19,9 @@ import vehicle_models.four_state_vehicles as fsv
 class SimulationScenario(ABC):
     def __init__(self):
         self.n_per_lane: List[int] = []
-        self.vehicle_group = VehicleGroup()
         BaseVehicle.reset_vehicle_counter()
-        self.tf = None
+        self.vehicle_group = VehicleGroup()
+        self.result_summary: Dict = {}
 
     def create_uniform_vehicles(
             self, n_per_lane: List[int], vehicle_class: Type[BaseVehicle],
@@ -130,23 +130,13 @@ class SimulationScenario(ABC):
         # self.initial_state =
         # self.vehicle_group.get_full_initial_state_vector()
 
-    # def lane_change_scenario_vehicle_filter(self, values: List):
-    #     # Used together with lane change scenarios. We define values for the
-    #     # 4 relevant surrounding vehicles, but they might not all be in the
-    #     # current scenario
-    #     # TODO: poor organization
-    #     if self.n_per_lane[0] < 3:
-    #         values.pop(2)
-    #         if self.n_per_lane[0] < 2:
-    #             values.pop(0)
-    #     if self.n_per_lane[1] < 2:
-    #         values.pop()
-    #         if self.n_per_lane[1] < 1:
-    #             values.pop()
-    #     return values
-
     def response_to_dataframe(self) -> pd.DataFrame:
         return self.vehicle_group.to_dataframe()
+
+    # TODO: move to more specific class?
+    def get_opc_results_summary(self):
+        platoon_leader = self.vehicle_group.get_platoon_leader()
+        return platoon_leader.opt_controller.get_results_summary()
 
     @abstractmethod
     def create_initial_state(self):
@@ -187,9 +177,8 @@ class VehicleFollowingScenario(SimulationScenario):
         :param final_time: Total simulation time
         :return:
         """
-        self.tf = final_time
         dt = 1e-2
-        time = np.arange(0, self.tf, dt)
+        time = np.arange(0, final_time, dt)
         self.vehicle_group.prepare_to_start_simulation(len(time))
         self.vehicle_group.update_surrounding_vehicles()
         for i in range(len(time) - 1):
@@ -223,9 +212,8 @@ class FastLaneChange(SimulationScenario):
         :param final_time: Total simulation time
         :return:
         """
-        self.tf = final_time
         dt = 1e-2
-        time = np.arange(0, self.tf, dt)
+        time = np.arange(0, final_time, dt)
         ego = self.vehicle_group.vehicles[0]
         inputs = {}
         self.vehicle_group.prepare_to_start_simulation(len(time))
@@ -327,9 +315,8 @@ class LaneChangeScenario(SimulationScenario):
         # self.vehicle_group.make_all_connected()
 
     def run(self, final_time):
-        self.tf = final_time
         dt = 1e-2
-        time = np.arange(0, self.tf, dt)
+        time = np.arange(0, final_time, dt)
         self.vehicle_group.prepare_to_start_simulation(len(time))
         self.vehicle_group.update_surrounding_vehicles()
         for i in range(len(time) - 1):
@@ -339,6 +326,8 @@ class LaneChangeScenario(SimulationScenario):
             self.vehicle_group.simulate_one_time_step(time[i + 1])
 
 
+# TODO: make LaneChangeScenario inherit from PlatoonLaneChange or merge the two
+#  classes
 class PlatoonLaneChange(SimulationScenario):
 
     def __init__(self, n_platoon: int, n_orig_ahead: int,
@@ -430,9 +419,8 @@ class PlatoonLaneChange(SimulationScenario):
                                                        theta0_array, v0_array)
 
     def run(self, final_time):
-        self.tf = final_time
         dt = 1e-2
-        time = np.arange(0, self.tf, dt)
+        time = np.arange(0, final_time, dt)
         self.vehicle_group.prepare_to_start_simulation(len(time))
         self.vehicle_group.update_surrounding_vehicles()
         for i in range(len(time) - 1):
@@ -449,6 +437,7 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
 
     def __init__(self):
         super().__init__()
+        self.tf: float = 0.0
 
     def set_boundary_conditions(self, tf: float):
         """ Sets the initial state, final time and desired final states """
@@ -483,7 +472,8 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
         )
 
     def solve(self):
-        self.controller = opt_ctrl.VehicleOptimalController(self.tf)
+        self.controller = opt_ctrl.VehicleOptimalController()
+        self.controller.set_time_horizon(self.tf)
         self.controller.find_multiple_vehicle_trajectory(
             self.vehicle_group.vehicles,
             [self.vehicle_group.get_vehicle_id_by_name('ego')])

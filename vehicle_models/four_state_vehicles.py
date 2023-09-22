@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC
+import copy
 from typing import Dict, List, Union
 
 import numpy as np
@@ -129,25 +130,26 @@ class OptimalControlVehicle(FourStateVehicle):
         self.set_mode(modes.OCPLaneKeepingMode())
 
         self._n_feedback_inputs = self._n_inputs - self._n_optimal_inputs
-        self._ocp_has_solution = False
-        self._ocp_horizon = 10.0  # [s]
+        # self._ocp_has_solution = False
         self._ocp_initial_time = -np.inf
 
         self.opt_controller: opt_ctrl.VehicleOptimalController = (
-            opt_ctrl.VehicleOptimalController(self._ocp_horizon)
+            opt_ctrl.VehicleOptimalController()
         )
 
-    def set_ocp_initial_time(self, value):
-        self._ocp_initial_time = value
+    def reset_ocp_initial_time(self):
+        self._ocp_initial_time = 0.0
 
-    def get_reset_copy(self):
+    def get_reset_copy(self) -> OptimalControlVehicle:
         """
         Returns a copy of the vehicle with initial state equal the vehicle's
-        current state and with no memory.
+        current state and with no memory. In addition, sets ocp_initial_time to
+        zero
         :return:
         """
-        new_vehicle: OptimalControlVehicle = super().get_reset_copy()
-        new_vehicle.set_ocp_initial_time(0.0)
+        new_vehicle = copy.deepcopy(self)
+        self._reset_copied_vehicle(new_vehicle)
+        new_vehicle.reset_ocp_initial_time()
         return new_vehicle
 
     def get_intermediate_steps_data(self):
@@ -195,7 +197,7 @@ class OptimalControlVehicle(FourStateVehicle):
 
     def is_lane_changing(self) -> bool:
         delta_t = self.get_current_time() - self._lc_start_time
-        return delta_t <= self._ocp_horizon
+        return delta_t <= self.opt_controller.get_time_horizon()
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
                           vehicles: Dict[int, base.BaseVehicle]):
@@ -377,6 +379,27 @@ class PlatoonVehicle(SafeAccelOptimalLCVehicle):
         except AttributeError:
             return None
 
+    def get_reset_copy(self) -> PlatoonVehicle:
+        """
+        Returns a copy of the vehicle with initial state equal the vehicle's
+        current state and with no memory. In addition, sets ocp_initial_time to
+        zero and removes the vehicle from platoons.
+        :return:
+        """
+        # When we make a deepcopy of the vehicle, we copy the platoon, which
+        # has itself vehicles. This has two issues:
+        # 1. The vehicles in the copied platoons are not the vehicles being
+        # created.
+        # 2. The copied vehicles are no longer grouped in platoons (each one has
+        # its own platoon)
+        # The easiest solution is to have an empty platoon now and let the
+        # simulation figure out who goes in which platoons
+        new_vehicle = copy.deepcopy(self)
+        self._reset_copied_vehicle(new_vehicle)
+        new_vehicle.reset_ocp_initial_time()
+        new_vehicle._platoon = None
+        return new_vehicle
+
     def set_platoon(self, new_platoon: platoon.Platoon):
         self._platoon = new_platoon
 
@@ -389,17 +412,20 @@ class PlatoonVehicle(SafeAccelOptimalLCVehicle):
     def is_lane_changing(self) -> bool:
         # return self._platoon.is_lane_changing(self.get_current_time())
         delta_t = self.get_current_time() - self._lc_start_time
-        return delta_t <= self._ocp_horizon
+        return delta_t <= self.opt_controller.get_time_horizon()
+
+    def is_platoon_leader(self):
+        return self._id == self._platoon.get_platoon_leader_id()
 
     def can_start_lane_change(self, vehicles: Dict[int, base.BaseVehicle]
                               ) -> bool:
-        if self.opt_controller.has_solution():
+        if self._platoon.can_start_lane_change():
             return True
         # t = self.get_current_time()
         # if self._is_platoon_leader():
         #     self._platoon.compute_lane_change_trajectory(t, vehicles)
         # return self._platoon.trajectory_exists
-        if self._is_platoon_leader():
+        if self.is_platoon_leader():
             t = self.get_current_time()
             self._ocp_initial_time = t
             if self._is_verbose:
@@ -423,7 +449,7 @@ class PlatoonVehicle(SafeAccelOptimalLCVehicle):
 
         # t = self.get_current_time()
         if self.is_lane_changing():
-            if self._is_platoon_leader():
+            if self.is_platoon_leader():
                 delta_t = self.get_current_time() - self._ocp_initial_time
                 self._platoon.retrieve_all_inputs(delta_t)
             phi = self._platoon.get_input_for_vehicle(self._id)[0]
@@ -438,9 +464,6 @@ class PlatoonVehicle(SafeAccelOptimalLCVehicle):
     def _set_up_lane_change_control(self):
         self._platoon.set_lc_start_time(self._lc_start_time)
 
-    def _is_platoon_leader(self):
-        return self._id == self._platoon.get_platoon_leader_id()
-
     def analyze_platoons(self, vehicles: Dict[int, base.BaseVehicle]):
 
         # [Aug 23] We are only simulating simple scenarios. At the start of
@@ -448,16 +471,35 @@ class PlatoonVehicle(SafeAccelOptimalLCVehicle):
         # or join the platoon of the vehicle ahead. Vehicles do not leave or
         # join platoons afterward
 
-        if not self.is_in_a_platoon():
-            if (self.has_orig_lane_leader()
-                    and vehicles[
-                        self.get_orig_lane_leader_id()].is_in_a_platoon()):
-                leader_platoon = vehicles[
-                    self.get_orig_lane_leader_id()].get_platoon()
+        is_leader_in_a_platoon = (
+                self.has_orig_lane_leader()
+                and vehicles[self.get_orig_lane_leader_id()].is_in_a_platoon()
+        )
+        if is_leader_in_a_platoon:
+            leader_platoon: platoon.Platoon = vehicles[
+                self.get_orig_lane_leader_id()].get_platoon()
+            if not self.is_in_a_platoon() or self._platoon != leader_platoon:
                 leader_platoon.add_vehicle(self)
                 self.set_platoon(leader_platoon)
-            else:
+        else:
+            if not self.is_in_a_platoon():
                 self.set_platoon(platoon.Platoon(self))
+
+        # if not self.is_in_a_platoon():
+        #     if is_leader_in_a_platoon:
+        #         leader_platoon = vehicles[
+        #             self.get_orig_lane_leader_id()].get_platoon()
+        #         leader_platoon.add_vehicle(self)
+        #         self.set_platoon(leader_platoon)
+        #     else:
+        #         self.set_platoon(platoon.Platoon(self))
+        # else:
+        #     if is_leader_in_a_platoon:
+        #         leader_platoon = vehicles[
+        #             self.get_orig_lane_leader_id()].get_platoon()
+        #         if self._platoon != leader_platoon:
+        #             leader_platoon.add_vehicle(self)
+        #             self.set_platoon(leader_platoon)
 
     def _create_platoon(self):
         self.set_platoon(platoon.Platoon(self))
@@ -516,13 +558,6 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
         # Controller parameters
         self.h = vehicle.h  # time headway [s]
         self.long_controller = vehicle.long_controller
-
-        # TODO [Sept 18] moving this to set_leader_sequence method
-        # The solver always assumes t0 = 0, but we might be calling it at t > 0
-        # offset = vehicle.get_current_time()
-        # self.ocp_leader_switch_times = [t - offset for t
-        #                                 in vehicle.ocp_leader_switch_times]
-        # self.ocp_leader_sequence = vehicle.ocp_leader_sequence
 
     def get_input_limits(self) -> (List[float], List[float]):
         return [-self.phi_max], [self.phi_max]

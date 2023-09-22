@@ -80,6 +80,12 @@ class VehicleGroup:
                 platoon_vehs.append(veh)
         return platoon_vehs
 
+    def get_platoon_leader(self) -> fsv.PlatoonVehicle:
+        for veh in self.get_platoon_vehicles():
+            if veh.is_platoon_leader():
+                return veh
+        raise AttributeError("This vehicle group doesn't have any platoons")
+
     def get_initial_desired_gaps(self, v_ref: List[float] = None):
         gaps = []
         for veh_id in self.sorted_vehicle_ids:
