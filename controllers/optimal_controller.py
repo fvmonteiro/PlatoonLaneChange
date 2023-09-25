@@ -191,6 +191,7 @@ class VehicleOptimalController:
             input_sequence = mode_sequence
 
         converged = False
+        last_input = None
         counter = 0
         while not converged and counter < self.max_iter:
             counter += 1
@@ -198,15 +199,18 @@ class VehicleOptimalController:
             self._ocp_interface.set_mode_sequence(input_sequence)
             self._set_ocp_configuration(controlled_veh_ids)
             start_time = time.time()
-            self._solve_ocp()
+            self._solve_ocp(last_input)
             solve_time = time.time() - start_time
+            # TODO: do we want the mode sequence seen by the ocp solver or the
+            #  simulated one?
             simulated_vehicle_group = self.simulate_over_optimization_horizon(
                 vehicles)
+            # alt = self.get_mode_sequence_from_ocp_solution(vehicles)
             self._data_per_iteration.append(
                 simulated_vehicle_group.to_dataframe())
-            # analysis.plot_constrained_lane_change(
-            #     self._data_per_iteration[-1],
-            #     vehicles[center_veh_id].get_id())
+            analysis.plot_constrained_lane_change(
+                self._data_per_iteration[-1],
+                vehicles[center_veh_id].get_id())
             output_sequence = simulated_vehicle_group.get_mode_sequence()
 
             input_seq_str = som.mode_sequence_to_str(input_sequence)
@@ -221,19 +225,42 @@ class VehicleOptimalController:
                                                    output_sequence)
             print("Converged?", converged)
             input_sequence = output_sequence
+            if self.ocp_result.success:
+                last_input = self.ocp_result.inputs
 
     def simulate_over_optimization_horizon(
             self, vehicles: Dict[int, base.BaseVehicle]):
         dt = 1e-2
-        time = np.arange(0, self.get_time_horizon(), dt)
+        sim_time = np.arange(0, self.get_time_horizon(), dt)
 
         vehicle_group = vg.VehicleGroup()
         vehicle_group.populate_with_vehicles(vehicles)
         vehicle_group.set_verbose(False)
-        vehicle_group.prepare_to_start_simulation(len(time))
+        vehicle_group.prepare_to_start_simulation(len(sim_time))
         vehicle_group.update_surrounding_vehicles()
-        for i in range(len(time) - 1):
-            vehicle_group.simulate_one_time_step(time[i + 1])
+        for i in range(len(sim_time) - 1):
+            vehicle_group.simulate_one_time_step(sim_time[i + 1])
+        return vehicle_group
+
+    def get_mode_sequence_from_ocp_solution(self, vehicles):
+        sim_time = self.ocp_result.time
+        initial_state_per_vehicle = (
+            self._ocp_interface.map_state_to_vehicle_ids(self._initial_state)
+        )
+
+        vehicle_group = vg.VehicleGroup()
+        vehicle_group.populate_with_vehicles(vehicles,
+                                             initial_state_per_vehicle)
+        vehicle_group.set_verbose(False)
+        vehicle_group.prepare_to_start_simulation(len(sim_time))
+        for i in range(1, len(sim_time)):
+            vehicle_group.update_surrounding_vehicles()
+            t = self.ocp_result.time[i]
+            state = self.ocp_result.states[:, i]
+            state_by_vehicle = (
+                self._ocp_interface.map_state_to_vehicle_ids(state)
+            )
+            vehicle_group.set_vehicle_states(t, state_by_vehicle)
         return vehicle_group
 
     def _set_ocp_configuration(self, controlled_veh_ids: List[int]):
@@ -242,9 +269,9 @@ class VehicleOptimalController:
         self._initial_state = self._ocp_interface.get_initial_state()
         self._desired_state = self._ocp_interface.create_desired_state(
             self.time_horizon)
-        print("x0 vs xf:")
-        print(self._initial_state)
-        print(self._desired_state)
+        # print("x0 vs xf:")
+        # print(self._initial_state)
+        # print(self._desired_state)
         if self.has_terminal_constraints:
             self._set_terminal_constraints(controlled_veh_ids)
         self._set_safety_constraints(controlled_veh_ids)
@@ -285,16 +312,14 @@ class VehicleOptimalController:
                 x0=self._desired_state)
 
     def _set_terminal_constraints(self, controlled_veh_ids: List[int]):
-        # TODO: set terminal constraints for all vehicles?
-        controlled_vehicles = self._ocp_interface.vehicles
-        # controlled_vehicles = [self._ocp_interface.vehicles[veh_id]
-        #                        for veh_id in controlled_veh_ids]
+        controlled_vehicles = [self._ocp_interface.vehicles[veh_id]
+                               for veh_id in controlled_veh_ids]
         dim = [2 * len(controlled_vehicles),
                self._ocp_interface.n_states + self._ocp_interface.n_inputs]
         rows = np.zeros(dim)
         lower_boundaries = np.zeros(dim[0])
         upper_boundaries = np.zeros(dim[0])
-        y_margin = 1e-1 * 10
+        y_margin = 1e-1
         theta_margin = 1e-2
         for i in range(len(controlled_vehicles)):
             veh = controlled_vehicles[i]
@@ -362,10 +387,13 @@ class VehicleOptimalController:
                     -epsilon, epsilon)
                 self._constraints.append(dest_lane_follower_safety)
 
-    def _solve_ocp(self):
+    def _solve_ocp(self, custom_initial_control: np.ndarray = None):
         dt = VehicleOptimalController.discretization_step  # [s]
         time_pts = np.arange(0, self.time_horizon, dt)
-        if self.has_non_zero_initial_guess:
+
+        if custom_initial_control is not None:
+            u0 = custom_initial_control
+        elif self.has_non_zero_initial_guess:
             u0 = self._ocp_interface.get_initial_guess(time_pts)
         else:
             u0 = self._ocp_interface.get_desired_input()
@@ -378,7 +406,6 @@ class VehicleOptimalController:
             initial_guess=u0,
             minimize_options={'maxiter': self.solver_max_iter,
                               'disp': True},
-            # log=False
             # basis=flat.BezierFamily(5, T=self._ocp_horizon)
         )
         # Note: the basis parameter above was set empirically - it might not
@@ -386,7 +413,7 @@ class VehicleOptimalController:
         self.ocp_result = result
         self._ocp_time = result.time
         self._ocp_inputs_per_vehicle = (
-            self._ocp_interface.map_ocp_solution_to_vehicle_inputs(
+            self._ocp_interface.map_input_to_vehicle_ids(
                 result.inputs))
 
         self._ocp_has_solution = result.success

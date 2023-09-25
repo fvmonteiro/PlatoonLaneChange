@@ -140,7 +140,7 @@ class OptimalControlVehicle(FourStateVehicle):
     def reset_ocp_initial_time(self):
         self._ocp_initial_time = 0.0
 
-    def get_reset_copy(self) -> OptimalControlVehicle:
+    def make_reset_copy(self, initial_state=None) -> OptimalControlVehicle:
         """
         Returns a copy of the vehicle with initial state equal the vehicle's
         current state and with no memory. In addition, sets ocp_initial_time to
@@ -148,7 +148,7 @@ class OptimalControlVehicle(FourStateVehicle):
         :return:
         """
         new_vehicle = copy.deepcopy(self)
-        self._reset_copied_vehicle(new_vehicle)
+        self._reset_copied_vehicle(new_vehicle, initial_state)
         new_vehicle.reset_ocp_initial_time()
         return new_vehicle
 
@@ -379,7 +379,7 @@ class PlatoonVehicle(SafeAccelOptimalLCVehicle):
         except AttributeError:
             return None
 
-    def get_reset_copy(self) -> PlatoonVehicle:
+    def make_reset_copy(self, initial_state=None) -> PlatoonVehicle:
         """
         Returns a copy of the vehicle with initial state equal the vehicle's
         current state and with no memory. In addition, sets ocp_initial_time to
@@ -395,7 +395,7 @@ class PlatoonVehicle(SafeAccelOptimalLCVehicle):
         # The easiest solution is to have an empty platoon now and let the
         # simulation figure out who goes in which platoons
         new_vehicle = copy.deepcopy(self)
-        self._reset_copied_vehicle(new_vehicle)
+        self._reset_copied_vehicle(new_vehicle, initial_state)
         new_vehicle.reset_ocp_initial_time()
         new_vehicle._platoon = None
         return new_vehicle

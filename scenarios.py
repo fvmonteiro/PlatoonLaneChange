@@ -138,9 +138,9 @@ class SimulationScenario(ABC):
         platoon_leader = self.vehicle_group.get_platoon_leader()
         return platoon_leader.opt_controller.get_results_summary()
 
-    @abstractmethod
-    def create_initial_state(self):
-        pass
+    # @abstractmethod
+    # def create_initial_state(self):
+    #     pass
 
     @abstractmethod
     def run(self, parameters):
@@ -164,7 +164,7 @@ class VehicleFollowingScenario(SimulationScenario):
         self.n_per_lane = [n_vehs]
         self.vehicle_group.create_vehicle_array(vehicle_classes)
         # self.create_vehicle_group(vehicle_classes)
-        self.set_free_flow_speeds(v_ff)
+        self.vehicle_group.set_free_flow_speeds(v_ff)
 
     def create_initial_state(self):
         gap = 2
@@ -197,7 +197,7 @@ class FastLaneChange(SimulationScenario):
 
     def create_initial_state(self):
         v_ff = 10
-        self.set_free_flow_speeds(v_ff)
+        self.vehicle_group.set_free_flow_speeds(v_ff)
 
         # Initial states
         x0 = [0.]
@@ -232,106 +232,9 @@ class FastLaneChange(SimulationScenario):
 
 class LaneChangeScenario(SimulationScenario):
 
-    def __init__(self, lc_veh_class: Union[Type[BaseVehicle], partial[str]],
-                 has_lo: bool,
-                 has_fo: bool, has_ld: bool, has_fd: bool):
-        """
-
-        :param lc_veh_class:
-        :param has_lo: if True, includes the origin lane leader
-        :param has_fo: if True, includes the origin lane follower
-        :param has_ld: if True, includes the destination lane leader
-        :param has_fd: if True, includes the destination lane follower
-        """
-        super().__init__()
-
-        self.lc_intention_time = 1.0
-        self.leader_sequence = dict()  # used when iterating over the OCP
-        self._has_lo, self._has_fo, self._has_ld, self._has_fd = (
-            has_lo, has_fo, has_ld, has_fd
-        )
-
-        orig_veh_classes = (lc_veh_class,)
-        if has_lo:
-            orig_veh_classes = (fsv.ClosedLoopVehicle,) + orig_veh_classes
-        if has_fo:
-            orig_veh_classes = orig_veh_classes + (fsv.ClosedLoopVehicle,)
-
-        n_orig = 1 + has_lo + has_fo
-        n_dest = has_ld + has_fd
-        self.n_per_lane = [n_orig, n_dest]
-        veh_classes = orig_veh_classes + (fsv.ClosedLoopVehicle,) * n_dest
-        self.vehicle_group.create_vehicle_array(list(veh_classes))
-        self.create_initial_state()
-
-    @classmethod
-    def closed_loop(cls, has_lo: bool, has_fo: bool,
-                    has_ld: bool, has_fd: bool):
-        """
-        Creates a scenario instance where all vehicles have longitudinal and
-        lateral feedback controllers.
-        :param has_lo: if True, includes the origin lane leader
-        :param has_fo: if True, includes the origin lane follower
-        :param has_ld: if True, includes the destination lane leader
-        :param has_fd: if True, includes the destination lane follower
-        """
-        return cls(fsv.ClosedLoopVehicle, has_lo, has_fo, has_ld, has_fd)
-
-    @classmethod
-    def optimal_control(cls, has_lo: bool, has_fo: bool,
-                        has_ld: bool, has_fd: bool):
-        """
-
-        :param has_lo: if True, includes the origin lane leader
-        :param has_fo: if True, includes the origin lane follower
-        :param has_ld: if True, includes the destination lane leader
-        :param has_fd: if True, includes the destination lane follower
-        :return:
-        """
-        return cls(fsv.SafeAccelOptimalLCVehicle,
-                   has_lo, has_fo, has_ld, has_fd)
-
-    @classmethod
-    def single_vehicle_platoon_lane_change(cls, has_lo: bool, has_fo: bool,
-                                           has_ld: bool, has_fd: bool):
-        """
-        Only tests platoons with a single vehicle. Used for initial tests.
-        :param has_lo: if True, includes the origin lane leader
-        :param has_fo: if True, includes the origin lane follower
-        :param has_ld: if True, includes the destination lane leader
-        :param has_fd: if True, includes the destination lane follower
-        """
-        scenario = cls(fsv.PlatoonVehicle, has_lo, has_fo, has_ld, has_fd)
-        return scenario
-
-    def get_initial_system_mode(self):
-        self.vehicle_group.prepare_to_start_simulation(1)
-        self.vehicle_group.update_surrounding_vehicles()
-        return self.vehicle_group.mode_sequence[:]
-
-    def create_initial_state(self):
-        self.create_base_lane_change_initial_state(self._has_lo, self._has_fo,
-                                                   self._has_ld, self._has_fd)
-        # self.vehicle_group.make_all_connected()
-
-    def run(self, final_time):
-        dt = 1e-2
-        time = np.arange(0, final_time, dt)
-        self.vehicle_group.prepare_to_start_simulation(len(time))
-        self.vehicle_group.update_surrounding_vehicles()
-        for i in range(len(time) - 1):
-            if np.isclose(time[i], self.lc_intention_time, atol=dt / 10):
-                self.vehicle_group.set_single_vehicle_lane_change_direction(
-                    'ego', 1)
-            self.vehicle_group.simulate_one_time_step(time[i + 1])
-
-
-# TODO: make LaneChangeScenario inherit from PlatoonLaneChange or merge the two
-#  classes
-class PlatoonLaneChange(SimulationScenario):
-
-    def __init__(self, n_platoon: int, n_orig_ahead: int,
-                 n_orig_behind: int, n_dest_ahead: int, n_dest_behind: int):
+    def __init__(self, lc_veh_class: Type[BaseVehicle], n_platoon: int,
+                 n_orig_ahead: int, n_orig_behind: int,
+                 n_dest_ahead: int, n_dest_behind: int):
         if n_platoon < 1:
             raise ValueError("Scenario must have at least one platoon vehicle")
 
@@ -345,38 +248,79 @@ class PlatoonLaneChange(SimulationScenario):
 
         orig_veh_classes = (
                 (fsv.ClosedLoopVehicle,) * n_orig_ahead
-                + (fsv.PlatoonVehicle,) * n_platoon  # ignore type checker here
+                + (lc_veh_class,) * n_platoon
                 + (fsv.ClosedLoopVehicle,) * n_orig_behind)
         dest_veh_classes = (fsv.ClosedLoopVehicle,) * (n_dest_ahead
                                                        + n_dest_behind)
         self.n_per_lane = [len(orig_veh_classes), len(dest_veh_classes)]
         self.vehicle_group.create_vehicle_array(
             list(orig_veh_classes + dest_veh_classes))
-        # veh_classes = ([orig_veh_classes, dest_veh_classes])
-        # self.create_vehicle_group(veh_classes)
 
-        vehicle_names = (['lo' + str(i) for i in range(n_orig_ahead, 0, -1)]
-                         + ['p' + str(i) for i in range(1, n_platoon + 1)]
-                         + ['fo' + str(i) for i in range(1, n_orig_behind + 1)]
-                         + ['ld' + str(i) for i in range(n_dest_ahead, 0, -1)]
-                         + ['fd' + str(i) for i in range(1, n_dest_behind + 1)])
+        # TODO: name differently based on whether n_xxx > 1
+        self.lc_vehicle_names = ['p' + str(i) for i in range(1, n_platoon + 1)]
+        vehicle_names = (
+                ['lo' + str(i) for i in range(n_orig_ahead, 0, -1)]
+                + self.lc_vehicle_names
+                + ['fo' + str(i) for i in range(1, n_orig_behind + 1)]
+                + ['ld' + str(i) for i in range(n_dest_ahead, 0, -1)]
+                + ['fd' + str(i) for i in range(1, n_dest_behind + 1)]
+        )
         self.vehicle_group.set_vehicle_names(vehicle_names)
-        self.create_initial_state()
 
-    def create_initial_state(self):
+    @classmethod
+    def platoon_lane_change(cls, n_platoon: int, n_orig_ahead: int,
+                            n_orig_behind: int, n_dest_ahead: int,
+                            n_dest_behind: int):
+        return cls(fsv.PlatoonVehicle, n_platoon, n_orig_ahead, n_orig_behind,
+                   n_dest_ahead, n_dest_behind)
+
+    @classmethod
+    def single_vehicle_optimal_lane_change(
+            cls, n_orig_ahead: int, n_orig_behind: int,
+            n_dest_ahead: int, n_dest_behind: int):
+        return cls(fsv.SafeAccelOptimalLCVehicle, 1, n_orig_ahead,
+                   n_orig_behind, n_dest_ahead, n_dest_behind)
+
+    @classmethod
+    def single_vehicle_feedback_lane_change(
+            cls, n_orig_ahead: int, n_orig_behind: int,
+            n_dest_ahead: int, n_dest_behind: int):
+        return cls(fsv.ClosedLoopVehicle, 1, n_orig_ahead,
+                   n_orig_behind, n_dest_ahead, n_dest_behind)
+
+    def create_safe_uniform_speed_initial_state(self):
         # Free-flow speeds
         v_orig = 10
         v_dest = 10
         v_ff = 10
         v_ff_array = ([v_orig] + [v_ff] * (self.n_per_lane[0] - 1)
                       + [v_dest] + [v_ff] * (self.n_per_lane[1] - 1))
-        self.set_free_flow_speeds(v_ff_array)
-
-        # Initial states
         delta_x = {'lo': 0.0, 'ld': 0.0,
                    'fd': 0.0}  # deviation from equilibrium
-        v0_array = ([v_orig] * self.n_per_lane[0]
-                    + [v_dest] * self.n_per_lane[1])
+        self.create_initial_state(v_ff_array, delta_x)
+
+    def create_test_initial_state(self):
+        """
+        For ongoing tests. NOT TO BE USED IN DATA COLLECTION
+        :return:
+        """
+        print("======= RUNNING AN EXPLORATORY TEST SCENARIO =======")
+        v_orig = 10
+        v_dest = 10
+        v_ff = 10
+        v_ff_array = ([v_orig] + [v_ff] * (self.n_per_lane[0] - 1)
+                      + [v_dest] + [v_ff] * (self.n_per_lane[1] - 1))
+        delta_x = {'lo': 0.0, 'ld': 4.0,
+                   'fd': 0.0}  # deviation from equilibrium
+        self.create_initial_state(v_ff_array, delta_x)
+
+    def create_initial_state(self, v_ff_array: List[float],
+                             delta_x: Dict[str, float]):
+        self.vehicle_group.set_free_flow_speeds(v_ff_array)
+
+        # Initial states
+        v0_array = (v_ff_array[0:1] * self.n_per_lane[0]
+                    + self.n_per_lane[1] * [v_ff_array[self.n_per_lane[0]]])
         ref_gaps = self.vehicle_group.get_initial_desired_gaps(v0_array)
         idx_p0 = self._n_orig_ahead
         idx_p_last = idx_p0 + self._n_platoon - 1
@@ -425,9 +369,9 @@ class PlatoonLaneChange(SimulationScenario):
         self.vehicle_group.update_surrounding_vehicles()
         for i in range(len(time) - 1):
             if np.isclose(time[i], self.lc_intention_time, atol=dt / 10):
-                for k in range(self._n_platoon):
-                    self.vehicle_group.set_single_vehicle_lane_change_direction(
-                        'p' + str(k + 1), 1)
+                self.vehicle_group.set_vehicles_lane_change_direction(
+                    self.lc_vehicle_names, 1
+                )
             self.vehicle_group.simulate_one_time_step(time[i + 1])
 
 
@@ -446,6 +390,10 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
         self.vehicle_group.prepare_to_start_simulation(1)
         self.set_desired_lane_changes()
         self.vehicle_group.update_surrounding_vehicles()
+
+    @abstractmethod
+    def create_initial_state(self):
+        pass
 
     def boundary_conditions_to_dataframe(self) -> pd.DataFrame:
         """
@@ -510,11 +458,6 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
             current_inputs = self.controller.get_input(time[i], veh_ids)
             self.vehicle_group.simulate_one_time_step(time[i + 1],
                                                       current_inputs)
-            # self.vehicle_group.update_vehicle_modes()
-            # self.vehicle_group.determine_inputs(current_inputs)
-            # self.vehicle_group.compute_derivatives()
-            # self.vehicle_group.update_states(time[i + 1])
-            # self.vehicle_group.update_surrounding_vehicles()
 
     @abstractmethod
     def set_desired_lane_changes(self):

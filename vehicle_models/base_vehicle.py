@@ -161,21 +161,30 @@ class BaseVehicle(ABC):
 
     # TODO: figure out more descriptive name. This is a copy used for iterative
     #  simulations
-    def get_reset_copy(self) -> BaseVehicle:
+    def make_reset_copy(self, initial_state=None
+                        ) -> BaseVehicle:
         """
         Returns a copy of the vehicle with initial state equal the vehicle's
         current state and with no memory.
         :return:
         """
         new_vehicle = copy.deepcopy(self)
-        self._reset_copied_vehicle(new_vehicle)
+        self._reset_copied_vehicle(new_vehicle, initial_state)
         return new_vehicle
 
-    def _reset_copied_vehicle(self, new_vehicle: BaseVehicle):
-        new_vehicle.set_initial_state(self.get_x(), self.get_y(),
-                                      self.get_theta(), self.get_vel())
-        lc_direction = self.target_lane - new_vehicle.get_current_lane()
-        new_vehicle.set_lane_change_direction(lc_direction)
+    def _reset_copied_vehicle(self, new_vehicle: BaseVehicle,
+                              initial_state=None):
+        if initial_state is None:
+            initial_state = self.get_states()
+        x = initial_state[self._state_idx['x']]
+        y = initial_state[self._state_idx['y']]
+        theta = initial_state[self._state_idx['theta']]
+        try:
+            v = initial_state[self._state_idx['v']]
+        except KeyError:
+            v = None
+        new_vehicle.set_initial_state(x, y, theta, v)
+        new_vehicle.target_lane = self.target_lane
         new_vehicle.reset_simulation_logs()
 
     def set_free_flow_speed(self, v_ff: float):
@@ -192,8 +201,6 @@ class BaseVehicle(ABC):
         self.initial_state = self.create_state_vector(x, y, theta, v)
         self._states = self.initial_state
         self.target_lane = self.get_current_lane()
-        # self.target_lane = round(self.get_y() / const.LANE_WIDTH)
-        # self.target_y = self.get_y()
 
     def set_mode(self, mode: modes.VehicleMode):
         if self._is_verbose:
@@ -210,7 +217,7 @@ class BaseVehicle(ABC):
     def set_lane_change_direction(self, lc_direction):
         self.target_lane = self.get_current_lane() + lc_direction
 
-    def set_current_leader_id(self, veh_id):
+    def _set_current_leader_id(self, veh_id):
         """
         Sets which vehicle used to determine this vehicle's accel. The
         definition of leader ids for all vehicles in a vehicle group determines
@@ -219,6 +226,19 @@ class BaseVehicle(ABC):
         :return:
         """
         self._leader_id[self._iter_counter] = veh_id
+
+    def set_new_time_and_state(self, time, states):
+        """
+        Used when vehicle states were computed externally. Do not mix use of
+        this method and update_states.
+        :param time:
+        :param states:
+        :return:
+        """
+        self._iter_counter += 1
+        self._states = states
+        self._states_history[:, self._iter_counter] = self._states
+        self._time[self._iter_counter] = time
 
     def prepare_to_start_simulation(self, n_samples: int):
         """
@@ -488,7 +508,7 @@ class BaseVehicle(ABC):
         # self._derivatives = np.zeros(self._n_states)
 
     def follow_orig_lane_leader(self):
-        self.set_current_leader_id(self.get_orig_lane_leader_id())
+        self._set_current_leader_id(self.get_orig_lane_leader_id())
 
     @abstractmethod
     def get_vel(self):

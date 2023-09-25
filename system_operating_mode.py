@@ -71,3 +71,18 @@ def compare_mode_sequences(s1: ModeSequence, s2: ModeSequence) -> bool:
         if not (np.abs(t1 - t2) <= 0.1 and mode1 == mode2):
             return False
     return True
+
+
+def print_vehicles_leader_sequences(
+        vehicles: Dict[int, base.BaseVehicleInterface]):
+    print("OCP leader sequences:")
+    for veh in vehicles.values():
+        if len(veh.ocp_leader_switch_times) == 0:
+            continue
+        print(veh.get_name(), end=": ")
+        for t, lead_id in zip(veh.ocp_leader_switch_times,
+                              veh.ocp_leader_sequence):
+            print('(t={}, l={})'.format(
+                t, vehicles[lead_id].get_name()
+                if lead_id >= 0 else lead_id), end="; ")
+        print()

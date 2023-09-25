@@ -111,11 +111,25 @@ class VehicleGroup:
             vehicle = self.vehicles[veh_id]
             vehicle.set_free_flow_speed(values[veh_id])
 
+    def set_free_flow_speeds_by_name(self, values: Dict[str, float]):
+        for vehicle in self.vehicles.values():
+            vehicle.set_free_flow_speed(values[vehicle.get_name()])
+
     def set_vehicles_initial_states(self, x0, y0, theta0, v0):
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
             vehicle.set_initial_state(x0[veh_id], y0[veh_id],
                                       theta0[veh_id], v0[veh_id])
+
+    def set_vehicles_lane_change_direction(
+            self, ids_or_names: List[Union[int, str]],
+            lc_direction: Union[int, List[int]]):
+        if np.isscalar(lc_direction):
+            lc_direction = [lc_direction] * len(ids_or_names)
+        for i in range(len(ids_or_names)):
+            veh_id = ids_or_names[i]
+            self.set_single_vehicle_lane_change_direction(veh_id,
+                                                          lc_direction[i])
 
     def set_single_vehicle_lane_change_direction(
             self, veh_id_or_name: Union[int, str], lc_direction: int):
@@ -175,12 +189,17 @@ class VehicleGroup:
             self.vehicles[vehicle.get_id()] = vehicle
 
     # TODO: rename to indicate vehicles are reset to restart simulation
-    def populate_with_vehicles(self, vehicles: Dict[int, base.BaseVehicle]):
+    def populate_with_vehicles(self, vehicles: Dict[int, base.BaseVehicle],
+                               initial_state_per_vehicle=None):
         if self.get_n_vehicles() > 0:
             raise AttributeError("Cannot set vehicles to a vehicle group "
                                  "that was already initialized")
         for veh_id in sorted(vehicles.keys()):
-            vehicle = vehicles[veh_id].get_reset_copy()
+            if initial_state_per_vehicle:
+                initial_state = initial_state_per_vehicle[veh_id]
+            else:
+                initial_state = None
+            vehicle = vehicles[veh_id].make_reset_copy(initial_state)
             self.sorted_vehicle_ids.append(veh_id)
             self.vehicles[veh_id] = vehicle
             self.name_to_id[vehicle.get_name()] = veh_id
@@ -213,6 +232,18 @@ class VehicleGroup:
         self.compute_derivatives()
         self.update_states(new_time)
         self.update_surrounding_vehicles()
+
+    def set_vehicle_states(self, time, state_vectors):
+        """
+        Used to set vehicle states when they were computed by the optimal
+        control solver
+        :param time:
+        :param state_vectors:
+        :return:
+        """
+        for veh_id in self.sorted_vehicle_ids:
+            self.vehicles[veh_id].set_new_time_and_state(time,
+                                                         state_vectors[veh_id])
 
     def update_surrounding_vehicles(self):
         for ego_vehicle in self.vehicles.values():

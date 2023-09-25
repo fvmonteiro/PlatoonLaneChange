@@ -57,19 +57,6 @@ class VehicleGroupInterface:
 
         self.create_vehicle_interfaces(vehicles, ego_id)
 
-        # Sanity check:
-        print("OCP leader sequences:")
-        for veh in self.vehicles.values():
-            if len(veh.ocp_leader_switch_times) == 0:
-                continue
-            print(veh.get_name(), end=": ")
-            for t, lead_id in zip(veh.ocp_leader_switch_times,
-                                  veh.ocp_leader_sequence):
-                print('(t={}, l={})'.format(
-                    t, self.vehicles[lead_id].get_name()
-                    if lead_id >= 0 else lead_id), end="; ")
-            print()
-
     def get_input_limits(self):
         lower_bounds = []
         upper_bounds = []
@@ -102,11 +89,16 @@ class VehicleGroupInterface:
         # estimated_safe_time: float):
         n_ctrl_points = len(time_points)
         initial_guess = []
+        samples_in_a_second = sum(time_points < 1.0)
         for veh_id in self.sorted_vehicle_ids:
             min_phi, max_phi = self.vehicles[veh_id].get_input_limits()
-            initial_guess.extend(max_phi * 2
-                                 + [0.] * (n_ctrl_points - 4)
-                                 + min_phi * 2 if max_phi else [])
+            # only vehs with optimal control have bounds, but we should find a
+            # better way of testing here since this might change
+            if len(min_phi) > 0:
+                initial_guess.extend(
+                    max_phi * samples_in_a_second
+                    + min_phi * samples_in_a_second
+                    + [0.0] * (len(time_points) - 2 * samples_in_a_second))
         return np.array(initial_guess).reshape(-1, n_ctrl_points)
 
     def get_state_indices(self, state_name: str) -> List[int]:
@@ -127,12 +119,12 @@ class VehicleGroupInterface:
         return (self.state_idx_map[veh_id]
                 + self.vehicles[veh_id].state_idx[state_name])
 
-    def get_vehicle_state_vector_by_id(self, veh_id, states):
+    def get_vehicle_state_vector_by_id(self, veh_id: int, states: np.ndarray):
         start_idx = self.state_idx_map[veh_id]
         end_idx = self.state_idx_map[veh_id] + self.vehicles[veh_id].n_states
         return states[start_idx: end_idx]
 
-    def get_vehicle_inputs_vector_by_id(self, veh_id, inputs):
+    def get_vehicle_inputs_vector_by_id(self, veh_id: int, inputs: np.ndarray):
         start_idx = self.input_idx_map[veh_id]
         end_idx = self.input_idx_map[veh_id] + self.vehicles[veh_id].n_inputs
         return inputs[start_idx: end_idx]
@@ -298,12 +290,12 @@ class VehicleGroupInterface:
         phi = self.get_a_vehicle_input_by_id(lc_veh_id, inputs, 'phi')
         margin = 1e-1
         if make_smooth:
-            return self.smooth_min_0(gap_error + margin) * phi
+            return self._smooth_min_0(gap_error + margin) * phi
         else:
             return min(gap_error + margin, 0) * phi
 
     @staticmethod
-    def smooth_min_0(x, epsilon: float = 1e-5):
+    def _smooth_min_0(x, epsilon: float = 1e-5):
         if x < -epsilon:
             return x
         elif x > epsilon:
@@ -311,13 +303,39 @@ class VehicleGroupInterface:
         else:
             return -(x - epsilon) ** 2 / 4 / epsilon
 
-    def map_ocp_solution_to_vehicle_inputs(self, ocp_inputs):
-        inputs_map = {}
-        for veh_id, vehicle in self.vehicles.items():
-            ego_inputs = self.get_vehicle_inputs_vector_by_id(veh_id,
-                                                              ocp_inputs)
-            inputs_map[veh_id] = ego_inputs
-        return inputs_map
+    def map_input_to_vehicle_ids(self, array):
+        """
+        Creates a dictionary mapping the vehicle id to chunks of the given array
+        :param array:
+        :return:
+        """
+        return self.map_array_to_vehicle_ids(array, False)
+
+    def map_state_to_vehicle_ids(self, array):
+        """
+        Creates a dictionary mapping the vehicle id to chunks of the given array
+        :param array:
+        :return:
+        """
+        return self.map_array_to_vehicle_ids(array, True)
+
+    def map_array_to_vehicle_ids(self, array: np.ndarray,
+                                 is_state: bool):
+        """
+        Creates a dictionary mapping the vehicle id to chunks of the given array
+        :param array:
+        :param is_state: Whether it is an array of states (if True) or inputs
+         (if False)
+        :return:
+        """
+        get_function = (self.get_vehicle_state_vector_by_id if is_state
+                        else self.get_vehicle_inputs_vector_by_id)
+        mapped_array = {}
+        for veh_id in self.vehicles.keys():
+            # it's alright, pycharm is tripping
+            ego_values = get_function(veh_id, array)
+            mapped_array[veh_id] = ego_values
+        return mapped_array
 
     # TODO: maybe delete?
     def to_dataframe(self, time, states, inputs) -> pd.DataFrame:
