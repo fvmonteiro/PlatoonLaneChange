@@ -78,8 +78,8 @@ def run_constraints_scenario(has_lo: bool, has_fo: bool, has_ld: bool,
 
 def load_and_plot_latest_scenario():
     data = analysis.load_simulated_scenario(file_name)
-    # analysis.plot_initial_and_final_states(data, custom_colors=True)
-    analysis.plot_constrained_lane_change(data, 'ego')
+    analysis.plot_trajectory(data)
+    # analysis.plot_constrained_lane_change(data, 'ego')
 
 
 def run_save_and_plot(scenario: scenarios.LaneChangeScenario, tf: float = 10.):
@@ -165,11 +165,11 @@ def mode_convergence_base_tests():
 
 def main():
     n_platoon = 1
-    n_orig_ahead, n_orig_behind = 1, 1
+    n_orig_ahead, n_orig_behind = 0, 0
     n_dest_ahead, n_dest_behind = 0, 0
 
-    configure_optimal_controller(max_iter=5, solver_max_iter=500,
-                                 discretization_step=0.1, time_horizon=5.0,
+    configure_optimal_controller(max_iter=1, solver_max_iter=500,
+                                 discretization_step=0.5, time_horizon=5.0,
                                  has_terminal_constraints=False,
                                  has_non_zero_initial_guess=False,
                                  has_lateral_constraint=False)

@@ -95,6 +95,10 @@ class VehicleOptimalController:
     def get_time_horizon(self) -> float:
         return self.time_horizon
 
+    def get_time_points(self):
+        dt = self.discretization_step  # [s]
+        return np.arange(0, self.time_horizon, dt)
+
     def get_data_per_iteration(self):
         return self._data_per_iteration
 
@@ -118,11 +122,11 @@ class VehicleOptimalController:
             # t_eval=np.arange(0, time_pts[-1], 0.01)
         )
 
-    def get_input(self, time: float, veh_ids: Union[int, List[int]]):
+    def get_input(self, current_time: float, veh_ids: Union[int, List[int]]):
         """
         Gets the optimal input found by the solver at the given time by linear
         interpolation
-        :param time: Current time assuming t0 = 0. This means some callers must
+        :param current_time: Time assuming t0 = 0. This means some callers must
          provide t-t0.
         :param veh_ids: Ids of vehicles for which we want the inputs
         :return: Dictionary with veh ids as keys and inputs as values if
@@ -143,7 +147,7 @@ class VehicleOptimalController:
             current_inputs[v_id] = []
             for i in range(n_optimal_inputs):
                 current_inputs[v_id].append(np.interp(
-                    time, self._ocp_time, ego_inputs[i]))
+                    current_time, self._ocp_time, ego_inputs[i]))
                 # idx = np.searchsorted(self._ocp_time, delta_t)
                 # current_inputs[v_id].append(ego_inputs[i][idx])
 
@@ -197,6 +201,8 @@ class VehicleOptimalController:
             counter += 1
 
             self._ocp_interface.set_mode_sequence(input_sequence)
+            # TODO: can't we configure it only once? (Except the cost memory
+            #  must be reset)
             self._set_ocp_configuration(controlled_veh_ids)
             start_time = time.time()
             self._solve_ocp(last_input)
@@ -292,14 +298,15 @@ class VehicleOptimalController:
         # TODO: should depend on the vehicle model
         #  Three state: y_cost=0, theta_cost=0.1
         #  Safe vehicles: y_cost=0.1, theta_cost=10
-        # Desired control; not final control
-        uf = self._ocp_interface.get_desired_input()
+        time_points = self.get_time_points()
 
+        # Desired (not final) control
+        uf = self._ocp_interface.get_desired_input()
         state_cost_matrix = self._ocp_interface.create_state_cost_matrix(
             y_cost=0.01, theta_cost=0, x_cost=0)
-
         input_cost_matrix = np.diag([0.01] * self._ocp_interface.n_inputs)
-        self._running_cost = opt.quadratic_cost(
+        self.cost_with_memory_1 = CostWithMemory(time_points)
+        self._running_cost = self.cost_with_memory_1.quadratic_cost(
             self._dynamic_system, state_cost_matrix, input_cost_matrix,
             self._desired_state, uf)
 
@@ -307,7 +314,8 @@ class VehicleOptimalController:
             p = 1000
             terminal_cost_matrix = (
                 self._ocp_interface.create_terminal_cost_matrix(p))
-            self._terminal_cost = opt.quadratic_cost(
+            self.cost_with_memory_2 = CostWithMemory(time_points[-1:])
+            self._terminal_cost = self.cost_with_memory_2.quadratic_cost(
                 self._dynamic_system, terminal_cost_matrix, None,
                 x0=self._desired_state)
 
@@ -388,8 +396,7 @@ class VehicleOptimalController:
                 self._constraints.append(dest_lane_follower_safety)
 
     def _solve_ocp(self, custom_initial_control: np.ndarray = None):
-        dt = VehicleOptimalController.discretization_step  # [s]
-        time_pts = np.arange(0, self.time_horizon, dt)
+        time_pts = self.get_time_points()
 
         if custom_initial_control is not None:
             u0 = custom_initial_control
@@ -397,6 +404,7 @@ class VehicleOptimalController:
             u0 = self._ocp_interface.get_initial_guess(time_pts)
         else:
             u0 = self._ocp_interface.get_desired_input()
+
         result = opt.solve_ocp(
             self._dynamic_system, time_pts, self._initial_state,
             cost=self._running_cost,
@@ -406,6 +414,7 @@ class VehicleOptimalController:
             initial_guess=u0,
             minimize_options={'maxiter': self.solver_max_iter,
                               'disp': True},
+            log=True
             # basis=flat.BezierFamily(5, T=self._ocp_horizon)
         )
         # Note: the basis parameter above was set empirically - it might not
@@ -439,20 +448,102 @@ class VehicleOptimalController:
         self._results_summary['input_sequence'].append(input_sequence)
         self._results_summary['output_sequence'].append(output_sequence)
 
-    def _detail_costs(self):
-        """
-        Attempt to figure out where cost differences between apparently equal
-        configurations come from. However, the opc solver costs and the costs
-        computed here always differ.
-        :return:
-        """
-        ocp_states = self.ocp_result.states
-        ocp_inputs = self.ocp_result.inputs
-        running_cost = sum(
-            self._running_cost(ocp_states[:, i], ocp_inputs[:, i])
-            for i in range(ocp_states.shape[1]))
-        terminal_cost = self._terminal_cost(ocp_states[:, -1], 0)
-        print("Computed costs:")
-        print("\tL={}, T={}, total={}".format(running_cost, terminal_cost,
-                                              running_cost + terminal_cost))
 
+class CostWithMemory:
+
+    def __init__(self, time_points: Union[List, np.ndarray]):
+        """
+
+        :param time_points:
+        """
+        self._time_points = time_points
+        self._n_eval_per_iter: int = len(time_points)
+        self._current_iter_costs: np.ndarray = np.zeros(self._n_eval_per_iter)
+        self._call_counter: int = 0
+        self._cost_per_iter: List[float] = []
+
+    # TODO: alternative approach: make this a function that receives a "memory"
+    #  object
+    def quadratic_cost(self, sys: ct.NonlinearIOSystem, Q, R,
+                       x0: Union[np.ndarray, float] = 0,
+                       u0: Union[np.ndarray, float] = 0):
+        """
+        Inspired from the Control library with modifications to keep track of
+        costs over iterations
+
+        Create quadratic cost function
+        Returns a quadratic cost function that can be used for an optimal control
+        problem.  The cost function is of the form
+          cost = (x - x0)^T Q (x - x0) + (u - u0)^T R (u - u0)
+
+        :param sys: InputOutputSystem
+            I/O system for which the cost function is being defined.
+        :param Q: 2D array_like
+            Weighting matrix for state cost. Dimensions must match system state.
+        :param R: 2D array_like
+            Weighting matrix for input cost. Dimensions must match system input.
+        :param x0: 1D array
+            Nominal value of the system state (for which cost should be zero).
+        :param u0: 1D array
+            Nominal value of the system input (for which cost should be zero).
+
+        :return: callable
+            Function that can be used to evaluate the cost at a given state and
+            input.  The call signature of the function is cost_fun(x, u).
+
+        """
+        # Process the input arguments
+        if Q is not None:
+            Q = np.atleast_2d(Q)
+            if Q.size == 1:  # allow scalar weights
+                Q = np.eye(sys.nstates) * Q.item()
+            elif Q.shape != (sys.nstates, sys.nstates):
+                raise ValueError("Q matrix is the wrong shape")
+
+        if R is not None:
+            R = np.atleast_2d(R)
+            if R.size == 1:  # allow scalar weights
+                R = np.eye(sys.ninputs) * R.item()
+            elif R.shape != (sys.ninputs, sys.ninputs):
+                raise ValueError("R matrix is the wrong shape")
+
+        if Q is None:
+            return partial(self.input_only_cost, R=R, u0=u0)
+
+        if R is None:
+            return partial(self.state_only_cost, Q=Q, x0=x0)
+
+        # Received both Q and R matrices
+        return partial(self.full_cost, Q=Q, R=R, x0=x0, u0=u0)
+
+    def save_costs(self, current_cost):
+        self._current_iter_costs[self._call_counter] = current_cost
+        self._call_counter += 1
+
+        # Integrate the cost
+        if self._call_counter >= self._n_eval_per_iter:
+            # Compute the time intervals
+            dt = np.diff(self._time_points)
+            total_cost = 0
+            for i in range(self._time_points.size - 1):
+                # Approximate the integral using trapezoidal rule
+                total_cost += 0.5 * (self._current_iter_costs[i]
+                                     + self._current_iter_costs[i+1]) * dt[i]
+            self._cost_per_iter.append(total_cost)
+            self._current_iter_costs = np.zeros(self._n_eval_per_iter)
+            self._call_counter = 0
+
+    def input_only_cost(self, x, u, R, u0):
+        cost = ((u - u0) @ R @ (u - u0)).item()
+        self.save_costs(cost)
+        return cost
+
+    def state_only_cost(self, x, u, Q, x0):
+        cost = ((x - x0) @ Q @ (x - x0)).item()
+        self.save_costs(cost)
+        return cost
+
+    def full_cost(self, x, u, Q, R, x0, u0):
+        cost = ((x-x0) @ Q @ (x-x0) + (u-u0) @ R @ (u-u0)).item()
+        self.save_costs(cost)
+        return cost

@@ -7,80 +7,7 @@ import pandas as pd
 import seaborn as sns
 
 import constants as const
-
-
-def compute_values_relative_to_other_vehicle(
-        data: pd.DataFrame, other_name):
-    """
-    Computes gap relative to the relevant surrounding vehicle
-    :param data: dataframe with position of all vehicles
-    :param other_name: Options: leader, dest_lane_leader, dest_lane_follower
-    :return:
-    """
-    other_id = other_name + '_id'
-    merged = data[['t', 'id', other_id, 'v', 'x']].merge(
-        data[['t', 'id', 'v', 'x']], how='left',
-        left_on=['t', other_id], right_on=['t', 'id'],
-        suffixes=(None, '_' + other_name)).drop(columns='id_' + other_name)
-    data['gap_to_' + other_name] = merged['x_' + other_name] - merged['x']
-    # data['rel_vel_to_' + other_name] = merged['v'] - merged['v_' + other_name]
-
-
-def compute_values_to_fixed_nearby_vehicle(
-        data: pd.DataFrame, other_name, do_renaming: bool = False):
-    """
-    Computes gap relative to the *initial* relevant surrounding vehicle
-    :param data: dataframe with position of all vehicles
-    :param other_name: Options: leader, dest_lane_leader, dest_lane_follower
-    :param do_renaming: If true removes '_initial_' from the newly created
-     column names
-    :return:
-    """
-    data["_".join(['initial', other_name, 'id'])] = (
-        data[other_name + '_id'].groupby(data['id']).transform('first'))
-    compute_values_relative_to_other_vehicle(data, 'initial_' + other_name)
-    # Remove 'initial_' from column names
-    if do_renaming:
-        new_names = {col: col.replace('_initial_', '_') for col in data.columns
-                     if 'initial_' + other_name in col}
-        data.rename(columns=new_names, inplace=True)
-
-
-def compute_values_to_orig_lane_leader(data: pd.DataFrame):
-    """
-    Computes gap relative to the *initial* relevant surrounding vehicle
-    :param data:
-    :return:
-    """
-    compute_values_relative_to_other_vehicle(data, 'orig_lane_leader')
-
-
-def compute_values_to_future_leader(data: pd.DataFrame):
-    compute_values_relative_to_other_vehicle(data, 'dest_lane_leader')
-    # compute_values_to_fixed_nearby_vehicle(data, 'dest_lane_leader',
-    #                                        do_renaming=True)
-
-
-def compute_values_to_future_follower(data: pd.DataFrame):
-    compute_values_relative_to_other_vehicle(data, 'dest_lane_follower')
-    # compute_values_to_fixed_nearby_vehicle(data, 'dest_lane_follower',
-    #                                        do_renaming=True)
-    data['gap_to_dest_lane_follower'] = -data['gap_to_dest_lane_follower']
-
-
-def compute_all_relative_values(data: pd.DataFrame):
-    compute_values_to_orig_lane_leader(data)
-    compute_values_to_fixed_nearby_vehicle(data, 'orig_lane_leader')
-    compute_values_to_future_leader(data)
-    compute_values_to_future_follower(data)
-
-
-def check_constraint_satisfaction(data: pd.DataFrame, lc_id: int):
-    data['safe_gap'] = compute_default_safe_gap(data['v'])
-    data['gap_error'] = data['gap_to_orig_lane_leader'] - data['safe_gap']
-    data['constraint'] = np.minimum(data['gap_error'], 0) * data['phi']
-    plot_scenario_results(['t', 't', 't'], ['constraint', 'phi', 'gap_error'],
-                          data[data['id'] == lc_id])
+import post_processing as pp
 
 
 def load_simulated_scenario(pickle_file_name: str):
@@ -89,8 +16,12 @@ def load_simulated_scenario(pickle_file_name: str):
     return data
 
 
-def compute_default_safe_gap(vel):
-    return const.SAFE_LC_TIME_HEADWAY * vel + const.STANDSTILL_DISTANCE
+def check_constraint_satisfaction(data: pd.DataFrame, lc_id: int):
+    data['safe_gap'] = pp.compute_default_safe_gap(data['v'])
+    data['gap_error'] = data['gap_to_orig_lane_leader'] - data['safe_gap']
+    data['constraint'] = np.minimum(data['gap_error'], 0) * data['phi']
+    plot_scenario_results(['t', 't', 't'], ['constraint', 'phi', 'gap_error'],
+                          data[data['id'] == lc_id])
 
 
 def compare_desired_and_actual_final_states(desired_data, simulated_data):
@@ -101,6 +32,37 @@ def compare_desired_and_actual_final_states(desired_data, simulated_data):
     plot_initial_and_final_states(simulated_data, ax[1])
     ax[1].set_title("Simulated")
     ax[1].set_aspect('equal', adjustable='box')
+    fig.tight_layout()
+    fig.show()
+
+
+def plot_trajectory(data: pd.DataFrame):
+    # min_y, max_y = data['y'].min(), data['y'].max()
+    min_x, max_x = data['x'].min(), data['x'].max()
+    dt = 1.0  # [s]
+    time = np.arange(data['t'].min(), data['t'].max(), dt)
+    step = round(dt / (data['t'].iloc[1] - data['t'].iloc[0]))
+    fig, ax = plt.subplots(len(time), 1)
+    # fig.set_size_inches(6, 9)
+    for i in range(len(time)):
+        for veh_id in data['id'].unique():
+            veh_data = data[data['id'] == veh_id]
+            veh_name = veh_data['name'].iloc[0]
+            color = _get_color_by_name(veh_name)
+            ax[i].scatter(data=veh_data.iloc[i * step],
+                          x='x', y='y', marker='>', color=color,)
+        # sns.scatterplot(data, x='x', y='y', hue='name', palette=colors,
+        #                 markers='>', legend=False, marker='>')
+
+        ax[i].axhline(y=const.LANE_WIDTH / 2, linestyle='--', color='black')
+        # ax[i].set_aspect('equal', adjustable='box')
+        ax[i].set(xlim=(min_x - 2, max_x),
+                  ylim=(-const.LANE_WIDTH / 2, 3 * const.LANE_WIDTH / 2))
+        if i == len(time) - 1:
+            ax[i].set(xlabel=_get_variable_with_unit('x'))
+        else:
+            ax[i].set_xticks([])
+
     fig.tight_layout()
     fig.show()
 
@@ -166,7 +128,7 @@ def plot_lane_change(data: pd.DataFrame):
 
 def plot_constrained_lane_change(data: pd.DataFrame,
                                  lc_veh_id_or_name: Union[int, str]):
-    compute_all_relative_values(data)
+    pp.compute_all_relative_values(data)
 
     sns.set_style('whitegrid')
     x_axes = ['t', 't', 't']
@@ -201,7 +163,7 @@ def plot_gap_errors(data: pd.DataFrame,
         lc_vehicle_data = data[data['name'] == veh_id_or_name]
     else:
         lc_vehicle_data = data[data['id'] == veh_id_or_name]
-    ego_safe_gap = compute_default_safe_gap(lc_vehicle_data['v'].to_numpy())
+    ego_safe_gap = pp.compute_default_safe_gap(lc_vehicle_data['v'].to_numpy())
 
     gap = lc_vehicle_data['gap_to_orig_lane_leader'].to_numpy()
     orig_lane_error = gap - ego_safe_gap
@@ -217,7 +179,7 @@ def plot_gap_errors(data: pd.DataFrame,
         print("Hey! Time to deal with multiple dest lane followers")
     if len(dest_follower_id) > 0:
         follower_data = data[data['id'] == dest_follower_id[0]]
-        foll_safe_gap = compute_default_safe_gap(follower_data['v'].to_numpy())
+        foll_safe_gap = pp.compute_default_safe_gap(follower_data['v'].to_numpy())
         gap = lc_vehicle_data['gap_to_dest_lane_follower'].to_numpy()
         dest_lane_error = gap - foll_safe_gap
         ax.plot(lc_vehicle_data['t'], dest_lane_error, label='fd to ego')
@@ -237,7 +199,7 @@ def plot_vehicle_following(data: pd.DataFrame):
     :return:
     """
     sns.set_style('whitegrid')
-    compute_all_relative_values(data)
+    pp.compute_all_relative_values(data)
     x_axes = ['t', 't']
     y_axes = ['gap_to_orig_lane_leader', 'v']
     plot_scenario_results(x_axes, y_axes, data)

@@ -242,9 +242,9 @@ class LaneChangeScenario(SimulationScenario):
 
         self.lc_intention_time = 1.0
         self.leader_sequence = dict()  # used when iterating over the OCP
-        self._n_orig_ahead = n_orig_ahead
+        self._n_orig_ahead, self._n_orig_behind = n_orig_ahead, n_orig_behind
         self._n_platoon = n_platoon
-        self._n_dest_ahead = n_dest_ahead
+        self._n_dest_ahead, self._n_dest_behind = n_dest_ahead, n_dest_behind
 
         orig_veh_classes = (
                 (fsv.ClosedLoopVehicle,) * n_orig_ahead
@@ -270,23 +270,48 @@ class LaneChangeScenario(SimulationScenario):
     @classmethod
     def platoon_lane_change(cls, n_platoon: int, n_orig_ahead: int,
                             n_orig_behind: int, n_dest_ahead: int,
-                            n_dest_behind: int):
+                            n_dest_behind: int) -> LaneChangeScenario:
         return cls(fsv.PlatoonVehicle, n_platoon, n_orig_ahead, n_orig_behind,
                    n_dest_ahead, n_dest_behind)
 
     @classmethod
     def single_vehicle_optimal_lane_change(
             cls, n_orig_ahead: int, n_orig_behind: int,
-            n_dest_ahead: int, n_dest_behind: int):
+            n_dest_ahead: int, n_dest_behind: int) -> LaneChangeScenario:
         return cls(fsv.SafeAccelOptimalLCVehicle, 1, n_orig_ahead,
                    n_orig_behind, n_dest_ahead, n_dest_behind)
 
     @classmethod
     def single_vehicle_feedback_lane_change(
             cls, n_orig_ahead: int, n_orig_behind: int,
-            n_dest_ahead: int, n_dest_behind: int):
+            n_dest_ahead: int, n_dest_behind: int) -> LaneChangeScenario:
         return cls(fsv.ClosedLoopVehicle, 1, n_orig_ahead,
                    n_orig_behind, n_dest_ahead, n_dest_behind)
+
+    def name_vehicles(self):
+        # NOT READY
+        # compare to code in constructor
+        if self._n_platoon > 1:
+            self.lc_vehicle_names = ['p' + str(i) for i
+                                     in range(1, self._n_platoon + 1)]
+        else:
+            self.lc_vehicle_names = ['ego']
+
+        vehicle_counts = [
+            self._n_orig_ahead, self._n_platoon, self._n_orig_behind,
+            self._n_dest_ahead, self._n_dest_behind]
+        vehicle_base_names = ['lo', 'p', 'fo', 'ld', 'fd']
+        all_names = []
+        for i in range(len(vehicle_counts)):
+            n = vehicle_counts[i]
+            base_name = vehicle_base_names[i]
+            if n != 1:
+                all_names.extend([base_name + str(i) for i
+                                  in range(self._n_orig_ahead, 0, -1)])
+            else:
+                all_names.append(base_name)
+
+        self.vehicle_group.set_vehicle_names(all_names)
 
     def create_safe_uniform_speed_initial_state(self):
         # Free-flow speeds
