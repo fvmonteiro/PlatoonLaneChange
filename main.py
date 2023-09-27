@@ -11,7 +11,8 @@ from controllers.optimal_controller import configure_optimal_controller
 import vehicle_models
 import scenarios
 
-file_name = 'data.pickle'  # temp
+trajectory_file_name = 'trajectory_data.pickle'  # temp
+cost_file_name = 'cost_data.pickle'
 
 
 def run_no_lc_scenario():
@@ -48,7 +49,7 @@ def run_base_opc_scenario(max_iter=100):
     scenario.set_boundary_conditions(tf)
     scenario.solve()
     scenario.run()
-    scenario.save_response_data(file_name)
+    scenario.save_response_data(trajectory_file_name)
     data = scenario.response_to_dataframe()
     analysis.plot_lane_change(data)
 
@@ -66,9 +67,8 @@ def run_constraints_scenario(has_lo: bool, has_fo: bool, has_ld: bool,
     scenario.solve()
     scenario.run()
     # Check results
-    scenario.save_response_data(file_name)
+    scenario.save_response_data(trajectory_file_name)
     data = scenario.response_to_dataframe()
-    # lc_veh_id = scenario.lc_veh_id
     analysis.plot_constrained_lane_change(data, 'ego')
     analysis.plot_constrained_lane_change(
         scenario.ocp_simulation_to_dataframe(), 'ego')
@@ -77,18 +77,31 @@ def run_constraints_scenario(has_lo: bool, has_fo: bool, has_ld: bool,
 
 
 def load_and_plot_latest_scenario():
-    data = analysis.load_simulated_scenario(file_name)
-    analysis.plot_trajectory(data)
-    # analysis.plot_constrained_lane_change(data, 'ego')
+    trajectory_data = analysis.load_latest_simulated_scenario(
+        trajectory_file_name)
+    analysis.plot_trajectory(trajectory_data)
+    analysis.plot_constrained_lane_change(trajectory_data, 'p1')
+
+    cost_data = analysis.load_latest_simulated_scenario(cost_file_name)
+    analysis.plot_cost_per_solver_evaluation(cost_data[0], cost_data[1])
 
 
 def run_save_and_plot(scenario: scenarios.LaneChangeScenario, tf: float = 10.):
     scenario.create_test_initial_state()
     scenario.run(tf)
-    scenario.save_response_data(file_name)
+
+    scenario.save_response_data(trajectory_file_name)
     data = scenario.response_to_dataframe()
-    analysis.plot_initial_and_final_states(data, custom_colors=True)
+    analysis.plot_trajectory(data)
     analysis.plot_constrained_lane_change(data, 'p1')  # TODO: ego or p1
+
+    try:
+        scenario.save_cost_data(cost_file_name)
+        running_cost, terminal_cost = scenario.get_opc_cost_history()
+        analysis.plot_cost_per_solver_evaluation(running_cost, terminal_cost)
+    except AttributeError:
+        warnings.warn('Trying to get cost of scenario without platoons.'
+                      '\nCommand ignored.')
 
 
 def run_cbf_lc_scenario(n_orig_ahead: int, n_orig_behind: int,
@@ -165,10 +178,10 @@ def mode_convergence_base_tests():
 
 def main():
     n_platoon = 1
-    n_orig_ahead, n_orig_behind = 0, 0
+    n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 0, 0
 
-    configure_optimal_controller(max_iter=1, solver_max_iter=500,
+    configure_optimal_controller(max_iter=2, solver_max_iter=500,
                                  discretization_step=0.5, time_horizon=5.0,
                                  has_terminal_constraints=False,
                                  has_non_zero_initial_guess=False,

@@ -40,8 +40,6 @@ class VehicleGroupInterface:
         :param ego_id: If given, assumes this vehicle as the center of
          the system, i.e., its (x, y) = (0, 0)
         """
-        # TODO: make vehicles a  list?
-        #  The order of vehicles must be fixed anyway
         self.vehicles: Dict[int, base.BaseVehicleInterface] = {}
         # Often, we need to iterate over all vehicles in the order they were
         # created. The list below make that easy
@@ -119,12 +117,14 @@ class VehicleGroupInterface:
         return (self.state_idx_map[veh_id]
                 + self.vehicles[veh_id].state_idx[state_name])
 
-    def get_vehicle_state_vector_by_id(self, veh_id: int, states: np.ndarray):
+    def get_vehicle_state_vector_by_id(self, veh_id: int, states: np.ndarray
+                                       ) -> np.ndarray:
         start_idx = self.state_idx_map[veh_id]
         end_idx = self.state_idx_map[veh_id] + self.vehicles[veh_id].n_states
         return states[start_idx: end_idx]
 
-    def get_vehicle_inputs_vector_by_id(self, veh_id: int, inputs: np.ndarray):
+    def get_vehicle_inputs_vector_by_id(self, veh_id: int, inputs: np.ndarray
+                                        ) -> np.ndarray:
         start_idx = self.input_idx_map[veh_id]
         end_idx = self.input_idx_map[veh_id] + self.vehicles[veh_id].n_inputs
         return inputs[start_idx: end_idx]
@@ -303,7 +303,7 @@ class VehicleGroupInterface:
         else:
             return -(x - epsilon) ** 2 / 4 / epsilon
 
-    def map_input_to_vehicle_ids(self, array):
+    def map_input_to_vehicle_ids(self, array) -> Dict[int, np.ndarray]:
         """
         Creates a dictionary mapping the vehicle id to chunks of the given array
         :param array:
@@ -311,7 +311,7 @@ class VehicleGroupInterface:
         """
         return self.map_array_to_vehicle_ids(array, False)
 
-    def map_state_to_vehicle_ids(self, array):
+    def map_state_to_vehicle_ids(self, array) -> Dict[int, np.ndarray]:
         """
         Creates a dictionary mapping the vehicle id to chunks of the given array
         :param array:
@@ -320,7 +320,7 @@ class VehicleGroupInterface:
         return self.map_array_to_vehicle_ids(array, True)
 
     def map_array_to_vehicle_ids(self, array: np.ndarray,
-                                 is_state: bool):
+                                 is_state: bool) -> Dict[int, np.ndarray]:
         """
         Creates a dictionary mapping the vehicle id to chunks of the given array
         :param array:

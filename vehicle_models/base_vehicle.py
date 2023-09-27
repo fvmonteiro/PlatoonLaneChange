@@ -9,9 +9,7 @@ import numpy as np
 import pandas as pd
 
 import constants as const
-# import platoon
 import vehicle_operating_modes.base_operating_modes as modes
-# import vehicle_ocp_interface as vi
 
 
 class BaseVehicle(ABC):
@@ -227,18 +225,23 @@ class BaseVehicle(ABC):
         """
         self._leader_id[self._iter_counter] = veh_id
 
-    def set_new_time_and_state(self, time, states):
+    def write_state_and_input(self, time: float, states: np.ndarray,
+                              optimal_phi: float):
         """
         Used when vehicle states were computed externally. Do not mix use of
         this method and update_states.
         :param time:
         :param states:
+        :param optimal_phi:
         :return:
         """
         self._iter_counter += 1
+        self._time[self._iter_counter] = time
         self._states = states
         self._states_history[:, self._iter_counter] = self._states
-        self._time[self._iter_counter] = time
+        if optimal_phi:
+            self._inputs[self._input_idx['phi']] = optimal_phi
+            self._inputs_history[:, self._iter_counter] = self._inputs
 
     def prepare_to_start_simulation(self, n_samples: int):
         """

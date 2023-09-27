@@ -10,30 +10,35 @@ import constants as const
 import post_processing as pp
 
 
-def load_simulated_scenario(pickle_file_name: str):
+def load_latest_simulated_scenario(pickle_file_name: str):
     with open(pickle_file_name, 'rb') as f:
         data = pickle.load(f)
     return data
 
 
-def check_constraint_satisfaction(data: pd.DataFrame, lc_id: int):
-    data['safe_gap'] = pp.compute_default_safe_gap(data['v'])
-    data['gap_error'] = data['gap_to_orig_lane_leader'] - data['safe_gap']
-    data['constraint'] = np.minimum(data['gap_error'], 0) * data['phi']
-    plot_scenario_results(['t', 't', 't'], ['constraint', 'phi', 'gap_error'],
-                          data[data['id'] == lc_id])
+def plot_cost_per_solver_evaluation(running_costs, terminal_costs):
+    """
 
+    :param running_costs: 2D list with costs over solver iterations for each
+     time the optimal control problem was solved
+    :param terminal_costs: 2D list with costs over solver iterations for each
+     time the optimal control problem was solved. Could be an empty list.
+    :return:
+    """
+    n = len(running_costs)
+    has_terminal_cost = len(terminal_costs) > 0
 
-def compare_desired_and_actual_final_states(desired_data, simulated_data):
-    fig, ax = plt.subplots(2, 1)
-    plot_initial_and_final_states(desired_data, ax[0])
-    ax[0].set_title("Desired")
-    ax[0].set_aspect('equal', adjustable='box')
-    plot_initial_and_final_states(simulated_data, ax[1])
-    ax[1].set_title("Simulated")
-    ax[1].set_aspect('equal', adjustable='box')
-    fig.tight_layout()
-    fig.show()
+    fig, axs_2d = plt.subplots(n, 1, squeeze=False)
+    axs = [ax[0] for ax in axs_2d]
+    for i in range(n):
+        axs[i].plot(running_costs[i], label='running costs')
+        if has_terminal_cost:
+            axs[i].plot(terminal_costs[i], label='terminal costs')
+        axs[i].legend()
+        _, y_high = axs[i].get_ylim()
+        axs[i].set_ylim([0, min(running_costs[i][0] + 0.5, y_high)])
+    axs[-1].set_xlabel('function evaluations')
+    plt.show()
 
 
 def plot_trajectory(data: pd.DataFrame):
@@ -161,17 +166,19 @@ def plot_gap_errors(data: pd.DataFrame,
 
     if isinstance(veh_id_or_name, str):
         lc_vehicle_data = data[data['name'] == veh_id_or_name]
+        veh_name = veh_id_or_name
     else:
         lc_vehicle_data = data[data['id'] == veh_id_or_name]
+        veh_name = lc_vehicle_data['name'].iloc[0]
     ego_safe_gap = pp.compute_default_safe_gap(lc_vehicle_data['v'].to_numpy())
 
     gap = lc_vehicle_data['gap_to_orig_lane_leader'].to_numpy()
     orig_lane_error = gap - ego_safe_gap
-    ax.plot(lc_vehicle_data['t'], orig_lane_error, label='ego to lo')
+    ax.plot(lc_vehicle_data['t'], orig_lane_error, label=veh_name + ' to lo')
 
     gap = lc_vehicle_data['gap_to_dest_lane_leader'].to_numpy()
     dest_lane_error = gap - ego_safe_gap
-    ax.plot(lc_vehicle_data['t'], dest_lane_error, label='ego to ld')
+    ax.plot(lc_vehicle_data['t'], dest_lane_error, label=veh_name + ' to ld')
 
     dest_follower_ids = lc_vehicle_data['dest_lane_follower_id'].unique()
     dest_follower_id = [veh_id for veh_id in dest_follower_ids if veh_id >= 0]
@@ -182,7 +189,8 @@ def plot_gap_errors(data: pd.DataFrame,
         foll_safe_gap = pp.compute_default_safe_gap(follower_data['v'].to_numpy())
         gap = lc_vehicle_data['gap_to_dest_lane_follower'].to_numpy()
         dest_lane_error = gap - foll_safe_gap
-        ax.plot(lc_vehicle_data['t'], dest_lane_error, label='fd to ego')
+        ax.plot(lc_vehicle_data['t'], dest_lane_error,
+                label='fd to ' + veh_name)
 
     ax.legend()
     y_low, y_high = ax.get_ylim()
@@ -223,6 +231,26 @@ def plot_scenario_results(x_axes: List[str], y_axes: List[str],
         ax[i].set(xlabel=_get_variable_with_unit(x),
                   ylabel=_get_variable_with_unit(y),
                   ylim=(low, high))
+    fig.tight_layout()
+    fig.show()
+
+
+def check_constraint_satisfaction(data: pd.DataFrame, lc_id: int):
+    data['safe_gap'] = pp.compute_default_safe_gap(data['v'])
+    data['gap_error'] = data['gap_to_orig_lane_leader'] - data['safe_gap']
+    data['constraint'] = np.minimum(data['gap_error'], 0) * data['phi']
+    plot_scenario_results(['t', 't', 't'], ['constraint', 'phi', 'gap_error'],
+                          data[data['id'] == lc_id])
+
+
+def compare_desired_and_actual_final_states(desired_data, simulated_data):
+    fig, ax = plt.subplots(2, 1)
+    plot_initial_and_final_states(desired_data, ax[0])
+    ax[0].set_title("Desired")
+    ax[0].set_aspect('equal', adjustable='box')
+    plot_initial_and_final_states(simulated_data, ax[1])
+    ax[1].set_title("Simulated")
+    ax[1].set_aspect('equal', adjustable='box')
     fig.tight_layout()
     fig.show()
 

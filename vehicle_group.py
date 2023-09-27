@@ -1,4 +1,4 @@
-from typing import Any, Dict, Iterable, List, Type, Union, Tuple
+from typing import Any, Dict, Iterable, List, Type, Union, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -7,6 +7,9 @@ import pandas as pd
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
 import system_operating_mode as som
+
+
+V = TypeVar('V', bound=base.BaseVehicle)
 
 
 class VehicleGroup:
@@ -72,13 +75,26 @@ class VehicleGroup:
     def get_vehicle_by_name(self, name: str) -> base.BaseVehicle:
         return self.vehicles[self.name_to_id[name]]
 
+    def get_optimal_control_vehicles(self) -> List[fsv.OptimalControlVehicle]:
+        return self.get_vehicles_of_type(fsv.OptimalControlVehicle)
+
     def get_platoon_vehicles(self) -> List[fsv.PlatoonVehicle]:
-        platoon_vehs: List[fsv.PlatoonVehicle] = []
+        return self.get_vehicles_of_type(fsv.PlatoonVehicle)
+        # platoon_vehs: List[fsv.PlatoonVehicle] = []
+        # for veh_id in self.sorted_vehicle_ids:
+        #     veh = self.vehicles[veh_id]
+        #     if isinstance(veh, fsv.PlatoonVehicle):
+        #         platoon_vehs.append(veh)
+        # return platoon_vehs
+
+    def get_vehicles_of_type(self, vehicle_type: Type[base.BaseVehicle]
+                             ) -> List[V]:
+        selected_vehicles: List[vehicle_type] = []
         for veh_id in self.sorted_vehicle_ids:
             veh = self.vehicles[veh_id]
-            if isinstance(veh, fsv.PlatoonVehicle):
-                platoon_vehs.append(veh)
-        return platoon_vehs
+            if isinstance(veh, vehicle_type):
+                selected_vehicles.append(veh)
+        return selected_vehicles
 
     def get_platoon_leader(self) -> fsv.PlatoonVehicle:
         for veh in self.get_platoon_vehicles():
@@ -233,17 +249,21 @@ class VehicleGroup:
         self.update_states(new_time)
         self.update_surrounding_vehicles()
 
-    def set_vehicle_states(self, time, state_vectors):
+    def write_vehicle_states(self, time, state_vectors: Dict[int, np.ndarray],
+                             optimal_phi: Dict[int, np.ndarray]):
         """
-        Used to set vehicle states when they were computed by the optimal
-        control solver
+        Directly sets vehicle states and steering angle when they were computed
+        by the optimal control solver.
         :param time:
         :param state_vectors:
+        :param optimal_phi:
         :return:
         """
         for veh_id in self.sorted_vehicle_ids:
-            self.vehicles[veh_id].set_new_time_and_state(time,
-                                                         state_vectors[veh_id])
+            ego_phi = optimal_phi[veh_id]
+            ego_phi = ego_phi[0] if len(ego_phi) > 0 else 0.
+            self.vehicles[veh_id].write_state_and_input(
+                time, state_vectors[veh_id], ego_phi)
 
     def update_surrounding_vehicles(self):
         for ego_vehicle in self.vehicles.values():

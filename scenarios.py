@@ -133,15 +133,6 @@ class SimulationScenario(ABC):
     def response_to_dataframe(self) -> pd.DataFrame:
         return self.vehicle_group.to_dataframe()
 
-    # TODO: move to more specific class?
-    def get_opc_results_summary(self):
-        platoon_leader = self.vehicle_group.get_platoon_leader()
-        return platoon_leader.opt_controller.get_results_summary()
-
-    # @abstractmethod
-    # def create_initial_state(self):
-    #     pass
-
     @abstractmethod
     def run(self, parameters):
         """
@@ -288,6 +279,26 @@ class LaneChangeScenario(SimulationScenario):
         return cls(fsv.ClosedLoopVehicle, 1, n_orig_ahead,
                    n_orig_behind, n_dest_ahead, n_dest_behind)
 
+    # TODO: both methods below can also work with OptimalControlVehicle class
+    def get_opc_results_summary(self):
+        platoon_leader = self.vehicle_group.get_platoon_leader()
+        return platoon_leader.opt_controller.get_results_summary()
+
+    def get_opc_cost_history(self):
+        platoon_leader = self.vehicle_group.get_platoon_leader()
+        return (platoon_leader.opt_controller.get_running_cost_history(),
+                platoon_leader.opt_controller.get_terminal_cost_history())
+
+    def save_cost_data(self, file_name: str) -> None:
+        """
+        Pickles running and terminal costs 2D lists
+        :param file_name:
+        :return:
+        """
+        with open(file_name, 'wb') as f:
+            pickle.dump(self.get_opc_cost_history(),
+                        f, pickle.HIGHEST_PROTOCOL)
+
     def name_vehicles(self):
         # NOT READY
         # compare to code in constructor
@@ -320,9 +331,10 @@ class LaneChangeScenario(SimulationScenario):
         v_ff = 10
         v_ff_array = ([v_orig] + [v_ff] * (self.n_per_lane[0] - 1)
                       + [v_dest] + [v_ff] * (self.n_per_lane[1] - 1))
+        self.vehicle_group.set_free_flow_speeds(v_ff_array)
         delta_x = {'lo': 0.0, 'ld': 0.0,
                    'fd': 0.0}  # deviation from equilibrium
-        self.create_initial_state(v_ff_array, delta_x)
+        self.create_initial_state(v_orig, v_dest, delta_x)
 
     def create_test_initial_state(self):
         """
@@ -330,22 +342,25 @@ class LaneChangeScenario(SimulationScenario):
         :return:
         """
         print("======= RUNNING AN EXPLORATORY TEST SCENARIO =======")
-        v_orig = 10
-        v_dest = 10
-        v_ff = 10
-        v_ff_array = ([v_orig] + [v_ff] * (self.n_per_lane[0] - 1)
-                      + [v_dest] + [v_ff] * (self.n_per_lane[1] - 1))
-        delta_x = {'lo': 0.0, 'ld': 4.0,
-                   'fd': 0.0}  # deviation from equilibrium
-        self.create_initial_state(v_ff_array, delta_x)
-
-    def create_initial_state(self, v_ff_array: List[float],
-                             delta_x: Dict[str, float]):
+        v_orig_leader = 10
+        v_dest_leader = 10
+        v_others = 10
+        v_orig_foll = 10
+        v_ff_array = ([v_orig_leader] * self._n_orig_ahead
+                      + [v_others] * self._n_platoon
+                      + [v_orig_foll] * self._n_orig_behind
+                      + [v_dest_leader] + [v_others] * (self.n_per_lane[1] - 1))
         self.vehicle_group.set_free_flow_speeds(v_ff_array)
+        delta_x = {'lo': 0.0, 'ld': 0.0,
+                   'fd': 0.0}  # deviation from equilibrium
+        self.create_initial_state(v_orig_leader, v_dest_leader, delta_x)
+
+    def create_initial_state(self, v_orig: float, v_dest: float,
+                             delta_x: Dict[str, float]):
 
         # Initial states
-        v0_array = (v_ff_array[0:1] * self.n_per_lane[0]
-                    + self.n_per_lane[1] * [v_ff_array[self.n_per_lane[0]]])
+        v0_array = ([v_orig] * self.n_per_lane[0]
+                    + self.n_per_lane[1] * [v_dest])
         ref_gaps = self.vehicle_group.get_initial_desired_gaps(v0_array)
         idx_p0 = self._n_orig_ahead
         idx_p_last = idx_p0 + self._n_platoon - 1

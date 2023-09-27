@@ -129,7 +129,7 @@ class OptimalControlVehicle(FourStateVehicle):
         self._ocp_interface = OpenLoopVehicleInterface
         self.set_mode(modes.OCPLaneKeepingMode())
 
-        self._n_feedback_inputs = self._n_inputs - self._n_optimal_inputs
+        # self._n_feedback_inputs = self._n_inputs - self._n_optimal_inputs
         # self._ocp_has_solution = False
         self._ocp_initial_time = -np.inf
 
