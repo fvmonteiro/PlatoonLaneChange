@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from functools import partial
 import time
-from typing import Dict, List, Union
+from typing import Callable, Dict, List, Union, Tuple
 
 import control as ct
 import control.optimal as opt
@@ -12,6 +12,7 @@ import numpy as np
 from scipy.optimize import LinearConstraint, NonlinearConstraint
 
 import analysis  # only during tests
+import controllers.optimal_control_costs as occ
 import system_operating_mode as som
 import vehicle_models.base_vehicle as base
 import vehicle_group as vg
@@ -91,8 +92,7 @@ class VehicleOptimalController:
 
         self._data_per_iteration = []
         self._results_summary: defaultdict[str, List] = defaultdict(list)
-        self._running_cost_history: List[CostWithMemory] = []
-        self._terminal_cost_history: List[CostWithMemory] = []
+        self._cost_history: List[occ.OCPCostTracker] = []
 
     def get_time_horizon(self) -> float:
         return self.time_horizon
@@ -116,17 +116,16 @@ class VehicleOptimalController:
         return self._ocp_has_solution
 
     def get_running_cost_history(self):
-        return cost_memory_list_to_2d(self._running_cost_history)
+        cost_history_per_iteration = []
+        for c in self._cost_history:
+            cost_history_per_iteration.append(c.get_running_cost())
+        return cost_history_per_iteration
 
     def get_terminal_cost_history(self):
-        # try:
-        return cost_memory_list_to_2d(self._terminal_cost_history)
-        # except AttributeError:
-        #     ret = []
-        #     reference = self.get_running_cost_history()
-        #     for a in reference:
-        #         ret.append([0.] * len(a))
-        #     return ret
+        cost_history_per_iteration = []
+        for c in self._cost_history:
+            cost_history_per_iteration.append(c.get_terminal_cost())
+        return cost_history_per_iteration
 
     def get_ocp_response(self):
         """
@@ -149,7 +148,6 @@ class VehicleOptimalController:
         :return: Dictionary with veh ids as keys and inputs as values if
          multiple veh ids passed, single input vector if single veh id
         """
-        # delta_t = time - self._start_time
 
         if np.isscalar(veh_ids):
             single_veh_ctrl = True
@@ -201,32 +199,44 @@ class VehicleOptimalController:
         :param mode_sequence: Predefined system mode sequence [optional].
         :return:
         """
-        # We put the vehicle below at the origin (0, 0) when solving the opc
-        # to make the solution independent of shifts in initial position
-        center_veh_id = controlled_veh_ids[0]
-        self._ocp_interface = vgi.VehicleGroupInterface(vehicles, center_veh_id)
+
         if mode_sequence is None:
             input_sequence: som.ModeSequence = [(0.0, som.SystemMode(vehicles))]
         else:
             input_sequence = mode_sequence
 
+        # We put the vehicle below at the origin (0, 0) when solving the opc
+        # to make the solution independent of shifts in initial position
+        center_veh_id = controlled_veh_ids[0]
+        self._ocp_interface = vgi.VehicleGroupInterface(vehicles,
+                                                        center_veh_id)
+        self._set_ocp_configuration(controlled_veh_ids)
+        running_cost = self._generate_running_cost()
+        terminal_cost = self._generate_terminal_cost()
+        time_points = self.get_time_points()
         converged = False
         last_input = None
         counter = 0
         while not converged and counter < self.max_iter:
             counter += 1
+
             self._ocp_interface.set_mode_sequence(input_sequence)
-            self._set_ocp_configuration(controlled_veh_ids)
-            self._set_costs()
+            # self._set_costs()
+            ocp_cost_tracker = occ.OCPCostTracker(
+                time_points, self._ocp_interface.n_states,
+                running_cost, terminal_cost)
+            self._cost_history.append(ocp_cost_tracker)
             start_time = time.time()
             self._solve_ocp(last_input)
             solve_time = time.time() - start_time
 
+            # print(self._cost_history[-1].costs_to_string())
+
             # TODO: do we want the mode sequence seen by the ocp solver or the
             #  simulated one?
-            alt = self.get_ocp_solver_simulation(vehicles)
-            analysis.plot_constrained_lane_change(
-                alt.to_dataframe(), vehicles[center_veh_id].get_id())
+            # alt = self.get_ocp_solver_simulation(vehicles)
+            # analysis.plot_constrained_lane_change(
+            #     alt.to_dataframe(), vehicles[center_veh_id].get_id())
 
             simulated_vehicle_group = self.simulate_over_optimization_horizon(
                 vehicles)
@@ -296,19 +306,20 @@ class VehicleOptimalController:
 
     def _set_ocp_configuration(self, controlled_veh_ids: List[int]):
         self._set_ocp_dynamics()
-        self._set_input_constraints()
         self._initial_state = self._ocp_interface.get_initial_state()
         self._desired_state = self._ocp_interface.create_desired_state(
             self.time_horizon)
         # print("x0 vs xf:")
         # print(self._initial_state)
         # print(self._desired_state)
+        self._constraints = []
+        self._set_input_constraints()
         if self.has_terminal_constraints:
             self._set_terminal_constraints(controlled_veh_ids)
         self._set_safety_constraints(controlled_veh_ids)
 
     def _set_ocp_dynamics(self):
-        params = {'vehicle_group': self._ocp_interface}
+        params = {'vehicle_group_interface': self._ocp_interface}
         input_names = self._ocp_interface.create_input_names()
         output_names = self._ocp_interface.create_output_names()
         n_states = self._ocp_interface.n_states
@@ -318,30 +329,74 @@ class VehicleOptimalController:
             params=params, states=n_states, name='vehicle_group',
             inputs=input_names, outputs=output_names)
 
-    def _set_costs(self):
-        # TODO: should depend on the vehicle model
-        #  Three state: y_cost=0, theta_cost=0.1
-        #  Safe vehicles: y_cost=0.1, theta_cost=10
-        time_points = self.get_time_points()
-        running_cost_with_memory = CostWithMemory(time_points)
-        self._running_cost_history.append(running_cost_with_memory)
+    def _generate_running_cost(self) -> Callable:
+        # Note: running and terminal costs should depend on vehicle model
+        # For three state: running costs y_cost=0, theta_cost=0.1 and
+
         u_ref = self._ocp_interface.get_desired_input()
         state_cost_matrix = self._ocp_interface.create_state_cost_matrix(
-            y_cost=0.01, theta_cost=0, x_cost=0)
-        input_cost_matrix = np.diag([0.01] * self._ocp_interface.n_inputs)
-        self._running_cost = running_cost_with_memory.quadratic_cost(
-            self._dynamic_system, state_cost_matrix, input_cost_matrix,
-            self._desired_state, u_ref)
+            y_cost=0.1, theta_cost=0., x_cost=0.)
+        # input_cost_matrix = np.diag([0.01] * self._ocp_interface.n_inputs)
+        running_cost = occ.quadratic_cost(
+            self._ocp_interface.n_states, self._ocp_interface.n_inputs,
+            state_cost_matrix, None, self._desired_state, u_ref
+        )
 
+        return running_cost
+
+    def _generate_terminal_cost(self) -> Callable:
+        # Note: running and terminal costs should depend on vehicle model
+        # For three state: terminal costs 1000 for all states
         if self._terminal_constraints is None:
-            p = 1000
-            terminal_cost_with_memory = CostWithMemory(time_points[-1:])
-            self._terminal_cost_history.append(terminal_cost_with_memory)
-            terminal_cost_matrix = (
-                self._ocp_interface.create_terminal_cost_matrix(p))
-            self._terminal_cost = terminal_cost_with_memory.quadratic_cost(
-                self._dynamic_system, terminal_cost_matrix, None,
-                x0=self._desired_state)
+            terminal_state_cost_matrix = (
+                self._ocp_interface.create_state_cost_matrix(y_cost=1,
+                                                             theta_cost=10)
+            )
+            terminal_input_cost_matrix = np.diag(
+                [0.] * self._ocp_interface.n_inputs)
+            terminal_cost = occ.quadratic_cost(
+                self._ocp_interface.n_states, self._ocp_interface.n_inputs,
+                terminal_state_cost_matrix, terminal_input_cost_matrix,
+                self._desired_state
+            )
+        else:
+            terminal_cost = None
+
+        return terminal_cost
+
+    # def _set_costs(self):
+    #     # Note: running and terminal costs should depend on vehicle model
+    #     # For three state: running costs y_cost=0, theta_cost=0.1 and
+    #     # terminal costs 1000 for all states
+    #     time_points = self.get_time_points()
+    #     u_ref = self._ocp_interface.get_desired_input()
+    #     state_cost_matrix = self._ocp_interface.create_state_cost_matrix(
+    #         y_cost=0.1, theta_cost=0., x_cost=0.)
+    #     # input_cost_matrix = np.diag([0.01] * self._ocp_interface.n_inputs)
+    #     running_cost = occ.quadratic_cost(
+    #         self._ocp_interface.n_states, self._ocp_interface.n_inputs,
+    #         state_cost_matrix, None, self._desired_state, u_ref
+    #     )
+    #
+    #     if self._terminal_constraints is None:
+    #         terminal_state_cost_matrix = (
+    #             self._ocp_interface.create_state_cost_matrix(y_cost=1,
+    #                                                          theta_cost=10)
+    #         )
+    #         terminal_input_cost_matrix = np.diag(
+    #             [0.] * self._ocp_interface.n_inputs)
+    #         terminal_cost = occ.quadratic_cost(
+    #             self._ocp_interface.n_states, self._ocp_interface.n_inputs,
+    #             terminal_state_cost_matrix, terminal_input_cost_matrix,
+    #             self._desired_state
+    #         )
+    #     else:
+    #         terminal_cost = None
+    #
+    #     ocp_cost_tracker = occ.OCPCostTracker(
+    #         time_points, self._ocp_interface.n_states,
+    #         running_cost, terminal_cost)
+    #     self._cost_history.append(ocp_cost_tracker)
 
     def _set_terminal_constraints(self, controlled_veh_ids: List[int]):
         controlled_vehicles = [self._ocp_interface.vehicles[veh_id]
@@ -439,13 +494,17 @@ class VehicleOptimalController:
 
         result = opt.solve_ocp(
             self._dynamic_system, time_pts, self._initial_state,
-            cost=self._running_cost,
+            # cost=self._running_cost,
+            cost=self._cost_history[-1].running_cost,
             trajectory_constraints=self._constraints,
-            terminal_cost=self._terminal_cost,
+            # terminal_cost=self._terminal_cost,
+            terminal_cost=self._cost_history[-1].terminal_cost,
             terminal_constraints=self._terminal_constraints,
             initial_guess=u0,
-            minimize_options={'maxiter': self.solver_max_iter,
-                              'disp': True},
+            minimize_options={
+                'maxiter': self.solver_max_iter, 'disp': True,
+                'callback': self._cost_history[-1].callback}
+            # minimize_method='trust-constr',
             # log=True
             # basis=flat.BezierFamily(5, T=self._ocp_horizon)
         )
@@ -461,10 +520,17 @@ class VehicleOptimalController:
         print("Solution{}found".format(
             " " if self._ocp_has_solution else " not "))
         # Threshold below based on terminal cost params
-        if result.success and result.cost > 4 * 1e3:
-            print("but high cost indicates no LC.")
-            self._ocp_has_solution = False
-        # TODO: tests only [Sept 20]
+        # if result.success and result.cost > 4 * 1e3:
+        #     print("but high cost indicates no LC.")
+        #     self._ocp_has_solution = False
+
+        # TODO: testing stuff here
+        if not self._ocp_has_solution:
+            new_result = self._cost_history[-1].get_best_iteration()
+            print(new_result['cost'])
+            self._ocp_inputs_per_vehicle = (
+                self._ocp_interface.map_input_to_vehicle_ids(
+                    new_result['inputs']))
         self._ocp_has_solution = True
 
     def _log_results(self, counter: int, input_sequence: str,
@@ -479,113 +545,3 @@ class VehicleOptimalController:
         self._results_summary['time'].append(solve_time)
         self._results_summary['input_sequence'].append(input_sequence)
         self._results_summary['output_sequence'].append(output_sequence)
-
-
-class CostWithMemory:
-
-    def __init__(self, time_points: Union[List, np.ndarray]):
-        """
-
-        :param time_points:
-        """
-        self._time_points = time_points
-        self._n_eval_per_iter: int = len(time_points)
-        self._current_iter_costs: np.ndarray = np.zeros(self._n_eval_per_iter)
-        self._call_counter: int = 0
-        self._cost_per_iter: List[float] = []
-
-    def get_cost_per_iter(self) -> List[float]:
-        return self._cost_per_iter
-
-    # TODO: alternative approach: make this a function that receives a "memory"
-    #  object
-    def quadratic_cost(self, sys: ct.NonlinearIOSystem, Q, R,
-                       x0: Union[np.ndarray, float] = 0,
-                       u0: Union[np.ndarray, float] = 0):
-        """
-        Create quadratic cost function
-        Returns a quadratic cost function that can be used for an optimal control
-        problem.  The cost function is of the form
-          cost = (x - x0)^T Q (x - x0) + (u - u0)^T R (u - u0)
-        (Inspired from the Control library with modifications to keep track of
-        costs over iterations.)
-
-        :param sys: InputOutputSystem
-            I/O system for which the cost function is being defined.
-        :param Q: 2D array_like
-            Weighting matrix for state cost. Dimensions must match system state.
-        :param R: 2D array_like
-            Weighting matrix for input cost. Dimensions must match system input.
-        :param x0: 1D array
-            Nominal value of the system state (for which cost should be zero).
-        :param u0: 1D array
-            Nominal value of the system input (for which cost should be zero).
-
-        :return: callable
-            Function that can be used to evaluate the cost at a given state and
-            input.  The call signature of the function is cost_fun(x, u).
-
-        """
-        # Process the input arguments
-        if Q is not None:
-            Q = np.atleast_2d(Q)
-            if Q.size == 1:  # allow scalar weights
-                Q = np.eye(sys.nstates) * Q.item()
-            elif Q.shape != (sys.nstates, sys.nstates):
-                raise ValueError("Q matrix is the wrong shape")
-
-        if R is not None:
-            R = np.atleast_2d(R)
-            if R.size == 1:  # allow scalar weights
-                R = np.eye(sys.ninputs) * R.item()
-            elif R.shape != (sys.ninputs, sys.ninputs):
-                raise ValueError("R matrix is the wrong shape")
-
-        if Q is None:
-            return partial(self._input_only_cost, R=R, u0=u0)
-
-        if R is None:
-            return partial(self._state_only_cost, Q=Q, x0=x0)
-
-        # Received both Q and R matrices
-        return partial(self._full_cost, Q=Q, R=R, x0=x0, u0=u0)
-
-    def save_costs(self, current_cost):
-        self._current_iter_costs[self._call_counter] = current_cost
-        self._call_counter += 1
-
-        # Integrate the cost
-        if self._call_counter >= self._n_eval_per_iter:
-            # Compute the time intervals
-            dt = np.diff(self._time_points)
-            total_cost = 0
-            for i in range(self._time_points.size - 1):
-                # Approximate the integral using trapezoidal rule
-                total_cost += 0.5 * (self._current_iter_costs[i]
-                                     + self._current_iter_costs[i+1]) * dt[i]
-            self._cost_per_iter.append(total_cost)
-            self._current_iter_costs = np.zeros(self._n_eval_per_iter)
-            self._call_counter = 0
-
-    def _input_only_cost(self, x, u, R, u0):
-        cost = ((u - u0) @ R @ (u - u0)).item()
-        self.save_costs(cost)
-        return cost
-
-    def _state_only_cost(self, x, u, Q, x0):
-        cost = ((x - x0) @ Q @ (x - x0)).item()
-        self.save_costs(cost)
-        return cost
-
-    def _full_cost(self, x, u, Q, R, x0, u0):
-        cost = ((x-x0) @ Q @ (x-x0) + (u-u0) @ R @ (u-u0)).item()
-        self.save_costs(cost)
-        return cost
-
-
-def cost_memory_list_to_2d(cost_memory: List[CostWithMemory]
-                           ) -> List[List[float]]:
-    cost_history_per_iteration = []
-    for cm in cost_memory:
-        cost_history_per_iteration.append(cm.get_cost_per_iter())
-    return cost_history_per_iteration

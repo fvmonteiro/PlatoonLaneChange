@@ -86,24 +86,6 @@ def load_and_plot_latest_scenario():
     analysis.plot_cost_per_solver_evaluation(cost_data[0], cost_data[1])
 
 
-def run_save_and_plot(scenario: scenarios.LaneChangeScenario, tf: float = 10.):
-    scenario.create_test_initial_state()
-    scenario.run(tf)
-
-    scenario.save_response_data(trajectory_file_name)
-    data = scenario.response_to_dataframe()
-    analysis.plot_trajectory(data)
-    analysis.plot_constrained_lane_change(data, 'p1')  # TODO: ego or p1
-
-    try:
-        scenario.save_cost_data(cost_file_name)
-        running_cost, terminal_cost = scenario.get_opc_cost_history()
-        analysis.plot_cost_per_solver_evaluation(running_cost, terminal_cost)
-    except AttributeError:
-        warnings.warn('Trying to get cost of scenario without platoons.'
-                      '\nCommand ignored.')
-
-
 def run_cbf_lc_scenario(n_orig_ahead: int, n_orig_behind: int,
                         n_dest_ahead: int, n_dest_behind: int):
     scenario = scenarios.LaneChangeScenario.single_vehicle_feedback_lane_change(
@@ -129,6 +111,24 @@ def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
     scenario = scenarios.LaneChangeScenario.platoon_lane_change(
         n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind)
     run_save_and_plot(scenario, tf)
+
+
+def run_save_and_plot(scenario: scenarios.LaneChangeScenario, tf: float = 10.):
+    scenario.create_test_initial_state()
+    scenario.run(tf)
+
+    scenario.save_response_data(trajectory_file_name)
+    data = scenario.response_to_dataframe()
+    analysis.plot_trajectory(data)
+    analysis.plot_constrained_lane_change(data, 'p1')  # TODO: ego or p1
+
+    try:
+        scenario.save_cost_data(cost_file_name)
+        running_cost, terminal_cost = scenario.get_opc_cost_history()
+        analysis.plot_cost_per_solver_evaluation(running_cost, terminal_cost)
+    except AttributeError:
+        warnings.warn('Trying to get cost of scenario without platoons.'
+                      '\nCommand ignored.')
 
 
 def mode_convergence_base_tests():
@@ -181,7 +181,7 @@ def main():
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 0, 0
 
-    configure_optimal_controller(max_iter=2, solver_max_iter=500,
+    configure_optimal_controller(max_iter=2, solver_max_iter=300,
                                  discretization_step=0.5, time_horizon=5.0,
                                  has_terminal_constraints=False,
                                  has_non_zero_initial_guess=False,

@@ -556,7 +556,7 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
                                       ClosedLoopVehicle]):
         super().__init__(vehicle)
         # Controller parameters
-        self.h = vehicle.h  # time headway [s]
+        self.h: float = vehicle.h  # time headway [s]
         self.long_controller = vehicle.long_controller
 
     def get_input_limits(self) -> (List[float], List[float]):

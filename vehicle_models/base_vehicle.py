@@ -443,6 +443,7 @@ class BaseVehicle(ABC):
         # only vehicles with controllers update their discrete states (modes)
         pass
 
+    # TODO: duplicated at interface
     def _position_derivative_cg(self, vel: float, theta: float, phi: float
                                 ) -> None:
 
@@ -452,6 +453,7 @@ class BaseVehicle(ABC):
         self._derivatives[self._state_idx['theta']] = (vel * np.sin(beta)
                                                        / self.lr)
 
+    # TODO: duplicated at interface
     def _position_derivative_rear_wheels(self, vel: float, theta: float,
                                          phi: float):
         self._derivatives[self._state_idx['x']] = vel * np.cos(theta)
@@ -578,20 +580,20 @@ class BaseVehicleInterface(ABC):
         self.state_idx, self.input_idx = {}, {}
 
         # Copy values from the vehicle
-        self._id = vehicle.get_id()
-        self._name = vehicle.get_name()
-        self.lr = vehicle.lr  # dist from C.G. to rear wheel
-        self.lf = vehicle.lf  # dist from C.G. to front wheel
-        self.wheelbase = self.lr + self.lf
-        self.phi_max = vehicle.phi_max  # max steering wheel angle
-        self.safe_h = vehicle.safe_h
-        self.c = vehicle.c  # standstill distance [m]
-        self.free_flow_speed = vehicle.free_flow_speed
+        self._id: int = vehicle.get_id()
+        self._name: str = vehicle.get_name()
+        self.lr: float = vehicle.lr  # dist from C.G. to rear wheel
+        self.lf: float = vehicle.lf  # dist from C.G. to front wheel
+        self.wheelbase: float = self.lr + self.lf
+        self.phi_max: float = vehicle.phi_max  # max steering wheel angle
+        self.safe_h: float = vehicle.safe_h
+        self.c: float = vehicle.c  # standstill distance [m]
+        self.free_flow_speed: float = vehicle.free_flow_speed
         self._orig_leader_id: int = vehicle.get_orig_lane_leader_id()
         self._destination_leader_id: int = vehicle.get_dest_lane_leader_id()
         self._destination_follower_id: int = vehicle.get_dest_lane_follower_id()
-        self._leader_id = vehicle.get_current_leader_id()
-        self.target_lane = vehicle.target_lane
+        self._leader_id: int = vehicle.get_current_leader_id()
+        self.target_lane: int = vehicle.target_lane
         # The vehicle's current state is the starting point for the ocp
         self._initial_state = vehicle.get_states()
 

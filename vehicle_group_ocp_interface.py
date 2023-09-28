@@ -12,7 +12,6 @@ import vehicle_models.base_vehicle as base
 # ========= Functions passed to the optimal control library methods ========== #
 def vehicles_derivatives(t, states, inputs, params):
     """
-    Implements the kinematic bicycle model with reference at the vehicles C.G.
     Follows the model of updfcn of the control package.
     :param t: time
     :param states: Array with states of all vehicles [x1, y1, ..., xN, yN]
@@ -20,8 +19,9 @@ def vehicles_derivatives(t, states, inputs, params):
     :param params: Dictionary which must contain the vehicle type
     :return: state update function
     """
-    vehicle_group_interface: VehicleGroupInterface = params['vehicle_group']
-
+    vehicle_group_interface: VehicleGroupInterface = (
+        params['vehicle_group_interface']
+    )
     return vehicle_group_interface.compute_derivatives(t, states, inputs)
 
 
@@ -232,18 +232,19 @@ class VehicleGroupInterface:
                 veh_costs.extend([0.0] * veh.n_states)
         return np.diag(veh_costs)
 
-    def create_terminal_cost_matrix(self, cost):
-        veh_costs = []
-        for veh_id in self.sorted_vehicle_ids:
-            veh = self.vehicles[veh_id]
-            if veh.n_inputs > 0 or True:  # TODO: cost only for controlled vehs?
-                if 'v' in veh.input_names or 'a' in veh.input_names:
-                    veh_costs.extend([cost] * veh.n_states)
-                else:
-                    veh_costs.extend([0, cost, cost, 0])
-            else:
-                veh_costs.extend([0.0] * veh.n_states)
-        return np.diag(veh_costs)
+    # def create_terminal_cost_matrix(self, cost):
+    #     veh_costs = []
+    #     for veh_id in self.sorted_vehicle_ids:
+    #         veh = self.vehicles[veh_id]
+    #         # TODO: cost only for controlled vehs?
+    #         if veh.n_inputs > 0 or True:
+    #             if 'v' in veh.input_names or 'a' in veh.input_names:
+    #                 veh_costs.extend([cost] * veh.n_states)
+    #             else:
+    #                 veh_costs.extend([0, cost, cost, 0])
+    #         else:
+    #             veh_costs.extend([0.0] * veh.n_states)
+    #     return np.diag(veh_costs)
 
     def compute_derivatives(self, t, states, inputs):
         """

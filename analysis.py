@@ -28,16 +28,27 @@ def plot_cost_per_solver_evaluation(running_costs, terminal_costs):
     n = len(running_costs)
     has_terminal_cost = len(terminal_costs) > 0
 
+    rc_color = 'tab:blue'
+    tc_color = 'tab:orange'
     fig, axs_2d = plt.subplots(n, 1, squeeze=False)
     axs = [ax[0] for ax in axs_2d]
     for i in range(n):
-        axs[i].plot(running_costs[i], label='running costs')
-        if has_terminal_cost:
-            axs[i].plot(terminal_costs[i], label='terminal costs')
-        axs[i].legend()
+        axs[i].plot(running_costs[i], label='running costs', color=rc_color)
         _, y_high = axs[i].get_ylim()
         axs[i].set_ylim([0, min(running_costs[i][0] + 0.5, y_high)])
+        axs[i].set_ylabel('running costs', color=rc_color)
+        axs[i].tick_params(axis='y', labelcolor=rc_color)
+        if has_terminal_cost:
+            ax_secondary = axs[i].twinx()
+            ax_secondary.plot(terminal_costs[i], label='terminal costs',
+                              color=tc_color)
+            ax_secondary.set_ylabel('terminal costs', color=tc_color)
+            ax_secondary.tick_params(axis='y', labelcolor=tc_color)
+            ax_secondary.set_yscale('log')
+        # axs[i].legend()
+
     axs[-1].set_xlabel('function evaluations')
+    fig.tight_layout()
     plt.show()
 
 
@@ -136,11 +147,11 @@ def plot_constrained_lane_change(data: pd.DataFrame,
     pp.compute_all_relative_values(data)
 
     sns.set_style('whitegrid')
-    x_axes = ['t', 't', 't']
-    y_axes = ['y', 'v', 'phi']
+    x_axes = ['t', 't', 't', 't']
+    y_axes = ['y', 'theta', 'v', 'phi']
 
     fig, ax = plt.subplots(len(y_axes) + 1)
-    fig.set_size_inches(9, 6)
+    fig.set_size_inches(12, 8)
 
     plot_gap_errors(data, lc_veh_id_or_name, ax[0])
     final_t = data['t'].max()
