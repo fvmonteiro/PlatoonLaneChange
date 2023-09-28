@@ -16,13 +16,13 @@ def load_latest_simulated_scenario(pickle_file_name: str):
     return data
 
 
-def plot_cost_per_solver_evaluation(running_costs, terminal_costs):
+def plot_costs_vs_iteration(running_costs, terminal_costs,
+                            plot_separately: bool = False):
     """
 
-    :param running_costs: 2D list with costs over solver iterations for each
-     time the optimal control problem was solved
-    :param terminal_costs: 2D list with costs over solver iterations for each
-     time the optimal control problem was solved. Could be an empty list.
+    :param running_costs: 2D list with costs vs iterations
+    :param terminal_costs: 2D list with costs vs iterations. Could be an empty
+     list.
     :return:
     """
     n = len(running_costs)
@@ -33,21 +33,30 @@ def plot_cost_per_solver_evaluation(running_costs, terminal_costs):
     fig, axs_2d = plt.subplots(n, 1, squeeze=False)
     axs = [ax[0] for ax in axs_2d]
     for i in range(n):
-        axs[i].plot(running_costs[i], label='running costs', color=rc_color)
-        _, y_high = axs[i].get_ylim()
-        axs[i].set_ylim([0, min(running_costs[i][0] + 0.5, y_high)])
-        axs[i].set_ylabel('running costs', color=rc_color)
-        axs[i].tick_params(axis='y', labelcolor=rc_color)
-        if has_terminal_cost:
-            ax_secondary = axs[i].twinx()
-            ax_secondary.plot(terminal_costs[i], label='terminal costs',
-                              color=tc_color)
-            ax_secondary.set_ylabel('terminal costs', color=tc_color)
-            ax_secondary.tick_params(axis='y', labelcolor=tc_color)
-            ax_secondary.set_yscale('log')
-        # axs[i].legend()
+        if plot_separately:
+            axs[i].plot(running_costs[i], label='running costs', color=rc_color)
+            _, y_high = axs[i].get_ylim()
+            axs[i].set_ylim([0, min(running_costs[i][0] + 0.5, y_high)])
+            axs[i].set_ylabel('running costs', color=rc_color)
+            axs[i].tick_params(axis='y', labelcolor=rc_color)
+            if has_terminal_cost:
+                ax_secondary = axs[i].twinx()
+                ax_secondary.plot(terminal_costs[i], label='terminal costs',
+                                  color=tc_color)
+                ax_secondary.set_ylabel('terminal costs', color=tc_color)
+                ax_secondary.tick_params(axis='y', labelcolor=tc_color)
+                ax_secondary.set_yscale('log')
+            # axs[i].legend()
+        else:
+            cost = running_costs[i]
+            cost += (terminal_costs[i] if has_terminal_cost else 0)
+            axs[i].plot(cost)
+            _, y_high = axs[i].get_ylim()
+            axs[i].set_ylim([1, 1.2])
+            axs[i].set_ylabel('cost')
+            axs[i].set_yscale('log')
 
-    axs[-1].set_xlabel('function evaluations')
+    axs[-1].set_xlabel('iteration')
     fig.tight_layout()
     plt.show()
 

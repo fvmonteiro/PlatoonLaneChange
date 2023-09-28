@@ -23,7 +23,7 @@ def configure_optimal_controller(
         max_iter: int = None, solver_max_iter: int = None,
         discretization_step: float = None, time_horizon: float = None,
         has_terminal_constraints: bool = False,
-        has_non_zero_initial_guess: bool = False,
+        jumpstart_next_solver_call: bool = False,
         has_lateral_constraint: bool = False):
     """
     Sets the configurations of the optimal controller that do not vary during
@@ -35,9 +35,8 @@ def configure_optimal_controller(
     :param solver_max_iter: Maximum number of iterations by the solver
     :param has_terminal_constraints: Whether to include terminal constraints. If
      true, then there are no terminal costs
-    :param has_non_zero_initial_guess: Whether to set the initial control guess
-     to something other than all zeros. If true, we assume max input for the
-     first two time intervals and min input for the last two.
+    :param jumpstart_next_solver_call: Whether to use the solution of the
+     previous call to the solver as starting point for the next call
     :param has_lateral_constraint: Whether to include a constraint to keep the
      lane changing vehicles between y(t0)-1 and y(tf)+1. This can sometimes
      speed up simulations or prevent erratic behavior
@@ -54,8 +53,8 @@ def configure_optimal_controller(
 
     VehicleOptimalController.has_terminal_constraints = (
         has_terminal_constraints)
-    VehicleOptimalController.has_non_zero_initial_guess = (
-        has_non_zero_initial_guess)
+    VehicleOptimalController.jumpstart_next_solver_call = (
+        jumpstart_next_solver_call)
     VehicleOptimalController.has_lateral_constraint = has_lateral_constraint
 
 
@@ -75,13 +74,14 @@ class VehicleOptimalController:
     _ocp_interface: vgi.VehicleGroupInterface
     _initial_state: np.ndarray
     _desired_state: np.ndarray
+    _cost_with_tracker: occ.OCPCostTracker
 
     solver_max_iter: int = 300
     max_iter: int = 3
     discretization_step: float = 1.0  # [s]
     time_horizon: float = 10.0  # [s]
     has_terminal_constraints: bool = False
-    has_non_zero_initial_guess: bool = False
+    jumpstart_next_solver_call: bool = False
     has_lateral_constraint: bool = False
 
     def __init__(self):
@@ -92,7 +92,6 @@ class VehicleOptimalController:
 
         self._data_per_iteration = []
         self._results_summary: defaultdict[str, List] = defaultdict(list)
-        self._cost_history: List[occ.OCPCostTracker] = []
 
     def get_time_horizon(self) -> float:
         return self.time_horizon
@@ -116,16 +115,10 @@ class VehicleOptimalController:
         return self._ocp_has_solution
 
     def get_running_cost_history(self):
-        cost_history_per_iteration = []
-        for c in self._cost_history:
-            cost_history_per_iteration.append(c.get_running_cost())
-        return cost_history_per_iteration
+        return self._cost_with_tracker.get_running_cost()
 
     def get_terminal_cost_history(self):
-        cost_history_per_iteration = []
-        for c in self._cost_history:
-            cost_history_per_iteration.append(c.get_terminal_cost())
-        return cost_history_per_iteration
+        return self._cost_with_tracker.get_terminal_cost()
 
     def get_ocp_response(self):
         """
@@ -202,6 +195,10 @@ class VehicleOptimalController:
 
         if mode_sequence is None:
             input_sequence: som.ModeSequence = [(0.0, som.SystemMode(vehicles))]
+            # TODO: temp! Sequence chosen to 'skip' the first iteration and
+            #  gain some time in tests
+            som.append_mode_to_sequence(input_sequence, 0.94,
+                                        [('fo1', 'lo1'), ('p1', None)])
         else:
             input_sequence = mode_sequence
 
@@ -214,23 +211,22 @@ class VehicleOptimalController:
         running_cost = self._generate_running_cost()
         terminal_cost = self._generate_terminal_cost()
         time_points = self.get_time_points()
+        self._cost_with_tracker = occ.OCPCostTracker(
+            time_points, self._ocp_interface.n_states,
+            running_cost, terminal_cost)
         converged = False
-        last_input = None
+        initial_guess = None
         counter = 0
         while not converged and counter < self.max_iter:
             counter += 1
 
+            input_seq_str = som.mode_sequence_to_str(input_sequence)
+            print("Setting mode sequence to:  {}".format(input_seq_str))
             self._ocp_interface.set_mode_sequence(input_sequence)
-            # self._set_costs()
-            ocp_cost_tracker = occ.OCPCostTracker(
-                time_points, self._ocp_interface.n_states,
-                running_cost, terminal_cost)
-            self._cost_history.append(ocp_cost_tracker)
+            self._cost_with_tracker.start_recording()
             start_time = time.time()
-            self._solve_ocp(last_input)
+            self._solve_ocp(initial_guess)
             solve_time = time.time() - start_time
-
-            # print(self._cost_history[-1].costs_to_string())
 
             # TODO: do we want the mode sequence seen by the ocp solver or the
             #  simulated one?
@@ -247,7 +243,6 @@ class VehicleOptimalController:
                 vehicles[center_veh_id].get_id())
             output_sequence = simulated_vehicle_group.get_mode_sequence()
 
-            input_seq_str = som.mode_sequence_to_str(input_sequence)
             output_seq_str = som.mode_sequence_to_str(output_sequence)
             print("Input sequence:  {}\nOutput sequence: {}".format(
                 input_seq_str, output_seq_str
@@ -259,10 +254,12 @@ class VehicleOptimalController:
                                                    output_sequence)
             print("Converged?", converged)
             input_sequence = output_sequence
-            # if self.ocp_result.success:
-            #     last_input = self.ocp_result.inputs
-            # else:
-            #     last_input = None
+            if self.jumpstart_next_solver_call and self.ocp_result.success:
+                last_input = self.ocp_result.inputs
+                last_states = self.ocp_result.states
+                initial_guess = (last_states, last_input)
+            else:
+                initial_guess = None
 
     def simulate_over_optimization_horizon(
             self, vehicles: Dict[int, base.BaseVehicle]):
@@ -349,8 +346,8 @@ class VehicleOptimalController:
         # For three state: terminal costs 1000 for all states
         if self._terminal_constraints is None:
             terminal_state_cost_matrix = (
-                self._ocp_interface.create_state_cost_matrix(y_cost=1,
-                                                             theta_cost=10)
+                self._ocp_interface.create_state_cost_matrix(y_cost=1.,
+                                                             theta_cost=1.)
             )
             terminal_input_cost_matrix = np.diag(
                 [0.] * self._ocp_interface.n_inputs)
@@ -482,28 +479,30 @@ class VehicleOptimalController:
                     -epsilon, epsilon)
                 self._constraints.append(dest_lane_follower_safety)
 
-    def _solve_ocp(self, custom_initial_control: np.ndarray = None):
+    def _solve_ocp(self, custom_initial_guess: np.ndarray = None):
         time_pts = self.get_time_points()
 
-        if custom_initial_control is not None:
-            u0 = custom_initial_control
-        elif self.has_non_zero_initial_guess:
-            u0 = self._ocp_interface.get_initial_guess(time_pts)
+        # Initial guess can be a guess just of the input or of both input and
+        # states
+        if custom_initial_guess is not None:
+            x0 = custom_initial_guess
         else:
-            u0 = self._ocp_interface.get_desired_input()
+            x0 = self._ocp_interface.get_desired_input()
 
         result = opt.solve_ocp(
             self._dynamic_system, time_pts, self._initial_state,
             # cost=self._running_cost,
-            cost=self._cost_history[-1].running_cost,
+            cost=self._cost_with_tracker.running_cost,
             trajectory_constraints=self._constraints,
             # terminal_cost=self._terminal_cost,
-            terminal_cost=self._cost_history[-1].terminal_cost,
+            terminal_cost=self._cost_with_tracker.terminal_cost,
             terminal_constraints=self._terminal_constraints,
-            initial_guess=u0,
+            initial_guess=x0,
             minimize_options={
                 'maxiter': self.solver_max_iter, 'disp': True,
-                'callback': self._cost_history[-1].callback}
+                'ftol': 1.0E-2,  # default value 1.0E-6
+                # power_to_iter = {0: 16, 1: 38, 2: > 100}
+                'callback': self._cost_with_tracker.callback}
             # minimize_method='trust-constr',
             # log=True
             # basis=flat.BezierFamily(5, T=self._ocp_horizon)
@@ -526,7 +525,7 @@ class VehicleOptimalController:
 
         # TODO: testing stuff here
         if not self._ocp_has_solution:
-            new_result = self._cost_history[-1].get_best_iteration()
+            new_result = self._cost_with_tracker.get_best_iteration()
             print(new_result['cost'])
             self._ocp_inputs_per_vehicle = (
                 self._ocp_interface.map_input_to_vehicle_ids(

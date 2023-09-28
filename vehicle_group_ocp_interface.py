@@ -83,21 +83,21 @@ class VehicleGroupInterface:
             initial_state.extend(self.vehicles[veh_id].get_initial_state())
         return np.array(initial_state)
 
-    def get_initial_guess(self, time_points: np.ndarray):
-        # estimated_safe_time: float):
-        n_ctrl_points = len(time_points)
-        initial_guess = []
-        samples_in_a_second = sum(time_points < 1.0)
-        for veh_id in self.sorted_vehicle_ids:
-            min_phi, max_phi = self.vehicles[veh_id].get_input_limits()
-            # only vehs with optimal control have bounds, but we should find a
-            # better way of testing here since this might change
-            if len(min_phi) > 0:
-                initial_guess.extend(
-                    max_phi * samples_in_a_second
-                    + min_phi * samples_in_a_second
-                    + [0.0] * (len(time_points) - 2 * samples_in_a_second))
-        return np.array(initial_guess).reshape(-1, n_ctrl_points)
+    # def get_initial_guess(self, time_points: np.ndarray):
+    #     # estimated_safe_time: float):
+    #     n_ctrl_points = len(time_points)
+    #     initial_guess = []
+    #     samples_in_a_second = sum(time_points < 1.0)
+    #     for veh_id in self.sorted_vehicle_ids:
+    #         min_phi, max_phi = self.vehicles[veh_id].get_input_limits()
+    #         # only vehs with optimal control have bounds, but we should find a
+    #         # better way of testing here since this might change
+    #         if len(min_phi) > 0:
+    #             initial_guess.extend(
+    #                 max_phi * samples_in_a_second
+    #                 + min_phi * samples_in_a_second
+    #                 + [0.0] * (len(time_points) - 2 * samples_in_a_second))
+    #     return np.array(initial_guess).reshape(-1, n_ctrl_points)
 
     def get_state_indices(self, state_name: str) -> List[int]:
         """
@@ -225,7 +225,7 @@ class VehicleGroupInterface:
         veh_costs = []
         for veh_id in self.sorted_vehicle_ids:
             veh = self.vehicles[veh_id]
-            if veh.n_inputs > 0 or True:  # TODO: cost only for controlled vehs?
+            if veh.n_inputs > 0:
                 veh_costs.extend(self.vehicles[veh_id].create_state_vector(
                     x_cost, y_cost, theta_cost, v_cost))
             else:

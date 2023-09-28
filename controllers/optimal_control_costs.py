@@ -6,7 +6,7 @@ import numpy as np
 
 class OCPCostTracker:
     """
-    Makes it possible to keep track of the computes costs during the optimal
+    Makes it possible to keep track of the computed costs during the optimal
     control problem solver iterations.
     """
     def __init__(self, time_points: np.ndarray, n_states: int,
@@ -19,18 +19,29 @@ class OCPCostTracker:
         self._n_time_points: int = len(time_points)
         self._current_call_costs: np.ndarray = np.zeros(self._n_time_points)
         self._call_counter: int = 0
-        self._running_cost_per_call: List[float] = []
-        self._terminal_cost_per_call: List[float] = []
-        self._running_cost_per_iteration: List[float] = []
-        self._terminal_cost_per_iteration: List[float] = []
-        self._states_per_iteration: List[np.ndarray] = []
-        self._inputs_per_iteration: List[np.ndarray] = []
+        # One list of costs/states/inputs for each time we call the ocp solver
+        self._running_cost_per_call: List[List[float]] = []
+        self._terminal_cost_per_call: List[List[float]] = []
+        self._running_cost_per_iteration: List[List[float]] = []
+        self._terminal_cost_per_iteration: List[List[float]] = []
+        self._states_per_iteration: List[List[np.ndarray]] = []
+        self._inputs_per_iteration: List[List[np.ndarray]] = []
 
-    def get_running_cost(self):
-        return self._running_cost_per_iteration
+    def get_running_cost(self) -> List[np.array]:
+        return [np.array(costs) for costs in self._running_cost_per_iteration]
 
-    def get_terminal_cost(self):
-        return self._terminal_cost_per_iteration
+    def get_terminal_cost(self) -> List[np.array]:
+        return [np.array(costs) for costs in self._terminal_cost_per_iteration]
+
+    def start_recording(self):
+        self._current_call_costs = np.zeros(self._n_time_points)
+        self._call_counter = 0
+        self._running_cost_per_call.append([])
+        self._terminal_cost_per_call.append([])
+        self._running_cost_per_iteration.append([])
+        self._terminal_cost_per_iteration.append([])
+        self._states_per_iteration.append([])
+        self._inputs_per_iteration.append([])
 
     def running_cost(self, states, inputs):
         cost = self._running_cost_fun(states, inputs)
@@ -39,33 +50,39 @@ class OCPCostTracker:
 
     def terminal_cost(self, states, inputs):
         cost = self._terminal_cost_fun(states, inputs)
-        self._terminal_cost_per_call.append(cost)
+        self._terminal_cost_per_call[-1].append(cost)
         return cost
 
-    def costs_to_string(self):
+    def print_cost_all_solutions(self):
+        for i in range(len(self._running_cost_per_iteration)):
+            print("==== OCP solution {} ====".format(i))
+            self.print_cost_from_solution_i(i)
+
+    def print_cost_from_solution_i(self, ocp_solution_number: int):
+        rc = self._running_cost_per_iteration[ocp_solution_number]
+        tc = self._terminal_cost_per_iteration[ocp_solution_number]
         output = '{:10s}\t{:10s}\t{:10s}\t{:10s}\n'.format(
             'Iteration', 'Running', 'Terminal', 'Total')
-        for i in range(len(self._running_cost_per_iteration)):
+        for i in range(len(rc)):
             output += '{:<10d}\t{:<10.6g}\t{:<10.6g}\t{:<10.6g}\n'.format(
-                i, self._running_cost_per_iteration[i],
-                self._terminal_cost_per_iteration[i],
-                self._running_cost_per_iteration[i] +
-                self._terminal_cost_per_iteration[i])
-        return output
+                i, rc[i], tc[i], rc[i] + tc[i])
+        print(output)
 
-    def get_best_iteration(self):
+    def get_best_iteration(self, ocp_solution_number: int = -1):
         """
         Gets the states and inputs from the iteration that had the minimum cost
         :return:
         """
-        best_idx = np.argmin(np.array(self._running_cost_per_iteration)
-                             + np.array(self._terminal_cost_per_iteration))
-        min_cost = (self._running_cost_per_iteration[best_idx]
-                    + self._terminal_cost_per_iteration[best_idx])
+        rc = np.array(self._running_cost_per_iteration[ocp_solution_number])
+        tc = np.array(self._terminal_cost_per_iteration[ocp_solution_number])
+        best_idx = np.argmin(rc + tc)
+        min_cost = rc[best_idx] + tc[best_idx]
         print('Best iteration idx:', best_idx)
-        return {'cost': min_cost,
-                'states': self._states_per_iteration[best_idx],
-                'inputs': self._inputs_per_iteration[best_idx]}
+        return {
+            'cost': min_cost,
+            'states': self._states_per_iteration[ocp_solution_number][best_idx],
+            'inputs': self._inputs_per_iteration[ocp_solution_number][best_idx]
+        }
     # TODO: return object with members: success, time, states (n x time),
     #  inputs (n x time), message, nit, cost
 
@@ -86,16 +103,16 @@ class OCPCostTracker:
             # Approximate the integral using trapezoidal rule
             running_cost += 0.5 * (costs[i] + costs[i + 1]) * dt[i]
 
-        terminal_cost = 0
+        terminal_cost = 0.
         if self._terminal_cost_fun is not None:
             terminal_cost = self._terminal_cost_fun(states[:, -1],
                                                     inputs[:, -1])
 
         # Store everyone
-        self._running_cost_per_iteration.append(running_cost)
-        self._terminal_cost_per_iteration.append(terminal_cost)
-        self._states_per_iteration.append(states)
-        self._inputs_per_iteration.append(inputs)
+        self._running_cost_per_iteration[-1].append(running_cost)
+        self._terminal_cost_per_iteration[-1].append(terminal_cost)
+        self._states_per_iteration[-1].append(states)
+        self._inputs_per_iteration[-1].append(inputs)
 
     def _save_running_cost_per_call(self, current_cost):
         self._current_call_costs[self._call_counter] = current_cost
@@ -111,7 +128,7 @@ class OCPCostTracker:
                 # Approximate the integral using trapezoidal rule
                 total_cost += 0.5 * (self._current_call_costs[i]
                                      + self._current_call_costs[i + 1]) * dt[i]
-            self._running_cost_per_call.append(total_cost)
+            self._running_cost_per_call[-1].append(total_cost)
             self._current_call_costs = np.zeros(self._n_time_points)
             self._call_counter = 0
 

@@ -342,10 +342,10 @@ class LaneChangeScenario(SimulationScenario):
         :return:
         """
         print("======= RUNNING AN EXPLORATORY TEST SCENARIO =======")
-        v_orig_leader = 10
-        v_dest_leader = 10
-        v_others = 10
-        v_orig_foll = 10
+        v_orig_leader = 10.
+        v_dest_leader = 10.
+        v_others = 10.
+        v_orig_foll = 10.
         v_ff_array = ([v_orig_leader] * self._n_orig_ahead
                       + [v_others] * self._n_platoon
                       + [v_orig_foll] * self._n_orig_behind

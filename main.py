@@ -83,7 +83,8 @@ def load_and_plot_latest_scenario():
     analysis.plot_constrained_lane_change(trajectory_data, 'p1')
 
     cost_data = analysis.load_latest_simulated_scenario(cost_file_name)
-    analysis.plot_cost_per_solver_evaluation(cost_data[0], cost_data[1])
+    analysis.plot_costs_vs_iteration(cost_data[0], cost_data[1],
+                                     plot_separately=False)
 
 
 def run_cbf_lc_scenario(n_orig_ahead: int, n_orig_behind: int,
@@ -125,7 +126,7 @@ def run_save_and_plot(scenario: scenarios.LaneChangeScenario, tf: float = 10.):
     try:
         scenario.save_cost_data(cost_file_name)
         running_cost, terminal_cost = scenario.get_opc_cost_history()
-        analysis.plot_cost_per_solver_evaluation(running_cost, terminal_cost)
+        analysis.plot_costs_vs_iteration(running_cost, terminal_cost)
     except AttributeError:
         warnings.warn('Trying to get cost of scenario without platoons.'
                       '\nCommand ignored.')
@@ -135,7 +136,7 @@ def mode_convergence_base_tests():
     configure_optimal_controller(
         max_iter=5, solver_max_iter=1000, discretization_step=0.1,
         time_horizon=5.0, has_terminal_constraints=False,
-        has_non_zero_initial_guess=False, has_lateral_constraint=False
+        jumpstart_next_solver_call=False, has_lateral_constraint=False
     )
 
     # Eventually we'll move to descriptive names, but for now let's just avoid
@@ -181,10 +182,10 @@ def main():
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 0, 0
 
-    configure_optimal_controller(max_iter=2, solver_max_iter=300,
+    configure_optimal_controller(max_iter=3, solver_max_iter=100,
                                  discretization_step=0.5, time_horizon=5.0,
                                  has_terminal_constraints=False,
-                                 has_non_zero_initial_guess=False,
+                                 jumpstart_next_solver_call=True,
                                  has_lateral_constraint=False)
 
     start_time = time.time()
@@ -198,9 +199,9 @@ def main():
     #                     n_dest_behind)
     # run_internal_optimal_controller(n_orig_ahead, n_orig_behind, n_dest_ahead,
     #                                 n_dest_behind)
-    run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
-                     n_dest_ahead, n_dest_behind)
-    # load_and_plot_latest_scenario()
+    # run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
+    #                  n_dest_ahead, n_dest_behind)
+    load_and_plot_latest_scenario()
     # mode_convergence_base_tests()
 
     end_time = time.time()
