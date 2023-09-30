@@ -444,6 +444,12 @@ class BaseVehicle(ABC):
         pass
 
     # TODO: duplicated at interface
+    def _position_derivative_longitudinal_only(self, vel):
+        self._derivatives[self._state_idx['x']] = vel
+        self._derivatives[self._state_idx['y']] = 0.
+        self._derivatives[self._state_idx['theta']] = 0.
+
+    # TODO: duplicated at interface
     def _position_derivative_cg(self, vel: float, theta: float, phi: float
                                 ) -> None:
 
@@ -726,9 +732,13 @@ class BaseVehicleInterface(ABC):
         self._compute_derivatives(vel, theta, phi, accel, dxdt)
         return dxdt
 
+    def _position_derivative_longitudinal_only(self, vel, derivatives):
+        derivatives[self.state_idx['x']] = vel
+        derivatives[self.state_idx['y']] = 0.
+        derivatives[self.state_idx['theta']] = 0.
+
     def _position_derivative_cg(self, vel: float, theta: float, phi: float,
                                 derivatives) -> None:
-
         beta = np.arctan(self.lr * np.tan(phi) / (self.lf + self.lr))
         derivatives[self.state_idx['x']] = vel * np.cos(theta + beta)
         derivatives[self.state_idx['y']] = vel * np.sin(theta + beta)

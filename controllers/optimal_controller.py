@@ -22,7 +22,7 @@ import vehicle_group_ocp_interface as vgi
 def configure_optimal_controller(
         max_iter: int = None, solver_max_iter: int = None,
         discretization_step: float = None, time_horizon: float = None,
-        has_terminal_constraints: bool = False,
+        ftol: float = None, has_terminal_constraints: bool = False,
         jumpstart_next_solver_call: bool = False,
         has_lateral_constraint: bool = False):
     """
@@ -32,6 +32,8 @@ def configure_optimal_controller(
      mode sequence convergence (different from max iteration of the solver)
     :param discretization_step: Fixed discretization step of the opc solver
     :param time_horizon: Final time of the optimal control problem
+    :param ftol: Scipy minimize parameter: "Precision goal for the value of f
+     in the stopping criterion."
     :param solver_max_iter: Maximum number of iterations by the solver
     :param has_terminal_constraints: Whether to include terminal constraints. If
      true, then there are no terminal costs
@@ -50,6 +52,8 @@ def configure_optimal_controller(
         VehicleOptimalController.discretization_step = discretization_step
     if time_horizon:
         VehicleOptimalController.time_horizon = time_horizon
+    if ftol:
+        VehicleOptimalController.ftol = ftol
 
     VehicleOptimalController.has_terminal_constraints = (
         has_terminal_constraints)
@@ -80,6 +84,7 @@ class VehicleOptimalController:
     max_iter: int = 3
     discretization_step: float = 1.0  # [s]
     time_horizon: float = 10.0  # [s]
+    ftol: float = 1.0e-6  # [s]
     has_terminal_constraints: bool = False
     jumpstart_next_solver_call: bool = False
     has_lateral_constraint: bool = False
@@ -197,8 +202,8 @@ class VehicleOptimalController:
             input_sequence: som.ModeSequence = [(0.0, som.SystemMode(vehicles))]
             # TODO: temp! Sequence chosen to 'skip' the first iteration and
             #  gain some time in tests
-            som.append_mode_to_sequence(input_sequence, 0.94,
-                                        [('fo1', 'lo1'), ('p1', None)])
+            # som.append_mode_to_sequence(input_sequence, 0.94,
+            #                             [('fo1', 'lo1'), ('p1', None)])
         else:
             input_sequence = mode_sequence
 
@@ -213,7 +218,7 @@ class VehicleOptimalController:
         time_points = self.get_time_points()
         self._cost_with_tracker = occ.OCPCostTracker(
             time_points, self._ocp_interface.n_states,
-            running_cost, terminal_cost)
+            running_cost, terminal_cost, self._constraints)
         converged = False
         initial_guess = None
         counter = 0
@@ -346,7 +351,7 @@ class VehicleOptimalController:
         # For three state: terminal costs 1000 for all states
         if self._terminal_constraints is None:
             terminal_state_cost_matrix = (
-                self._ocp_interface.create_state_cost_matrix(y_cost=1.,
+                self._ocp_interface.create_state_cost_matrix(y_cost=10.,
                                                              theta_cost=1.)
             )
             terminal_input_cost_matrix = np.diag(
@@ -489,52 +494,58 @@ class VehicleOptimalController:
         else:
             x0 = self._ocp_interface.get_desired_input()
 
+        # try:
         result = opt.solve_ocp(
             self._dynamic_system, time_pts, self._initial_state,
-            # cost=self._running_cost,
             cost=self._cost_with_tracker.running_cost,
             trajectory_constraints=self._constraints,
-            # terminal_cost=self._terminal_cost,
             terminal_cost=self._cost_with_tracker.terminal_cost,
             terminal_constraints=self._terminal_constraints,
             initial_guess=x0,
             minimize_options={
                 'maxiter': self.solver_max_iter, 'disp': True,
-                'ftol': 1.0E-2,  # default value 1.0E-6
+                'ftol': self.ftol,  # default value 1.0E-6
                 # power_to_iter = {0: 16, 1: 38, 2: > 100}
                 'callback': self._cost_with_tracker.callback}
             # minimize_method='trust-constr',
             # log=True
             # basis=flat.BezierFamily(5, T=self._ocp_horizon)
         )
+        # except RuntimeError:
+        #     pass
         # Note: the basis parameter above was set empirically - it might not
         # always work well
-        self.ocp_result = result
-        self._ocp_time = result.time
+
+        # TODO: testing stuff here
+        if result.success:
+            self.ocp_result = (
+                occ.OptimalControlIterationResult.copy_original_result(result)
+            )
+        else:
+            self.ocp_result = (
+                self._cost_with_tracker.get_best_iteration_result()
+            )
+            print('Using input from the minimum cost feasible iteration.\n'
+                  'Iteration: {}. Cost: {}'.format(self.ocp_result.iteration,
+                                                   self.ocp_result.cost))
+        # self.ocp_result = result
+        self._ocp_time = self.ocp_result.time
         self._ocp_inputs_per_vehicle = (
             self._ocp_interface.map_input_to_vehicle_ids(
-                result.inputs))
+                self.ocp_result.inputs))
 
-        self._ocp_has_solution = result.success
+        self._ocp_has_solution = self.ocp_result.success
         print("Solution{}found".format(
             " " if self._ocp_has_solution else " not "))
         # Threshold below based on terminal cost params
         # if result.success and result.cost > 4 * 1e3:
         #     print("but high cost indicates no LC.")
         #     self._ocp_has_solution = False
-
-        # TODO: testing stuff here
-        if not self._ocp_has_solution:
-            new_result = self._cost_with_tracker.get_best_iteration()
-            print(new_result['cost'])
-            self._ocp_inputs_per_vehicle = (
-                self._ocp_interface.map_input_to_vehicle_ids(
-                    new_result['inputs']))
-        self._ocp_has_solution = True
+        # self._ocp_has_solution = True
 
     def _log_results(self, counter: int, input_sequence: str,
                      output_sequence: str, solve_time: float,
-                     result: opt.OptimalControlResult):
+                     result: occ.OptimalControlIterationResult):
         self._results_summary['iteration'].append(counter)
         self._results_summary['solution_found'].append(result.success)
         self._results_summary['message'].append(

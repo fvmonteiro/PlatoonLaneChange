@@ -23,28 +23,32 @@ def plot_costs_vs_iteration(running_costs, terminal_costs,
     :param running_costs: 2D list with costs vs iterations
     :param terminal_costs: 2D list with costs vs iterations. Could be an empty
      list.
+    :param plot_separately: If True, plots running and terminal costs on
+     separate y axes and sharing the x-axis. Otherwise, plots their sum
     :return:
     """
+    sns.set_style('whitegrid')
+
     n = len(running_costs)
     has_terminal_cost = len(terminal_costs) > 0
 
-    rc_color = 'tab:blue'
-    tc_color = 'tab:orange'
+    blue = 'tab:blue'
+    orange = 'tab:orange'
     fig, axs_2d = plt.subplots(n, 1, squeeze=False)
     axs = [ax[0] for ax in axs_2d]
     for i in range(n):
         if plot_separately:
-            axs[i].plot(running_costs[i], label='running costs', color=rc_color)
+            axs[i].plot(running_costs[i], label='running costs', color=blue)
             _, y_high = axs[i].get_ylim()
             axs[i].set_ylim([0, min(running_costs[i][0] + 0.5, y_high)])
-            axs[i].set_ylabel('running costs', color=rc_color)
-            axs[i].tick_params(axis='y', labelcolor=rc_color)
+            axs[i].set_ylabel('running costs', color=blue)
+            axs[i].tick_params(axis='y', labelcolor=blue)
             if has_terminal_cost:
                 ax_secondary = axs[i].twinx()
                 ax_secondary.plot(terminal_costs[i], label='terminal costs',
-                                  color=tc_color)
-                ax_secondary.set_ylabel('terminal costs', color=tc_color)
-                ax_secondary.tick_params(axis='y', labelcolor=tc_color)
+                                  color=orange)
+                ax_secondary.set_ylabel('terminal costs', color=orange)
+                ax_secondary.tick_params(axis='y', labelcolor=orange)
                 ax_secondary.set_yscale('log')
             # axs[i].legend()
         else:
@@ -52,9 +56,14 @@ def plot_costs_vs_iteration(running_costs, terminal_costs,
             cost += (terminal_costs[i] if has_terminal_cost else 0)
             axs[i].plot(cost)
             _, y_high = axs[i].get_ylim()
-            axs[i].set_ylim([1, 1.2])
+            # axs[i].set_ylim([1, 1.2])
             axs[i].set_ylabel('cost')
-            axs[i].set_yscale('log')
+            # axs[i].set_yscale('log')
+            ax_diff = axs[i].twinx()
+            ax_diff.plot(np.diff(cost), color=orange)
+            ax_diff.set_ylabel('delta cost', color=orange)
+            ax_diff.tick_params(axis='y', labelcolor=orange)
+            ax_diff.set_yscale('symlog')
 
     axs[-1].set_xlabel('iteration')
     fig.tight_layout()
@@ -68,7 +77,7 @@ def plot_trajectory(data: pd.DataFrame):
     time = np.arange(data['t'].min(), data['t'].max(), dt)
     step = round(dt / (data['t'].iloc[1] - data['t'].iloc[0]))
     fig, ax = plt.subplots(len(time), 1)
-    # fig.set_size_inches(6, 9)
+    fig.set_size_inches(6, 6)
     for i in range(len(time)):
         for veh_id in data['id'].unique():
             veh_data = data[data['id'] == veh_id]
@@ -79,6 +88,7 @@ def plot_trajectory(data: pd.DataFrame):
         # sns.scatterplot(data, x='x', y='y', hue='name', palette=colors,
         #                 markers='>', legend=False, marker='>')
 
+        ax[i].set_title('t = {}'.format(time[i]), loc='left')
         ax[i].axhline(y=const.LANE_WIDTH / 2, linestyle='--', color='black')
         # ax[i].set_aspect('equal', adjustable='box')
         ax[i].set(xlim=(min_x - 2, max_x),

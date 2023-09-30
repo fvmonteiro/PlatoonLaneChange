@@ -80,7 +80,7 @@ def load_and_plot_latest_scenario():
     trajectory_data = analysis.load_latest_simulated_scenario(
         trajectory_file_name)
     analysis.plot_trajectory(trajectory_data)
-    analysis.plot_constrained_lane_change(trajectory_data, 'p1')
+    # analysis.plot_constrained_lane_change(trajectory_data, 'p1')
 
     cost_data = analysis.load_latest_simulated_scenario(cost_file_name)
     analysis.plot_costs_vs_iteration(cost_data[0], cost_data[1],
@@ -178,12 +178,16 @@ def mode_convergence_base_tests():
 
 
 def main():
-    n_platoon = 1
-    n_orig_ahead, n_orig_behind = 1, 1
-    n_dest_ahead, n_dest_behind = 0, 0
+    # TODO: scenario with 2 platoon vehicles, 1 ld and 4m too close. Our best
+    #  iteration output is (shitty) and actually worse than the last iteration.
+    #  How come?
+    n_platoon = 2
+    n_orig_ahead, n_orig_behind = 0, 0
+    n_dest_ahead, n_dest_behind = 1, 0
 
-    configure_optimal_controller(max_iter=3, solver_max_iter=100,
-                                 discretization_step=0.5, time_horizon=5.0,
+    configure_optimal_controller(max_iter=3, solver_max_iter=300,
+                                 discretization_step=0.2, time_horizon=5.0,
+                                 ftol=1.0e-3,
                                  has_terminal_constraints=False,
                                  jumpstart_next_solver_call=True,
                                  has_lateral_constraint=False)
@@ -199,9 +203,9 @@ def main():
     #                     n_dest_behind)
     # run_internal_optimal_controller(n_orig_ahead, n_orig_behind, n_dest_ahead,
     #                                 n_dest_behind)
-    # run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
-    #                  n_dest_ahead, n_dest_behind)
-    load_and_plot_latest_scenario()
+    run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
+                     n_dest_ahead, n_dest_behind)
+    # load_and_plot_latest_scenario()
     # mode_convergence_base_tests()
 
     end_time = time.time()

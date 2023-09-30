@@ -273,9 +273,6 @@ class ClosedLoopVehicle(FourStateVehicle):
     """ Vehicle that computes all of its inputs by feedback laws.
      States: [x, y, theta, v], external input: None, centered at the C.G. """
 
-    # delete after figuring out a better class organization
-    _n_optimal_inputs = 0
-
     def __init__(self):
         super().__init__()
         self._ocp_interface = ClosedLoopVehicleInterface
@@ -358,6 +355,34 @@ class ClosedLoopVehicle(FourStateVehicle):
         safe_gap = following_vehicle.compute_safe_gap(
             following_vehicle.get_vel())
         return gap + margin >= safe_gap
+
+
+class SafeLongitudinalVehicle(ClosedLoopVehicle):
+    def __init__(self):
+        super().__init__()
+        self._ocp_interface = SafeLongitudinalVehicleInterface  # TODO
+        # self.set_mode(modes.CLLaneKeepingMode())  # TODO
+
+    def update_mode(self, vehicles: Dict[int, base.BaseVehicle]):
+        pass  # TODO: modes could be cooperating or not
+
+    def _compute_derivatives(self, vel, theta, phi):
+        self._position_derivative_longitudinal_only(vel)
+        self._derivatives[self._state_idx['v']] = self.get_an_input_by_name('a')
+
+    def _determine_inputs(self, open_loop_controls: np.ndarray,
+                          vehicles: Dict[int, base.BaseVehicle]):
+        """
+        Computes the acceleration and phi (steering wheel angle)
+        :param open_loop_controls: irrelevant
+        :param vehicles: Surrounding vehicles
+        :return: Nothing. The vehicle stores the computed input values
+        """
+        self._inputs[self._input_idx['a']] = (
+            self.long_controller.compute_acceleration(vehicles))
+
+    def _set_up_lane_change_control(self):
+        pass
 
 
 class PlatoonVehicle(SafeAccelOptimalLCVehicle):
@@ -601,3 +626,12 @@ class ClosedLoopVehicleInterface(SafeAccelVehicleInterface):
 
     def get_input_limits(self) -> (List[float], List[float]):
         return [], []
+
+
+class SafeLongitudinalVehicleInterface(ClosedLoopVehicleInterface):
+    def __init__(self, vehicle: SafeLongitudinalVehicle):
+        super().__init__(vehicle)
+
+    def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
+        self._position_derivative_longitudinal_only(vel, derivatives)
+        derivatives[self.state_idx['v']] = accel

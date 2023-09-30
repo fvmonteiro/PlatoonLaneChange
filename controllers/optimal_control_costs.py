@@ -1,5 +1,10 @@
+from __future__ import annotations
+
 from functools import partial
 from typing import Callable, List, Union
+
+import control.optimal as opt
+from scipy.optimize import LinearConstraint, NonlinearConstraint
 
 import numpy as np
 
@@ -9,12 +14,28 @@ class OCPCostTracker:
     Makes it possible to keep track of the computed costs during the optimal
     control problem solver iterations.
     """
-    def __init__(self, time_points: np.ndarray, n_states: int,
-                 running_cost: Callable, terminal_cost: Callable = None):
+    def __init__(
+            self, time_points: np.ndarray, n_states: int,
+            running_cost: Callable, terminal_cost: Callable = None,
+            constraints: List[Union[LinearConstraint, NonlinearConstraint]]
+            = None
+    ):
         self._time_points = time_points
         self._n_states = n_states
         self._running_cost_fun = running_cost
         self._terminal_cost_fun = terminal_cost
+        self._linear_constraints = []
+        self._non_linear_constraints = []
+        if constraints:
+            for c in constraints:
+                if isinstance(c, LinearConstraint):
+                    self._linear_constraints.append(c)
+                elif isinstance(c, NonlinearConstraint):
+                    self._non_linear_constraints.append(c)
+                else:
+                    raise ValueError('Unknown constraint type: {}'.format(
+                        type(c)
+                    ))
 
         self._n_time_points: int = len(time_points)
         self._current_call_costs: np.ndarray = np.zeros(self._n_time_points)
@@ -27,11 +48,26 @@ class OCPCostTracker:
         self._states_per_iteration: List[List[np.ndarray]] = []
         self._inputs_per_iteration: List[List[np.ndarray]] = []
 
+        # Best feasible iteration (for each call to the ocp solver)
+        # self._best_states: List[np.array] = []
+        # self._best_inputs: List[np.array] = []
+        self._best_cost: float = np.inf
+        self._best_iteration: List[int] = []
+
     def get_running_cost(self) -> List[np.array]:
         return [np.array(costs) for costs in self._running_cost_per_iteration]
 
     def get_terminal_cost(self) -> List[np.array]:
         return [np.array(costs) for costs in self._terminal_cost_per_iteration]
+
+    def get_time_points(self) -> np.ndarray:
+        return self._time_points
+
+    def get_states_per_iteration(self):
+        return self._states_per_iteration
+
+    def get_inputs_per_iteration(self):
+        return self._inputs_per_iteration
 
     def start_recording(self):
         self._current_call_costs = np.zeros(self._n_time_points)
@@ -42,6 +78,10 @@ class OCPCostTracker:
         self._terminal_cost_per_iteration.append([])
         self._states_per_iteration.append([])
         self._inputs_per_iteration.append([])
+        self._best_cost = np.inf
+        self._best_iteration.append(-1)
+        # self._best_states.append(None)
+        # self._best_inputs.append(None)
 
     def running_cost(self, states, inputs):
         cost = self._running_cost_fun(states, inputs)
@@ -68,25 +108,29 @@ class OCPCostTracker:
                 i, rc[i], tc[i], rc[i] + tc[i])
         print(output)
 
-    def get_best_iteration(self, ocp_solution_number: int = -1):
+    def get_best_iteration_result(self, ocp_solution_number: int = -1):
         """
         Gets the states and inputs from the iteration that had the minimum cost
         :return:
         """
+        # rc = np.array(self._running_cost_per_iteration[ocp_solution_number])
+        # tc = np.array(self._terminal_cost_per_iteration[ocp_solution_number])
+        # best_idx = np.argmin(rc + tc)
+        # return OptimalControlIterationResult.get_result_from_iteration(
+        #     self, best_idx)
+        best_idx = self._best_iteration[ocp_solution_number]
+        return OptimalControlIterationResult.get_result_from_iteration(
+            self, ocp_solution_number, best_idx
+        )
+
+    def get_worst_iteration_result(self, ocp_solution_number: int = -1):
         rc = np.array(self._running_cost_per_iteration[ocp_solution_number])
         tc = np.array(self._terminal_cost_per_iteration[ocp_solution_number])
-        best_idx = np.argmin(rc + tc)
-        min_cost = rc[best_idx] + tc[best_idx]
-        print('Best iteration idx:', best_idx)
-        return {
-            'cost': min_cost,
-            'states': self._states_per_iteration[ocp_solution_number][best_idx],
-            'inputs': self._inputs_per_iteration[ocp_solution_number][best_idx]
-        }
-    # TODO: return object with members: success, time, states (n x time),
-    #  inputs (n x time), message, nit, cost
+        worst_idx = np.argmax(rc + tc)
+        return OptimalControlIterationResult.get_result_from_iteration(
+            self, worst_idx)
 
-    def callback(self, x):
+    def callback(self, x) -> None:
         states, inputs = self._compute_states_inputs(x)
 
         # Note: we're recomputing costs here, but given how simple they are
@@ -113,6 +157,38 @@ class OCPCostTracker:
         self._terminal_cost_per_iteration[-1].append(terminal_cost)
         self._states_per_iteration[-1].append(states)
         self._inputs_per_iteration[-1].append(inputs)
+
+        # Store min cost values
+        iteration_cost = running_cost + terminal_cost
+        if (iteration_cost < self._best_cost
+                and self.check_feasibility(states, inputs)):
+            self._best_cost = iteration_cost
+            iteration = len(self._running_cost_per_iteration[-1]) - 1
+            self._best_iteration[-1] = iteration
+            # self._best_states[-1] = states
+            # self._best_inputs[-1] = inputs
+
+        # Compare iterations:
+        # delta_cost = (np.diff(self._running_cost_per_iteration[-1][-2:])
+        #               + np.diff(self._terminal_cost_per_iteration[-1][-2:]))
+        # if np.abs(delta_cost) < 1.0:
+        #     raise RuntimeError(
+        #         "Terminating optimization: small variation in cost"
+        #         " between iterations: {}".format(delta_cost))
+
+    def check_feasibility(self, states, inputs):
+        margin = 1.0e-7
+        for i in range(self._n_time_points):
+            for lc in self._linear_constraints:
+                rl, ru = lc.residual(np.hstack([states[:, i], inputs[:, i]]))
+                if np.any(rl < -margin) or np.any(ru < -margin):
+                    return False
+            for nlc in self._non_linear_constraints:
+                if not (nlc.lb - margin
+                        <= nlc.fun(states[:, i], inputs[:, i]) <=
+                        nlc.ub + margin):
+                    return False
+        return True
 
     def _save_running_cost_per_call(self, current_cost):
         self._current_call_costs[self._call_counter] = current_cost
@@ -150,6 +226,55 @@ class OCPCostTracker:
         inputs = x.reshape((-1, self._n_time_points))
 
         return states, inputs
+
+
+class OptimalControlIterationResult:
+
+    # Members from opt.OptimalControlResult
+    success: bool
+    nit: int
+    cost: float
+    message: str
+    time: np.ndarray
+    inputs: np.ndarray
+    states: np.ndarray
+    # New members
+    iteration: int
+
+    def __init__(self, iteration: int):
+        self.iteration = iteration
+
+    @classmethod
+    def copy_original_result(cls, result: opt.OptimalControlResult
+                             ) -> OptimalControlIterationResult:
+        obj = OptimalControlIterationResult(result.nit - 1)
+        for key, val in result.items():
+            setattr(obj, key, val)
+        return obj
+
+    @classmethod
+    def get_result_from_iteration(
+            cls, cost_tracker: OCPCostTracker, ocp_solution_number: int,
+            iteration: int
+    ) -> OptimalControlIterationResult:
+        obj = OptimalControlIterationResult(iteration)
+        obj.success = True  # TODO: How to check?
+        obj.time = cost_tracker.get_time_points()
+        obj.states = cost_tracker.get_states_per_iteration()[
+            ocp_solution_number][iteration]
+        obj.inputs = cost_tracker.get_inputs_per_iteration()[
+            ocp_solution_number][iteration]
+        # feasibility check may be redundant sometimes
+        obj.success = cost_tracker.check_feasibility(obj.states, obj.inputs)
+        obj.message = (' ' if obj.success
+                       else 'OCP solution {}, iteration {} is not '
+                            'feasible'.format(ocp_solution_number, iteration))
+        obj.nit = len(cost_tracker.get_states_per_iteration()[
+                          ocp_solution_number])
+        rc = cost_tracker.get_running_cost()[ocp_solution_number][iteration]
+        tc = cost_tracker.get_terminal_cost()[ocp_solution_number][iteration]
+        obj.cost = rc + tc
+        return obj
 
 
 def quadratic_cost(n_states: int, n_inputs: int, Q, R,

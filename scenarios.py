@@ -150,7 +150,7 @@ class VehicleFollowingScenario(SimulationScenario):
 
     def __init__(self, n_vehs: int):
         super().__init__()
-        vehicle_classes = [fsv.ClosedLoopVehicle] * n_vehs
+        vehicle_classes = [fsv.SafeLongitudinalVehicle] * n_vehs
         v_ff = [10] + [12] * n_vehs
         self.n_per_lane = [n_vehs]
         self.vehicle_group.create_vehicle_array(vehicle_classes)
@@ -238,10 +238,10 @@ class LaneChangeScenario(SimulationScenario):
         self._n_dest_ahead, self._n_dest_behind = n_dest_ahead, n_dest_behind
 
         orig_veh_classes = (
-                (fsv.ClosedLoopVehicle,) * n_orig_ahead
+                (fsv.SafeLongitudinalVehicle,) * n_orig_ahead
                 + (lc_veh_class,) * n_platoon
-                + (fsv.ClosedLoopVehicle,) * n_orig_behind)
-        dest_veh_classes = (fsv.ClosedLoopVehicle,) * (n_dest_ahead
+                + (fsv.SafeLongitudinalVehicle,) * n_orig_behind)
+        dest_veh_classes = (fsv.SafeLongitudinalVehicle,) * (n_dest_ahead
                                                        + n_dest_behind)
         self.n_per_lane = [len(orig_veh_classes), len(dest_veh_classes)]
         self.vehicle_group.create_vehicle_array(
@@ -351,7 +351,7 @@ class LaneChangeScenario(SimulationScenario):
                       + [v_orig_foll] * self._n_orig_behind
                       + [v_dest_leader] + [v_others] * (self.n_per_lane[1] - 1))
         self.vehicle_group.set_free_flow_speeds(v_ff_array)
-        delta_x = {'lo': 0.0, 'ld': 0.0,
+        delta_x = {'lo': 0.0, 'ld': 4.0,
                    'fd': 0.0}  # deviation from equilibrium
         self.create_initial_state(v_orig_leader, v_dest_leader, delta_x)
 
