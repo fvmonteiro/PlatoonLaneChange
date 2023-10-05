@@ -9,6 +9,7 @@ import control as ct
 import numpy as np
 import pandas as pd
 
+import analysis
 import controllers.optimal_controller as opt_ctrl
 from constants import LANE_WIDTH
 from vehicle_group import VehicleGroup
@@ -232,7 +233,6 @@ class LaneChangeScenario(SimulationScenario):
         super().__init__()
 
         self.lc_intention_time = 1.0
-        self.leader_sequence = dict()  # used when iterating over the OCP
         self._n_orig_ahead, self._n_orig_behind = n_orig_ahead, n_orig_behind
         self._n_platoon = n_platoon
         self._n_dest_ahead, self._n_dest_behind = n_dest_ahead, n_dest_behind
@@ -242,7 +242,7 @@ class LaneChangeScenario(SimulationScenario):
                 + (lc_veh_class,) * n_platoon
                 + (fsv.SafeLongitudinalVehicle,) * n_orig_behind)
         dest_veh_classes = (fsv.SafeLongitudinalVehicle,) * (n_dest_ahead
-                                                       + n_dest_behind)
+                                                             + n_dest_behind)
         self.n_per_lane = [len(orig_veh_classes), len(dest_veh_classes)]
         self.vehicle_group.create_vehicle_array(
             list(orig_veh_classes + dest_veh_classes))
@@ -261,9 +261,13 @@ class LaneChangeScenario(SimulationScenario):
     @classmethod
     def platoon_lane_change(cls, n_platoon: int, n_orig_ahead: int,
                             n_orig_behind: int, n_dest_ahead: int,
-                            n_dest_behind: int) -> LaneChangeScenario:
-        return cls(fsv.PlatoonVehicle, n_platoon, n_orig_ahead, n_orig_behind,
-                   n_dest_ahead, n_dest_behind)
+                            n_dest_behind: int, is_acceleration_optimal: bool
+                            ) -> LaneChangeScenario:
+        scenario = cls(fsv.PlatoonVehicle, n_platoon, n_orig_ahead,
+                       n_orig_behind, n_dest_ahead, n_dest_behind)
+        for vehicle in scenario.vehicle_group.get_platoon_vehicles():
+            vehicle.set_acceleration_controller_type(is_acceleration_optimal)
+        return scenario
 
     @classmethod
     def single_vehicle_optimal_lane_change(
@@ -278,6 +282,9 @@ class LaneChangeScenario(SimulationScenario):
             n_dest_ahead: int, n_dest_behind: int) -> LaneChangeScenario:
         return cls(fsv.ClosedLoopVehicle, 1, n_orig_ahead,
                    n_orig_behind, n_dest_ahead, n_dest_behind)
+
+    def get_n_platoon(self):
+        return self._n_platoon
 
     # TODO: both methods below can also work with OptimalControlVehicle class
     def get_opc_results_summary(self):
@@ -351,8 +358,8 @@ class LaneChangeScenario(SimulationScenario):
                       + [v_orig_foll] * self._n_orig_behind
                       + [v_dest_leader] + [v_others] * (self.n_per_lane[1] - 1))
         self.vehicle_group.set_free_flow_speeds(v_ff_array)
-        delta_x = {'lo': 0.0, 'ld': 4.0,
-                   'fd': 0.0}  # deviation from equilibrium
+        delta_x = {'lo': 0.0, 'ld': 0.0,
+                   'fd': -10.0}  # deviation from equilibrium
         self.create_initial_state(v_orig_leader, v_dest_leader, delta_x)
 
     def create_initial_state(self, v_orig: float, v_dest: float,
@@ -406,6 +413,7 @@ class LaneChangeScenario(SimulationScenario):
         dt = 1e-2
         time = np.arange(0, final_time, dt)
         self.vehicle_group.prepare_to_start_simulation(len(time))
+        # analysis.plot_initial_state(self.response_to_dataframe())
         self.vehicle_group.update_surrounding_vehicles()
         for i in range(len(time) - 1):
             if np.isclose(time[i], self.lc_intention_time, atol=dt / 10):

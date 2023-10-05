@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Union
 
 import numpy as np
 
@@ -63,9 +63,7 @@ class LongitudinalController:
         :param vehicles:
         :return:
         """
-        relevant_ids = [self.vehicle.get_orig_lane_leader_id(),
-                        self.vehicle.get_dest_lane_leader_id(),
-                        self.vehicle.get_incoming_vehicle_id()]
+        relevant_ids = self.vehicle.get_surrounding_vehicle_ids()
         candidate_accel = {
             veh_id: self.compute_accel_to_a_leader(veh_id, vehicles)
             for veh_id in relevant_ids

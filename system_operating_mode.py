@@ -96,13 +96,22 @@ def mode_sequence_to_str(s: ModeSequence) -> str:
     return " ".join(ret)
 
 
-def compare_mode_sequences(s1: ModeSequence, s2: ModeSequence) -> bool:
+def compare_mode_sequences(s1: ModeSequence, s2: ModeSequence, dt: float
+                           ) -> bool:
+    """
+
+    :param s1: First mode sequence
+    :param s2: Second mode sequence
+    :param dt: The time tolerance for mode switches in each sequence to be
+     considered the same.
+    :return:
+    """
     if len(s1) != len(s2):
         return False
     for i in range(len(s1)):
         t1, mode1 = s1[i]
         t2, mode2 = s2[i]
-        if not (np.abs(t1 - t2) <= 0.1 and mode1 == mode2):
+        if not (np.abs(t1 - t2) <= dt and mode1 == mode2):
             return False
     return True
 

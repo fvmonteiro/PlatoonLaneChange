@@ -6,7 +6,6 @@ from typing import Dict, List
 import numpy as np
 
 # import controllers.optimal_controller as opt_ctrl
-import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
 
 
@@ -25,10 +24,13 @@ class Platoon:
         # self._lc_controller: opt_ctrl.VehicleOptimalController = (
         #     opt_ctrl.VehicleOptimalController(self._ocp_horizon)
         # )
-        self._solver_attempt_time: float = -np.inf
-        self.trajectory_exists: bool = False
+        # self._solver_attempt_time: float = -np.inf
+        # self.trajectory_exists: bool = False
 
-        self.vehicles: List[fsv.PlatoonVehicle] = [first_vehicle]
+        # Vehicles and their ids sorted by position (first is front-most)
+        self.vehicles: List[fsv.PlatoonVehicle] = []
+        self._id_to_position_map: Dict[int, int] = {}
+        self.add_vehicle(first_vehicle)
 
     def get_platoon_leader(self):
         return self.vehicles[0]
@@ -45,8 +47,17 @@ class Platoon:
     def set_lc_start_time(self, t: float):
         self._lc_start_time = t
 
+    def get_preceding_vehicle_id(self, veh_id: int) -> int:
+        preceding_position = self._id_to_position_map[veh_id] - 1
+        if preceding_position >= 0:
+            return self.vehicles[preceding_position].get_id()
+        else:
+            return -1
+
     def add_vehicle(self, new_vehicle: fsv.PlatoonVehicle):
-        if new_vehicle.get_x() < self.vehicles[-1].get_x():
+        if (len(self.vehicles) == 0
+                or new_vehicle.get_x() < self.vehicles[-1].get_x()):
+            self._id_to_position_map[new_vehicle.get_id()] = len(self.vehicles)
             self.vehicles.append(new_vehicle)
         else:
             # bisect.insort(self.vehicles, new_vehicle, key=lambda v: v.get_x())
@@ -55,6 +66,8 @@ class Platoon:
             # Possibly slow, but irrelevant for the total run time
             self.vehicles = (self.vehicles[:idx] + [new_vehicle]
                              + self.vehicles[idx:])
+            for i, veh in enumerate(self.vehicles):
+                self._id_to_position_map[veh.get_id()] = i
 
     # def add_vehicles(self, vehicles: List[fsv.PlatoonVehicle]):
     #     self.vehicle_ids = [

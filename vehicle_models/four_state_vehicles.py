@@ -150,6 +150,10 @@ class OptimalControlVehicle(FourStateVehicle):
         new_vehicle = copy.deepcopy(self)
         self._reset_copied_vehicle(new_vehicle, initial_state)
         new_vehicle.reset_ocp_initial_time()
+        # TODO: temp solution to avoid looking for an optimal solution when we
+        #  just want to simulate an open loop system. Same code in
+        #  PlatoonVehicle class
+        new_vehicle.opt_controller._ocp_has_solution = True
         return new_vehicle
 
     def get_intermediate_steps_data(self):
@@ -232,6 +236,9 @@ class OptimalControlVehicle(FourStateVehicle):
     def _set_up_lane_change_control(self):
         pass
 
+    def _write_optimal_inputs(self, optimal_inputs):
+        self._inputs = optimal_inputs
+
 
 class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
     """ Safe acceleration (internally computed) and optimal control computed
@@ -267,6 +274,9 @@ class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
     def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]):
         self._leader_id[self._iter_counter] = (
             self.long_controller.get_more_critical_leader(vehicles))
+
+    def _write_optimal_inputs(self, optimal_phi):
+        self._inputs[self._input_idx['phi']] = optimal_phi[0]
 
 
 class ClosedLoopVehicle(FourStateVehicle):
@@ -360,7 +370,7 @@ class ClosedLoopVehicle(FourStateVehicle):
 class SafeLongitudinalVehicle(ClosedLoopVehicle):
     def __init__(self):
         super().__init__()
-        self._ocp_interface = SafeLongitudinalVehicleInterface  # TODO
+        self._ocp_interface = SafeLongitudinalVehicleInterface
         # self.set_mode(modes.CLLaneKeepingMode())  # TODO
 
     def update_mode(self, vehicles: Dict[int, base.BaseVehicle]):
@@ -385,24 +395,50 @@ class SafeLongitudinalVehicle(ClosedLoopVehicle):
         pass
 
 
-class PlatoonVehicle(SafeAccelOptimalLCVehicle):
+class PlatoonVehicle(OptimalControlVehicle):
     """
-    Vehicles belonging to a platoon. Each vehicle computes its own acceleration
-    but the lane change control is defined by the platoon.
-    Note: not yet sure who this class should inherit from
+    Vehicle belonging to a platoon. The platoon vehicle has longitudinal
+    and lateral feedback controllers while it has no lane change intention.
+    Once it has lane change intention, we can decide whether acceleration
+    is computed by an optimal controller. For now, the lane-changing steering
+    wheel angle is always computed by an optimal controller
+
     """
 
+    _is_acceleration_optimal: bool
     _platoon: platoon.Platoon
 
     def __init__(self):
         super().__init__()
         self.set_mode(modes.PlatoonVehicleLaneKeepingMode())
 
+    def get_surrounding_vehicle_ids(self) -> List[int]:
+        ids = super().get_surrounding_vehicle_ids()
+        if self.is_in_a_platoon():
+            ids.append(self._platoon.get_preceding_vehicle_id(self.get_id()))
+        return ids
+
     def get_platoon(self):
         try:
             return self._platoon
         except AttributeError:
             return None
+
+    def set_acceleration_controller_type(self,
+                                         is_acceleration_optimal: bool = False):
+        """
+        Must be called after instantiation of an object (but we don't want to
+        add a parameter to the constructor)
+        :param is_acceleration_optimal:
+        :return:
+        """
+        if is_acceleration_optimal:
+            self._n_optimal_inputs = 2
+            self._ocp_interface = OpenLoopVehicleInterface
+        else:
+            self._n_optimal_inputs = 1
+            self._ocp_interface = SafeAccelVehicleInterface
+        self._is_acceleration_optimal = is_acceleration_optimal
 
     def make_reset_copy(self, initial_state=None) -> PlatoonVehicle:
         """
@@ -422,6 +458,7 @@ class PlatoonVehicle(SafeAccelOptimalLCVehicle):
         new_vehicle = copy.deepcopy(self)
         self._reset_copied_vehicle(new_vehicle, initial_state)
         new_vehicle.reset_ocp_initial_time()
+        new_vehicle.opt_controller._ocp_has_solution = True
         new_vehicle._platoon = None
         return new_vehicle
 
@@ -434,10 +471,10 @@ class PlatoonVehicle(SafeAccelOptimalLCVehicle):
         else:
             self._mode.handle_lane_keeping_intention(vehicles)
 
-    def is_lane_changing(self) -> bool:
-        # return self._platoon.is_lane_changing(self.get_current_time())
-        delta_t = self.get_current_time() - self._lc_start_time
-        return delta_t <= self.opt_controller.get_time_horizon()
+    # def is_lane_changing(self) -> bool:
+    #     # return self._platoon.is_lane_changing(self.get_current_time())
+    #     delta_t = self.get_current_time() - self._lc_start_time
+    #     return delta_t <= self.opt_controller.get_time_horizon()
 
     def is_platoon_leader(self):
         return self._id == self._platoon.get_platoon_leader_id()
@@ -469,18 +506,29 @@ class PlatoonVehicle(SafeAccelOptimalLCVehicle):
         :param vehicles: Surrounding vehicles
         :return: Nothing. The vehicle stores the computed input values
         """
-        self._inputs[self._input_idx['a']] = (
-            self.long_controller.compute_acceleration(vehicles))
 
-        # t = self.get_current_time()
         if self.is_lane_changing():
             if self.is_platoon_leader():
                 delta_t = self.get_current_time() - self._ocp_initial_time
                 self._platoon.retrieve_all_inputs(delta_t)
-            phi = self._platoon.get_input_for_vehicle(self._id)[0]
+            if self._is_acceleration_optimal:
+                optimal_inputs = self._platoon.get_input_for_vehicle(self._id)
+                accel = optimal_inputs[self._input_idx['a']]
+                phi = optimal_inputs[self._input_idx['phi']]
+            else:
+                accel = self.long_controller.compute_acceleration(vehicles)
+                phi = self._platoon.get_input_for_vehicle(self._id)[0]
         else:
+            accel = self.long_controller.compute_acceleration(vehicles)
             phi = self.lk_controller.compute_steering_wheel_angle()
+
+        self._inputs[self._input_idx['a']] = accel
         self._inputs[self._input_idx['phi']] = phi
+
+    def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]):
+        # TODO: vary when lane-changing?
+        self._leader_id[self._iter_counter] = (
+            self.long_controller.get_more_critical_leader(vehicles))
 
     def _set_up_longitudinal_adjustments_control(
             self, vehicles: Dict[int, base.BaseVehicle]) -> None:
@@ -530,6 +578,12 @@ class PlatoonVehicle(SafeAccelOptimalLCVehicle):
         self.set_platoon(platoon.Platoon(self))
         # platoons[new_platoon.id] = new_platoon
         # self._platoon
+
+    def _write_optimal_inputs(self, optimal_inputs):
+        if self._is_acceleration_optimal:
+            self._inputs = optimal_inputs
+        else:
+            self._inputs[self._input_idx['phi']] = optimal_inputs[0]
 
 
 class FourStateVehicleInterface(base.BaseVehicleInterface, ABC):

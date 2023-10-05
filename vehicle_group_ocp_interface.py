@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Dict, List
 
 import numpy as np
@@ -214,8 +215,8 @@ class VehicleGroupInterface:
     def create_state_cost_matrix(self, x_cost: float = 0, y_cost: float = 0,
                                  theta_cost: float = 0, v_cost: float = 0):
         """
-        Creates a diagonal cost function where each state of all vehicles gets
-        the same weight
+        Creates a diagonal cost function where each state of all controlled
+        vehicles gets the same weight
         :param x_cost:
         :param y_cost:
         :param theta_cost:
@@ -225,26 +226,45 @@ class VehicleGroupInterface:
         veh_costs = []
         for veh_id in self.sorted_vehicle_ids:
             veh = self.vehicles[veh_id]
-            if veh.n_inputs > 0:
+            if veh.n_inputs == 0:
+                veh_costs.extend([0.0] * veh.n_states)
+            elif veh.n_inputs == 1:  # only steering wheel optimal control
+                if x_cost > 0 or v_cost > 0:
+                    warnings.warn('Trying to pass non-zero position or '
+                                  'velocity cost to a vehicle with feedback '
+                                  'acceleration. Setting both to zero')
+                veh_costs.extend(self.vehicles[veh_id].create_state_vector(
+                    0., y_cost, theta_cost, 0.))
+            else:  # steering wheel and accel optimal control
                 veh_costs.extend(self.vehicles[veh_id].create_state_vector(
                     x_cost, y_cost, theta_cost, v_cost))
-            else:
-                veh_costs.extend([0.0] * veh.n_states)
+
         return np.diag(veh_costs)
 
-    # def create_terminal_cost_matrix(self, cost):
-    #     veh_costs = []
-    #     for veh_id in self.sorted_vehicle_ids:
-    #         veh = self.vehicles[veh_id]
-    #         # TODO: cost only for controlled vehs?
-    #         if veh.n_inputs > 0 or True:
-    #             if 'v' in veh.input_names or 'a' in veh.input_names:
-    #                 veh_costs.extend([cost] * veh.n_states)
-    #             else:
-    #                 veh_costs.extend([0, cost, cost, 0])
-    #         else:
-    #             veh_costs.extend([0.0] * veh.n_states)
-    #     return np.diag(veh_costs)
+    def create_input_cost_matrix(self, accel_cost: float = 0,
+                                 phi_cost: float = 0,):
+        """
+        Creates a diagonal cost function where each input of all controlled
+        vehicles gets the same weight
+        :param accel_cost:
+        :param phi_cost:
+        :return:
+        """
+        veh_costs = []
+        for veh_id in self.sorted_vehicle_ids:
+            veh = self.vehicles[veh_id]
+            if veh.n_inputs == 0:
+                continue
+            elif veh.n_inputs == 1:  # only steering wheel optimal control
+                if accel_cost > 0:
+                    warnings.warn('Trying to pass non-zero accel cost to a '
+                                  'vehicle with feedback acceleration. '
+                                  'Accel cost being ignored')
+                veh_costs.append(phi_cost)
+            else:  # steering wheel and accel optimal control
+                veh_costs.extend([accel_cost, phi_cost])
+
+        return np.diag(veh_costs)
 
     def compute_derivatives(self, t, states, inputs):
         """

@@ -31,7 +31,7 @@ def run_fast_lane_change():
     analysis.plot_lane_change(data)
 
 
-def run_base_opc_scenario(max_iter=100):
+def run_base_opc_scenario():
     v_ff = 10
     tf = 10
 
@@ -79,8 +79,9 @@ def run_constraints_scenario(has_lo: bool, has_fo: bool, has_ld: bool,
 def load_and_plot_latest_scenario():
     trajectory_data = analysis.load_latest_simulated_scenario(
         trajectory_file_name)
-    analysis.plot_trajectory(trajectory_data)
+    # analysis.plot_trajectory(trajectory_data)
     # analysis.plot_constrained_lane_change(trajectory_data, 'p1')
+    # analysis.plot_platoon_lane_change(trajectory_data)
 
     cost_data = analysis.load_latest_simulated_scenario(cost_file_name)
     analysis.plot_costs_vs_iteration(cost_data[0], cost_data[1],
@@ -107,10 +108,13 @@ def run_internal_optimal_controller(n_orig_ahead: int, n_orig_behind: int,
 
 
 def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
-                     n_dest_ahead: int, n_dest_behind: int):
+                     n_dest_ahead: int, n_dest_behind: int,
+                     is_acceleration_optimal: bool):
     tf = 7.0
     scenario = scenarios.LaneChangeScenario.platoon_lane_change(
-        n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind)
+        n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
+        is_acceleration_optimal
+    )
     run_save_and_plot(scenario, tf)
 
 
@@ -121,7 +125,10 @@ def run_save_and_plot(scenario: scenarios.LaneChangeScenario, tf: float = 10.):
     scenario.save_response_data(trajectory_file_name)
     data = scenario.response_to_dataframe()
     analysis.plot_trajectory(data)
-    analysis.plot_constrained_lane_change(data, 'p1')  # TODO: ego or p1
+    if scenario.get_n_platoon() == 1:
+        analysis.plot_constrained_lane_change(data, 'p1')  # TODO: ego or p1
+    else:
+        analysis.plot_platoon_lane_change(data)
 
     try:
         scenario.save_cost_data(cost_file_name)
@@ -178,19 +185,17 @@ def mode_convergence_base_tests():
 
 
 def main():
-    # TODO: scenario with 2 platoon vehicles, 1 ld and 4m too close. Our best
-    #  iteration output is (shitty) and actually worse than the last iteration.
-    #  How come?
-    n_platoon = 2
+    n_platoon = 1
     n_orig_ahead, n_orig_behind = 0, 0
-    n_dest_ahead, n_dest_behind = 1, 0
+    n_dest_ahead, n_dest_behind = 0, 0
 
-    configure_optimal_controller(max_iter=3, solver_max_iter=300,
+    configure_optimal_controller(max_iter=1, solver_max_iter=300,
                                  discretization_step=0.2, time_horizon=5.0,
                                  ftol=1.0e-3,
                                  has_terminal_constraints=False,
-                                 jumpstart_next_solver_call=True,
-                                 has_lateral_constraint=False)
+                                 jumpstart_next_solver_call=False,
+                                 has_lateral_constraint=False,
+                                 estimate_gradient=True)
 
     start_time = time.time()
 
@@ -204,7 +209,8 @@ def main():
     # run_internal_optimal_controller(n_orig_ahead, n_orig_behind, n_dest_ahead,
     #                                 n_dest_behind)
     run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
-                     n_dest_ahead, n_dest_behind)
+                     n_dest_ahead, n_dest_behind,
+                     is_acceleration_optimal=True)
     # load_and_plot_latest_scenario()
     # mode_convergence_base_tests()
 

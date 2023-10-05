@@ -24,7 +24,7 @@ def configure_optimal_controller(
         discretization_step: float = None, time_horizon: float = None,
         ftol: float = None, has_terminal_constraints: bool = False,
         jumpstart_next_solver_call: bool = False,
-        has_lateral_constraint: bool = False):
+        has_lateral_constraint: bool = False, estimate_gradient: bool = True):
     """
     Sets the configurations of the optimal controller that do not vary during
     the simulation.
@@ -60,6 +60,7 @@ def configure_optimal_controller(
     VehicleOptimalController.jumpstart_next_solver_call = (
         jumpstart_next_solver_call)
     VehicleOptimalController.has_lateral_constraint = has_lateral_constraint
+    VehicleOptimalController.estimate_gradient = estimate_gradient
 
 
 class VehicleOptimalController:
@@ -88,6 +89,7 @@ class VehicleOptimalController:
     has_terminal_constraints: bool = False
     jumpstart_next_solver_call: bool = False
     has_lateral_constraint: bool = False
+    estimate_gradient: bool = True
 
     def __init__(self):
         self._terminal_cost = None
@@ -105,7 +107,11 @@ class VehicleOptimalController:
         if dt is None:
             dt = self.discretization_step  # [s]
         n = round(self.time_horizon / dt) + 1  # +1 to get 'round' times
-        return np.linspace(0, self.time_horizon, n)
+        # We use the rounding function to prevent minor numerical differences
+        # between time steps.
+        rounding_precision = int(np.floor(np.log10(dt)))
+        return np.round(np.linspace(0, self.time_horizon, n),
+                        -rounding_precision)
 
     def get_data_per_iteration(self):
         return self._data_per_iteration
@@ -200,10 +206,6 @@ class VehicleOptimalController:
 
         if mode_sequence is None:
             input_sequence: som.ModeSequence = [(0.0, som.SystemMode(vehicles))]
-            # TODO: temp! Sequence chosen to 'skip' the first iteration and
-            #  gain some time in tests
-            # som.append_mode_to_sequence(input_sequence, 0.94,
-            #                             [('fo1', 'lo1'), ('p1', None)])
         else:
             input_sequence = mode_sequence
 
@@ -212,13 +214,9 @@ class VehicleOptimalController:
         center_veh_id = controlled_veh_ids[0]
         self._ocp_interface = vgi.VehicleGroupInterface(vehicles,
                                                         center_veh_id)
-        self._set_ocp_configuration(controlled_veh_ids)
-        running_cost = self._generate_running_cost()
-        terminal_cost = self._generate_terminal_cost()
-        time_points = self.get_time_points()
-        self._cost_with_tracker = occ.OCPCostTracker(
-            time_points, self._ocp_interface.n_states,
-            running_cost, terminal_cost, self._constraints)
+        self._set_ocp_configuration()
+        self._create_cost_with_tracker()
+
         converged = False
         initial_guess = None
         counter = 0
@@ -228,24 +226,36 @@ class VehicleOptimalController:
             input_seq_str = som.mode_sequence_to_str(input_sequence)
             print("Setting mode sequence to:  {}".format(input_seq_str))
             self._ocp_interface.set_mode_sequence(input_sequence)
+            self._set_constraints(controlled_veh_ids)
             self._cost_with_tracker.start_recording()
+
             start_time = time.time()
             self._solve_ocp(initial_guess)
             solve_time = time.time() - start_time
 
-            # TODO: do we want the mode sequence seen by the ocp solver or the
-            #  simulated one?
-            # alt = self.get_ocp_solver_simulation(vehicles)
-            # analysis.plot_constrained_lane_change(
-            #     alt.to_dataframe(), vehicles[center_veh_id].get_id())
+            # Just checking what the optimizer "sees"
+            alt = self.get_ocp_solver_simulation(vehicles)
+            if len(alt.get_platoon_vehicles()) == 1:  # TODO: also temp checking
+                analysis.plot_constrained_lane_change(
+                    alt.to_dataframe(), vehicles[center_veh_id].get_id())
+            else:
+                analysis.plot_platoon_lane_change(alt.to_dataframe())
 
+            # TODO: big problem here. How to force this simulation NOT to run
+            #  the ocp solver? When we find a solution, it's OK. But if we don't
+            #  it will run indefinitely.
+            #  Solution: optimal vehicles should create open loop versions of
+            #  themselves.
             simulated_vehicle_group = self.simulate_over_optimization_horizon(
                 vehicles)
             self._data_per_iteration.append(
                 simulated_vehicle_group.to_dataframe())
-            analysis.plot_constrained_lane_change(
-                self._data_per_iteration[-1],
-                vehicles[center_veh_id].get_id())
+            if len(simulated_vehicle_group.get_platoon_vehicles()) == 1:
+                analysis.plot_constrained_lane_change(
+                    self._data_per_iteration[-1],
+                    vehicles[center_veh_id].get_id())
+            else:
+                analysis.plot_platoon_lane_change(self._data_per_iteration[-1])
             output_sequence = simulated_vehicle_group.get_mode_sequence()
 
             output_seq_str = som.mode_sequence_to_str(output_sequence)
@@ -255,8 +265,9 @@ class VehicleOptimalController:
             self._log_results(counter, input_seq_str, output_seq_str,
                               solve_time, self.ocp_result)
 
-            converged = som.compare_mode_sequences(input_sequence,
-                                                   output_sequence)
+            converged = som.compare_mode_sequences(
+                input_sequence, output_sequence, self.discretization_step
+            )
             print("Converged?", converged)
             input_sequence = output_sequence
             if self.jumpstart_next_solver_call and self.ocp_result.success:
@@ -306,7 +317,7 @@ class VehicleOptimalController:
                                                inputs_by_vehicle)
         return vehicle_group
 
-    def _set_ocp_configuration(self, controlled_veh_ids: List[int]):
+    def _set_ocp_configuration(self):
         self._set_ocp_dynamics()
         self._initial_state = self._ocp_interface.get_initial_state()
         self._desired_state = self._ocp_interface.create_desired_state(
@@ -314,6 +325,54 @@ class VehicleOptimalController:
         # print("x0 vs xf:")
         # print(self._initial_state)
         # print(self._desired_state)
+
+    def _create_cost_with_tracker(self):
+        # Note: running and terminal costs should depend on vehicle model
+        # For three state: running costs y_cost=0, theta_cost=0.1 and
+
+        u_ref = self._ocp_interface.get_desired_input()
+        Q = self._ocp_interface.create_state_cost_matrix(
+            y_cost=0.1, theta_cost=0., v_cost=0.1)
+        R = self._ocp_interface.create_input_cost_matrix(accel_cost=0.1,
+                                                         phi_cost=0.)
+        # R = np.diag([0.] * self._ocp_interface.n_inputs)
+        running_cost = occ.quadratic_cost(
+            self._ocp_interface.n_states, self._ocp_interface.n_inputs,
+            Q, R, self._desired_state, u_ref
+        )
+
+        if not self.has_terminal_constraints:
+            Q_terminal = (
+                self._ocp_interface.create_state_cost_matrix(y_cost=10.,
+                                                             theta_cost=1.)
+            )
+            R_terminal = self._ocp_interface.create_input_cost_matrix(
+                phi_cost=0.)
+            terminal_cost = occ.quadratic_cost(
+                self._ocp_interface.n_states, self._ocp_interface.n_inputs,
+                Q_terminal, R_terminal, self._desired_state, u_ref
+            )
+        else:
+            Q_terminal = None
+            R_terminal = None
+            terminal_cost = None
+
+        time_points = self.get_time_points()
+        if self.estimate_gradient:
+            self._cost_gradient = occ.quadratic_cost_gradient(
+                self._ocp_interface.n_states, self._ocp_interface.n_inputs,
+                len(time_points), Q, R, Q_terminal, R_terminal,
+                self._desired_state, u_ref)
+        else:
+            self._cost_gradient = None
+
+        self._cost_with_tracker = occ.OCPCostTracker(
+            time_points, self._ocp_interface.n_states,
+            running_cost, terminal_cost, self._constraints,
+            self.solver_max_iter
+        )
+
+    def _set_constraints(self,  controlled_veh_ids: List[int]):
         self._constraints = []
         self._set_input_constraints()
         if self.has_terminal_constraints:
@@ -338,10 +397,10 @@ class VehicleOptimalController:
         u_ref = self._ocp_interface.get_desired_input()
         state_cost_matrix = self._ocp_interface.create_state_cost_matrix(
             y_cost=0.1, theta_cost=0., x_cost=0.)
-        # input_cost_matrix = np.diag([0.01] * self._ocp_interface.n_inputs)
+        input_cost_matrix = np.diag([0.] * self._ocp_interface.n_inputs)
         running_cost = occ.quadratic_cost(
             self._ocp_interface.n_states, self._ocp_interface.n_inputs,
-            state_cost_matrix, None, self._desired_state, u_ref
+            state_cost_matrix, input_cost_matrix, self._desired_state, u_ref
         )
 
         return running_cost
@@ -350,6 +409,7 @@ class VehicleOptimalController:
         # Note: running and terminal costs should depend on vehicle model
         # For three state: terminal costs 1000 for all states
         if self._terminal_constraints is None:
+            u_ref = self._ocp_interface.get_desired_input()
             terminal_state_cost_matrix = (
                 self._ocp_interface.create_state_cost_matrix(y_cost=10.,
                                                              theta_cost=1.)
@@ -359,46 +419,30 @@ class VehicleOptimalController:
             terminal_cost = occ.quadratic_cost(
                 self._ocp_interface.n_states, self._ocp_interface.n_inputs,
                 terminal_state_cost_matrix, terminal_input_cost_matrix,
-                self._desired_state
+                self._desired_state, u_ref
             )
         else:
             terminal_cost = None
 
         return terminal_cost
 
-    # def _set_costs(self):
-    #     # Note: running and terminal costs should depend on vehicle model
-    #     # For three state: running costs y_cost=0, theta_cost=0.1 and
-    #     # terminal costs 1000 for all states
-    #     time_points = self.get_time_points()
+    # # TODO: must be merged with running and terminal cost function generates
+    # def _generate_gradient_function(self) -> Callable:
     #     u_ref = self._ocp_interface.get_desired_input()
     #     state_cost_matrix = self._ocp_interface.create_state_cost_matrix(
     #         y_cost=0.1, theta_cost=0., x_cost=0.)
-    #     # input_cost_matrix = np.diag([0.01] * self._ocp_interface.n_inputs)
-    #     running_cost = occ.quadratic_cost(
-    #         self._ocp_interface.n_states, self._ocp_interface.n_inputs,
-    #         state_cost_matrix, None, self._desired_state, u_ref
+    #     input_cost_matrix = np.diag([0.] * self._ocp_interface.n_inputs)
+    #     terminal_state_cost_matrix = (
+    #         self._ocp_interface.create_state_cost_matrix(y_cost=10.,
+    #                                                      theta_cost=1.)
     #     )
-    #
-    #     if self._terminal_constraints is None:
-    #         terminal_state_cost_matrix = (
-    #             self._ocp_interface.create_state_cost_matrix(y_cost=1,
-    #                                                          theta_cost=10)
-    #         )
-    #         terminal_input_cost_matrix = np.diag(
-    #             [0.] * self._ocp_interface.n_inputs)
-    #         terminal_cost = occ.quadratic_cost(
-    #             self._ocp_interface.n_states, self._ocp_interface.n_inputs,
-    #             terminal_state_cost_matrix, terminal_input_cost_matrix,
-    #             self._desired_state
-    #         )
-    #     else:
-    #         terminal_cost = None
-    #
-    #     ocp_cost_tracker = occ.OCPCostTracker(
-    #         time_points, self._ocp_interface.n_states,
-    #         running_cost, terminal_cost)
-    #     self._cost_history.append(ocp_cost_tracker)
+    #     terminal_input_cost_matrix = np.diag(
+    #         [0.] * self._ocp_interface.n_inputs)
+    #     return occ.quadratic_cost_gradient(
+    #         self._ocp_interface.n_states, self._ocp_interface.n_inputs,
+    #         len(self.get_time_points()), state_cost_matrix, input_cost_matrix,
+    #         terminal_state_cost_matrix, terminal_input_cost_matrix,
+    #         self._desired_state, u_ref)
 
     def _set_terminal_constraints(self, controlled_veh_ids: List[int]):
         controlled_vehicles = [self._ocp_interface.vehicles[veh_id]
@@ -497,16 +541,17 @@ class VehicleOptimalController:
         # try:
         result = opt.solve_ocp(
             self._dynamic_system, time_pts, self._initial_state,
-            cost=self._cost_with_tracker.running_cost,
+            cost=self._cost_with_tracker.get_running_cost_fun(),
             trajectory_constraints=self._constraints,
-            terminal_cost=self._cost_with_tracker.terminal_cost,
+            terminal_cost=self._cost_with_tracker.get_terminal_cost_fun(),
             terminal_constraints=self._terminal_constraints,
             initial_guess=x0,
             minimize_options={
                 'maxiter': self.solver_max_iter, 'disp': True,
-                'ftol': self.ftol,  # default value 1.0E-6
-                # power_to_iter = {0: 16, 1: 38, 2: > 100}
-                'callback': self._cost_with_tracker.callback}
+                'ftol': self.ftol,
+                'callback': self._cost_with_tracker.callback,
+                'jac': self._cost_gradient
+            }
             # minimize_method='trust-constr',
             # log=True
             # basis=flat.BezierFamily(5, T=self._ocp_horizon)
@@ -517,6 +562,7 @@ class VehicleOptimalController:
         # always work well
 
         # TODO: testing stuff here
+        self._solver_result = result
         if result.success:
             self.ocp_result = (
                 occ.OptimalControlIterationResult.copy_original_result(result)
@@ -534,7 +580,7 @@ class VehicleOptimalController:
             self._ocp_interface.map_input_to_vehicle_ids(
                 self.ocp_result.inputs))
 
-        self._ocp_has_solution = self.ocp_result.success
+        self._ocp_has_solution = True  # TODO: self.ocp_result.success
         print("Solution{}found".format(
             " " if self._ocp_has_solution else " not "))
         # Threshold below based on terminal cost params

@@ -250,20 +250,20 @@ class VehicleGroup:
         self.update_surrounding_vehicles()
 
     def write_vehicle_states(self, time, state_vectors: Dict[int, np.ndarray],
-                             optimal_phi: Dict[int, np.ndarray]):
+                             optimal_inputs: Dict[int, np.ndarray]):
         """
-        Directly sets vehicle states and steering angle when they were computed
+        Directly sets vehicle states and inputs when they were computed
         by the optimal control solver.
         :param time:
         :param state_vectors:
-        :param optimal_phi:
+        :param optimal_inputs:
         :return:
         """
         for veh_id in self.sorted_vehicle_ids:
-            ego_phi = optimal_phi[veh_id]
-            ego_phi = ego_phi[0] if len(ego_phi) > 0 else 0.
+            # ego_phi = optimal_inputs[veh_id]
+            # ego_phi = ego_phi[0] if len(ego_phi) > 0 else 0.
             self.vehicles[veh_id].write_state_and_input(
-                time, state_vectors[veh_id], ego_phi)
+                time, state_vectors[veh_id], optimal_inputs[veh_id])
 
     def update_surrounding_vehicles(self):
         for ego_vehicle in self.vehicles.values():

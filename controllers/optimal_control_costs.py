@@ -4,9 +4,15 @@ from functools import partial
 from typing import Callable, List, Union
 
 import control.optimal as opt
+from scipy.linalg import block_diag
 from scipy.optimize import LinearConstraint, NonlinearConstraint
 
 import numpy as np
+
+
+# Alias for easier typing hints
+# LinearConstraint = sp.optimize.LinearConstraint
+# NonlinearConstraint = sp.optimize.NonlinearConstraint
 
 
 class OCPCostTracker:
@@ -14,28 +20,21 @@ class OCPCostTracker:
     Makes it possible to keep track of the computed costs during the optimal
     control problem solver iterations.
     """
+
+    _relative_tolerance = 1.0e-2  # used when checking solution feasibility
+
     def __init__(
             self, time_points: np.ndarray, n_states: int,
             running_cost: Callable, terminal_cost: Callable = None,
             constraints: List[Union[LinearConstraint, NonlinearConstraint]]
-            = None
+            = None, max_iterations: int = None
     ):
         self._time_points = time_points
         self._n_states = n_states
         self._running_cost_fun = running_cost
         self._terminal_cost_fun = terminal_cost
-        self._linear_constraints = []
-        self._non_linear_constraints = []
-        if constraints:
-            for c in constraints:
-                if isinstance(c, LinearConstraint):
-                    self._linear_constraints.append(c)
-                elif isinstance(c, NonlinearConstraint):
-                    self._non_linear_constraints.append(c)
-                else:
-                    raise ValueError('Unknown constraint type: {}'.format(
-                        type(c)
-                    ))
+        self._set_constraints_(constraints)
+        self._max_iterations = max_iterations
 
         self._n_time_points: int = len(time_points)
         self._current_call_costs: np.ndarray = np.zeros(self._n_time_points)
@@ -69,6 +68,9 @@ class OCPCostTracker:
     def get_inputs_per_iteration(self):
         return self._inputs_per_iteration
 
+    def has_terminal_cost(self):
+        return self._terminal_cost_fun is not None
+
     def start_recording(self):
         self._current_call_costs = np.zeros(self._n_time_points)
         self._call_counter = 0
@@ -79,19 +81,25 @@ class OCPCostTracker:
         self._states_per_iteration.append([])
         self._inputs_per_iteration.append([])
         self._best_cost = np.inf
-        self._best_iteration.append(-1)
+        self._best_iteration.append(-1)  # by default, the last run iteration
         # self._best_states.append(None)
         # self._best_inputs.append(None)
 
-    def running_cost(self, states, inputs):
-        cost = self._running_cost_fun(states, inputs)
-        self._save_running_cost_per_call(cost)
-        return cost
+    def get_running_cost_fun(self) -> Callable:
+        def support(states, inputs):
+            cost = self._running_cost_fun(states, inputs)
+            self._save_running_cost_per_call(cost)
+            return cost
+        return support
 
-    def terminal_cost(self, states, inputs):
-        cost = self._terminal_cost_fun(states, inputs)
-        self._terminal_cost_per_call[-1].append(cost)
-        return cost
+    def get_terminal_cost_fun(self):
+        def support(states, inputs):
+            cost = self._terminal_cost_fun(states, inputs)
+            self._terminal_cost_per_call[-1].append(cost)
+            return cost
+        if self.has_terminal_cost():
+            return support
+        return None
 
     def print_cost_all_solutions(self):
         for i in range(len(self._running_cost_per_iteration)):
@@ -108,6 +116,12 @@ class OCPCostTracker:
                 i, rc[i], tc[i], rc[i] + tc[i])
         print(output)
 
+    def get_total_cost(self, ocp_solution_number: int, iteration: int):
+        return (
+                self._running_cost_per_iteration[ocp_solution_number][iteration]
+                + self._terminal_cost_per_iteration[ocp_solution_number][
+                    iteration])
+
     def get_best_iteration_result(self, ocp_solution_number: int = -1):
         """
         Gets the states and inputs from the iteration that had the minimum cost
@@ -123,12 +137,17 @@ class OCPCostTracker:
             self, ocp_solution_number, best_idx
         )
 
-    def get_worst_iteration_result(self, ocp_solution_number: int = -1):
-        rc = np.array(self._running_cost_per_iteration[ocp_solution_number])
-        tc = np.array(self._terminal_cost_per_iteration[ocp_solution_number])
-        worst_idx = np.argmax(rc + tc)
+    def get_last_iteration_result(self, ocp_solution_number: int = -1):
         return OptimalControlIterationResult.get_result_from_iteration(
-            self, worst_idx)
+            self, ocp_solution_number, -1
+        )
+
+    # def get_worst_iteration_result(self, ocp_solution_number: int = -1):
+    #     rc = np.array(self._running_cost_per_iteration[ocp_solution_number])
+    #     tc = np.array(self._terminal_cost_per_iteration[ocp_solution_number])
+    #     worst_idx = np.argmax(rc + tc)
+    #     return OptimalControlIterationResult.get_result_from_iteration(
+    #         self, worst_idx)
 
     def callback(self, x) -> None:
         states, inputs = self._compute_states_inputs(x)
@@ -148,7 +167,7 @@ class OCPCostTracker:
             running_cost += 0.5 * (costs[i] + costs[i + 1]) * dt[i]
 
         terminal_cost = 0.
-        if self._terminal_cost_fun is not None:
+        if self.has_terminal_cost():
             terminal_cost = self._terminal_cost_fun(states[:, -1],
                                                     inputs[:, -1])
 
@@ -168,6 +187,13 @@ class OCPCostTracker:
             # self._best_states[-1] = states
             # self._best_inputs[-1] = inputs
 
+        if self._max_iterations is not None:
+            iterations = len(self._running_cost_per_iteration[-1])
+            percentage = iterations * 100 / self._max_iterations
+            if percentage % 5 == 0:
+                print('{}/{} iterations'.format(iterations,
+                                                self._max_iterations))
+
         # Compare iterations:
         # delta_cost = (np.diff(self._running_cost_per_iteration[-1][-2:])
         #               + np.diff(self._terminal_cost_per_iteration[-1][-2:]))
@@ -176,17 +202,29 @@ class OCPCostTracker:
         #         "Terminating optimization: small variation in cost"
         #         " between iterations: {}".format(delta_cost))
 
+    # def cost_gradient(self, x):
+    # States are appended to end of (input) the optimization variables
+    # states = x[-self._n_states * self._n_time_points:].reshape(
+    #     self._n_states, -1)
+    # x = x[:-self._n_states * self._n_time_points]
+    #
+    # # Note: this only works if we are not using any basis functions for the
+    # # control input.
+    # inputs = x.reshape((-1, self._n_time_points))
+
     def check_feasibility(self, states, inputs):
-        margin = 1.0e-7
+        # margin = 1.0e-3
         for i in range(self._n_time_points):
-            for lc in self._linear_constraints:
+            for j in range(len(self._linear_constraints)):
+                lc = self._linear_constraints[j]
+                margin_l, margin_u = self._lc_absolute_tolerance[j]
                 rl, ru = lc.residual(np.hstack([states[:, i], inputs[:, i]]))
-                if np.any(rl < -margin) or np.any(ru < -margin):
+                if np.any(rl < -margin_l) or np.any(ru < -margin_u):
                     return False
             for nlc in self._non_linear_constraints:
-                if not (nlc.lb - margin
+                if not ((nlc.lb * (1.0 + self._relative_tolerance))
                         <= nlc.fun(states[:, i], inputs[:, i]) <=
-                        nlc.ub + margin):
+                        (nlc.ub * (1.0 + self._relative_tolerance))):
                     return False
         return True
 
@@ -210,8 +248,8 @@ class OCPCostTracker:
 
     def _compute_states_inputs(self, x):
         """
-        Extracts state and input matrices with shape n_states (n_inputs) x n_times
-        from the vector of optimization variables.
+        Extracts state and input matrices with shape n_states (or n_inputs)
+         by n_times from the vector of optimization variables.
         Follows the implementation of the Optimal Control Solver library
         :param x: Optimization variables
         :return:
@@ -227,9 +265,26 @@ class OCPCostTracker:
 
         return states, inputs
 
+    def _set_constraints_(self, constraints):
+        self._linear_constraints = []
+        self._lc_absolute_tolerance = []
+        self._non_linear_constraints = []
+        if constraints:
+            for c in constraints:
+                if isinstance(c, LinearConstraint):
+                    self._linear_constraints.append(c)
+                    self._lc_absolute_tolerance.append(
+                        (np.abs(c.lb) * self._relative_tolerance,
+                         np.abs(c.ub) * self._relative_tolerance))
+                elif isinstance(c, NonlinearConstraint):
+                    self._non_linear_constraints.append(c)
+                else:
+                    raise ValueError('Unknown constraint type: {}'.format(
+                        type(c)
+                    ))
+
 
 class OptimalControlIterationResult:
-
     # Members from opt.OptimalControlResult
     success: bool
     nit: int
@@ -305,12 +360,72 @@ def quadratic_cost(n_states: int, n_inputs: int, Q, R,
 
     """
     # Process the input arguments
+    Q, R = _process_matrix_sizes(n_states, n_inputs, Q, R, make_zero=False)
+
+    if Q is None:
+        return lambda x, u: ((u - u0) @ R @ (u - u0)).item()
+
+    if R is None:
+        return lambda x, u: ((x - x0) @ Q @ (x - x0)).item()
+
+    # Received both Q and R matrices
+    return lambda x, u: (
+            (x - x0) @ Q @ (x - x0) + (u - u0) @ R @ (u - u0)).item()
+
+
+def quadratic_cost_gradient(n_states: int, n_inputs: int, n_times: int, Q, R,
+                            Q_terminal=None, R_terminal=None,
+                            x0: Union[np.ndarray, float] = 0,
+                            u0: Union[np.ndarray, float] = 0) -> Callable:
+    # Process the input arguments
+    Q, R = _process_matrix_sizes(n_states, n_inputs, Q, R, make_zero=True)
+    Q_terminal, R_terminal = _process_matrix_sizes(n_states, n_inputs,
+                                                   Q_terminal, R_terminal,
+                                                   make_zero=True)
+    # TODO: it is faster to reorganize the 'big' matrices (only once) than to
+    #  reshape vector x at every iteration
+    q_list = [Q] * (n_times - 1) + [Q + Q_terminal]
+    r_list = [R] * (n_times - 1) + [R + R_terminal]
+    big_Q = block_diag(*q_list)
+    big_R = block_diag(*r_list)
+    big_x0 = np.tile(x0, n_times)
+    big_u0 = np.tile(u0, n_times)
+
+    def support(x):
+        # Note 1: this only works if we are not using any basis functions for
+        # the control input.
+        # Note 2: we have to rearrange the terms to organize them by time and
+        # then return it in the original form...
+        inputs = x[:n_inputs * n_times].reshape(n_inputs, -1
+                                                ).transpose().flatten()
+        states = x[n_inputs * n_times:].reshape(n_states, -1
+                                                ).transpose().flatten()
+        return 2 * np.hstack(
+            ((big_R @ (inputs - big_u0)).reshape(-1, n_inputs
+                                                 ).transpose().flatten(),
+             (big_Q @ (states - big_x0)).reshape(-1, n_states
+                                                 ).transpose().flatten())
+        )
+
+    return support
+
+    # return lambda x, u: 2 * np.vstack((big_R @ (u-np.repeat(u0, n_times)),
+    #                                    big_Q @ (x-np.repeat(x0, n_times))))
+
+
+def _process_matrix_sizes(n_states: int, n_inputs: int, Q, R,
+                          make_zero: bool = False):
+    """
+    If make_zero True and the matrix is None, creates a matrix of zeros.
+    """
     if Q is not None:
         Q = np.atleast_2d(Q)
         if Q.size == 1:  # allow scalar weights
             Q = np.eye(n_states) * Q.item()
         elif Q.shape != (n_states, n_states):
             raise ValueError("Q matrix is the wrong shape")
+    elif make_zero:
+        Q = np.zeros(n_states)
 
     if R is not None:
         R = np.atleast_2d(R)
@@ -318,27 +433,21 @@ def quadratic_cost(n_states: int, n_inputs: int, Q, R,
             R = np.eye(n_inputs) * R.item()
         elif R.shape != (n_inputs, n_inputs):
             raise ValueError("R matrix is the wrong shape")
+    elif make_zero:
+        R = np.zeros(n_inputs)
 
-    if Q is None:
-        return partial(_input_only_cost, R=R, u0=u0)
+    return Q, R
 
-    if R is None:
-        return partial(_state_only_cost, Q=Q, x0=x0)
-
-    # Received both Q and R matrices
-    return partial(_full_cost, Q=Q, R=R, x0=x0, u0=u0)
-
-
-def _input_only_cost(x, u, R, u0):
-    cost = ((u - u0) @ R @ (u - u0)).item()
-    return cost
-
-
-def _state_only_cost(x, u, Q, x0):
-    cost = ((x - x0) @ Q @ (x - x0)).item()
-    return cost
-
-
-def _full_cost(x, u, Q, R, x0, u0):
-    cost = ((x-x0) @ Q @ (x-x0) + (u-u0) @ R @ (u-u0)).item()
-    return cost
+# def _input_only_cost(x, u, R, u0):
+#     cost = ((u - u0) @ R @ (u - u0)).item()
+#     return cost
+#
+#
+# def _state_only_cost(x, u, Q, x0):
+#     cost = ((x - x0) @ Q @ (x - x0)).item()
+#     return cost
+#
+#
+# def _full_cost(x, u, Q, R, x0, u0):
+#     cost = ((x-x0) @ Q @ (x-x0) + (u-u0) @ R @ (u-u0)).item()
+#     return cost

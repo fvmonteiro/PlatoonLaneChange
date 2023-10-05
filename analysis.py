@@ -1,5 +1,6 @@
 import pickle
-from typing import List, Union
+import warnings
+from typing import Dict, List, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -55,15 +56,18 @@ def plot_costs_vs_iteration(running_costs, terminal_costs,
             cost = running_costs[i]
             cost += (terminal_costs[i] if has_terminal_cost else 0)
             axs[i].plot(cost)
-            _, y_high = axs[i].get_ylim()
-            # axs[i].set_ylim([1, 1.2])
             axs[i].set_ylabel('cost')
-            # axs[i].set_yscale('log')
-            ax_diff = axs[i].twinx()
-            ax_diff.plot(np.diff(cost), color=orange)
-            ax_diff.set_ylabel('delta cost', color=orange)
-            ax_diff.tick_params(axis='y', labelcolor=orange)
-            ax_diff.set_yscale('symlog')
+            y_low, y_high = axs[i].get_ylim()
+            # axs[i].set_ylim([1, 1.0e4])
+            if y_high - y_low >= 1.0e3:
+                axs[i].set_yscale('log')
+            # ax_diff = axs[i].twinx()
+            # ax_diff.plot(np.diff(cost), color=orange)
+            # ax_diff.set_ylabel('delta cost', color=orange)
+            # ax_diff.tick_params(axis='y', labelcolor=orange)
+            # y_low, y_high = ax_diff.get_ylim()
+            # if y_high - y_low >= 1.0e3:
+            #     ax_diff.set_yscale('symlog')
 
     axs[-1].set_xlabel('iteration')
     fig.tight_layout()
@@ -84,7 +88,7 @@ def plot_trajectory(data: pd.DataFrame):
             veh_name = veh_data['name'].iloc[0]
             color = _get_color_by_name(veh_name)
             ax[i].scatter(data=veh_data.iloc[i * step],
-                          x='x', y='y', marker='>', color=color,)
+                          x='x', y='y', marker='>', color=color, )
         # sns.scatterplot(data, x='x', y='y', hue='name', palette=colors,
         #                 markers='>', legend=False, marker='>')
 
@@ -148,6 +152,38 @@ def plot_initial_and_final_states(data: pd.DataFrame, axis=None,
         fig.show()
 
 
+def plot_initial_state(data: pd.DataFrame, axis=None):
+    """
+
+    :param data: Dataframe containing only initial and desired final state
+     for each vehicle
+    :param axis: Axis on which to do the plot [optional]
+    """
+    if axis is None:
+        fig, ax = plt.subplots()
+    else:
+        ax = axis
+        fig = plt.gcf()
+
+    for veh_id in data['id'].unique():
+        veh_data = data[data['id'] == veh_id]
+        veh_name = veh_data['name'].iloc[0]
+        color = _get_color_by_name(veh_name)
+        ax.scatter(data=veh_data.iloc[0],
+                   x='x', y='y', marker='>', color=color)
+    min_y = data['y'].min()
+    max_y = data['y'].max()
+    ax.axhline(y=const.LANE_WIDTH / 2, linestyle='--', color='black')
+    ax.set(xlabel=_get_variable_with_unit('x'),
+           ylabel=_get_variable_with_unit('y'),
+           ylim=(min_y - 2, max_y + 2))
+    ax.set_aspect('equal', adjustable='box')
+
+    if axis is None:
+        fig.tight_layout()
+        fig.show()
+
+
 def plot_lane_change(data: pd.DataFrame):
     """
     Plots the lane change in a y vs x plot along with speed and steering wheel
@@ -166,40 +202,75 @@ def plot_constrained_lane_change(data: pd.DataFrame,
     pp.compute_all_relative_values(data)
 
     sns.set_style('whitegrid')
-    x_axes = ['t', 't', 't', 't']
-    y_axes = ['y', 'theta', 'v', 'phi']
+    x_axes = ['t', 't', 't']
+    y_axes = ['y', 'v', 'phi']
 
     fig, ax = plt.subplots(len(y_axes) + 1)
     fig.set_size_inches(12, 8)
+    plot_single_vehicle_lane_change_gap_errors(data, lc_veh_id_or_name, ax[0])
+    plot_scenario_results(x_axes, y_axes, data, ax[1:])
+    fig.tight_layout()
+    fig.show()
 
-    plot_gap_errors(data, lc_veh_id_or_name, ax[0])
-    final_t = data['t'].max()
-    for i, (x, y) in enumerate(zip(x_axes, y_axes)):
-        show_legend = True if i == len(x_axes) - 1 else False
-        sns.lineplot(data, x=x, y=y, hue='name', ax=ax[i + 1], palette='tab10',
-                     legend=show_legend)
-        y_low, y_high = ax[i + 1].get_ylim()
-        if y == 'v' and y_high - y_low < 1:
-            y_low, y_high = np.floor(y_low - 0.5), np.ceil(y_high + 0.5)
-        ax[i + 1].set(xlabel=_get_variable_with_unit(x),
-                      ylabel=_get_variable_with_unit(y),
-                      xlim=(0, final_t),
-                      ylim=(y_low, y_high))
+
+def plot_platoon_lane_change(data: pd.DataFrame):
+    pp.compute_all_relative_values(data)
+
+    sns.set_style('whitegrid')
+    x_axes = ['t', 't', 't']
+    y_axes = ['y', 'v', 'phi']
+
+    fig, ax = plt.subplots(len(y_axes) + 1)
+    fig.set_size_inches(12, 8)
+    # TODO: veh pairs depend on the scenario
+    plot_gap_errors(data, {'p1': ['ld1', 'lo1'], 'p2': ['p1', 'ld1']}, ax[0])
+    plot_scenario_results(x_axes, y_axes, data, ax[1:])
     fig.tight_layout()
     fig.show()
 
 
 def plot_gap_errors(data: pd.DataFrame,
-                    veh_id_or_name: Union[int, str], ax=None):
+                    vehicle_pairs: Dict[Union[int, str], List[Union[int, str]]],
+                    ax=None):
     if ax is None:
         fig, ax = plt.subplots()
 
-    if isinstance(veh_id_or_name, str):
-        lc_vehicle_data = data[data['name'] == veh_id_or_name]
-        veh_name = veh_id_or_name
-    else:
-        lc_vehicle_data = data[data['id'] == veh_id_or_name]
-        veh_name = lc_vehicle_data['name'].iloc[0]
+    for ego_identifier, others in vehicle_pairs.items():
+        ego_data = get_veh_data(data, ego_identifier)
+        if ego_data.empty:
+            warnings.warn(f'No data for vehicle {ego_identifier}')
+            continue
+        ego_name = ego_data['name'].iloc[0]
+        ego_safe_gap = pp.compute_default_safe_gap(
+            ego_data['v'].to_numpy())
+        for other_identifier in others:
+            other_data = get_veh_data(data, other_identifier)
+            if not other_data.empty:
+                other_name = other_data['name'].iloc[0]
+                gap = other_data['x'].to_numpy() - ego_data['x'].to_numpy()
+                gap_error = gap - ego_safe_gap
+                ax.plot(ego_data['t'].to_numpy(), gap_error,
+                        label=f'{ego_name} to {other_name}')
+    ax.legend()
+    y_low, y_high = ax.get_ylim()
+    final_t = data['t'].max()
+    ax.set(xlabel=_get_variable_with_unit('t'),
+           ylabel=_get_variable_with_unit('gap_error'),
+           xlim=(0, final_t), ylim=(y_low, min(5, y_high)))
+
+
+def plot_single_vehicle_lane_change_gap_errors(
+        data: pd.DataFrame, veh_id_or_name: Union[int, str], ax=None):
+    """
+    Plots the gaps between a vehicle and all the relevant surrounding vehicles:
+    leader at the origin lane, leader at the destination lane, and follower at
+    the destination lane
+    """
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    lc_vehicle_data = get_veh_data(data, veh_id_or_name)
+    veh_name = lc_vehicle_data['name'].iloc[0]
     ego_safe_gap = pp.compute_default_safe_gap(lc_vehicle_data['v'].to_numpy())
 
     gap = lc_vehicle_data['gap_to_orig_lane_leader'].to_numpy()
@@ -216,7 +287,8 @@ def plot_gap_errors(data: pd.DataFrame,
         print("Hey! Time to deal with multiple dest lane followers")
     if len(dest_follower_id) > 0:
         follower_data = data[data['id'] == dest_follower_id[0]]
-        foll_safe_gap = pp.compute_default_safe_gap(follower_data['v'].to_numpy())
+        foll_safe_gap = pp.compute_default_safe_gap(
+            follower_data['v'].to_numpy())
         gap = lc_vehicle_data['gap_to_dest_lane_follower'].to_numpy()
         dest_lane_error = gap - foll_safe_gap
         ax.plot(lc_vehicle_data['t'], dest_lane_error,
@@ -227,7 +299,7 @@ def plot_gap_errors(data: pd.DataFrame,
     final_t = data['t'].max()
     ax.set(xlabel=_get_variable_with_unit('t'),
            ylabel=_get_variable_with_unit('gap_error'),
-           xlim=(0, final_t), ylim=(y_low, y_high))
+           xlim=(0, final_t), ylim=(y_low, min(5, y_high)))
 
 
 def plot_vehicle_following(data: pd.DataFrame):
@@ -244,25 +316,35 @@ def plot_vehicle_following(data: pd.DataFrame):
 
 
 def plot_scenario_results(x_axes: List[str], y_axes: List[str],
-                          data: pd.DataFrame):
+                          data: pd.DataFrame, axs: List = None):
     """
 
     :param x_axes: Name of the variable on the x-axis for each plot
     :param y_axes: Name of the variable on the y-axis for each plot
     :param data:
+    :param axs:
     :return:
     """
-    fig, ax = plt.subplots(len(y_axes))
+    if axs is None:
+        fig, ax = plt.subplots(len(y_axes))
+    else:
+        ax = axs
+
+    final_t = data['t'].max()
     for i, (x, y) in enumerate(zip(x_axes, y_axes)):
-        sns.lineplot(data, x=x, y=y, hue='id', ax=ax[i], palette='tab10')
+        show_legend = True if i == len(x_axes) - 1 else False
+        sns.lineplot(data, x=x, y=y, hue='name', ax=ax[i], palette='tab10',
+                     legend=show_legend)
         low, high = ax[i].get_ylim()
         if y == 'v' and high - low < 1:
             low, high = np.floor(low - 0.5), np.ceil(high + 0.5)
         ax[i].set(xlabel=_get_variable_with_unit(x),
                   ylabel=_get_variable_with_unit(y),
-                  ylim=(low, high))
-    fig.tight_layout()
-    fig.show()
+                  xlim=(0, final_t), ylim=(low, high))
+
+    if axs is None:
+        fig.tight_layout()
+        fig.show()
 
 
 def check_constraint_satisfaction(data: pd.DataFrame, lc_id: int):
@@ -283,6 +365,15 @@ def compare_desired_and_actual_final_states(desired_data, simulated_data):
     ax[1].set_aspect('equal', adjustable='box')
     fig.tight_layout()
     fig.show()
+
+
+def get_veh_data(data: pd.DataFrame, id_or_name: Union[int, str]
+                 ) -> pd.DataFrame:
+    if isinstance(id_or_name, str):
+        ego_data = data[data['name'] == id_or_name]
+    else:
+        ego_data = data[data['id'] == id_or_name]
+    return ego_data
 
 
 def _get_variable_with_unit(variable: str):

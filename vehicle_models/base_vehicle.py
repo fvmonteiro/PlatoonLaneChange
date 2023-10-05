@@ -138,6 +138,15 @@ class BaseVehicle(ABC):
     def get_incoming_vehicle_id(self) -> int:
         return self._incoming_vehicle_id[self._iter_counter]
 
+    def get_surrounding_vehicle_ids(self) -> List[int]:
+        """
+        Returns the IDs of vehicles relevant for lane change safety
+        :return:
+        """
+        return [self.get_orig_lane_leader_id(),
+                self.get_dest_lane_leader_id(),
+                self.get_incoming_vehicle_id()]
+
     def get_desired_future_follower_id(self) -> int:
         return self._desired_future_follower_id
 
@@ -215,33 +224,23 @@ class BaseVehicle(ABC):
     def set_lane_change_direction(self, lc_direction):
         self.target_lane = self.get_current_lane() + lc_direction
 
-    def _set_current_leader_id(self, veh_id):
-        """
-        Sets which vehicle used to determine this vehicle's accel. The
-        definition of leader ids for all vehicles in a vehicle group determines
-        the operating mode.
-        :param veh_id: leading vehicle's id. Use -1 to designate no leader
-        :return:
-        """
-        self._leader_id[self._iter_counter] = veh_id
-
     def write_state_and_input(self, time: float, states: np.ndarray,
-                              optimal_phi: float):
+                              optimal_inputs: np.ndarray):
         """
         Used when vehicle states were computed externally. Do not mix use of
         this method and update_states.
         :param time:
         :param states:
-        :param optimal_phi:
+        :param optimal_inputs:
         :return:
         """
         self._iter_counter += 1
         self._time[self._iter_counter] = time
         self._states = states
         self._states_history[:, self._iter_counter] = self._states
-        if optimal_phi:
-            self._inputs[self._input_idx['phi']] = optimal_phi
-            self._inputs_history[:, self._iter_counter] = self._inputs
+        if len(optimal_inputs) > 0:
+            self._write_optimal_inputs(optimal_inputs)
+        self._inputs_history[:, self._iter_counter] = self._inputs
 
     def prepare_to_start_simulation(self, n_samples: int):
         """
@@ -571,6 +570,23 @@ class BaseVehicle(ABC):
     @abstractmethod
     def _update_target_leader(self, vehicles: Dict[int, BaseVehicle]):
         pass
+
+    def _write_optimal_inputs(self, optimal_inputs):
+        """
+        Used when vehicle states were computed externally.
+        :return: Nothing
+        """
+        pass
+
+    def _set_current_leader_id(self, veh_id):
+        """
+        Sets which vehicle used to determine this vehicle's accel. The
+        definition of leader ids for all vehicles in a vehicle group determines
+        the operating mode.
+        :param veh_id: leading vehicle's id. Use -1 to designate no leader
+        :return:
+        """
+        self._leader_id[self._iter_counter] = veh_id
 
 
 # TODO: still must figure out a way to prevent so much repeated code between
