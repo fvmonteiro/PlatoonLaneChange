@@ -63,7 +63,7 @@ class LongitudinalController:
         :param vehicles:
         :return:
         """
-        relevant_ids = self.vehicle.get_surrounding_vehicle_ids()
+        relevant_ids = self.vehicle.get_possible_target_leader_ids()
         candidate_accel = {
             veh_id: self.compute_accel_to_a_leader(veh_id, vehicles)
             for veh_id in relevant_ids

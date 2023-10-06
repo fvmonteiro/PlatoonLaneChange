@@ -79,8 +79,9 @@ def run_constraints_scenario(has_lo: bool, has_fo: bool, has_ld: bool,
 def load_and_plot_latest_scenario():
     trajectory_data = analysis.load_latest_simulated_scenario(
         trajectory_file_name)
-    # analysis.plot_trajectory(trajectory_data)
+    analysis.plot_trajectory(trajectory_data)
     # analysis.plot_constrained_lane_change(trajectory_data, 'p1')
+    analysis.plot_platoon_lane_change(trajectory_data)
     # analysis.plot_platoon_lane_change(trajectory_data)
 
     cost_data = analysis.load_latest_simulated_scenario(cost_file_name)
@@ -125,10 +126,10 @@ def run_save_and_plot(scenario: scenarios.LaneChangeScenario, tf: float = 10.):
     scenario.save_response_data(trajectory_file_name)
     data = scenario.response_to_dataframe()
     analysis.plot_trajectory(data)
-    if scenario.get_n_platoon() == 1:
-        analysis.plot_constrained_lane_change(data, 'p1')  # TODO: ego or p1
-    else:
-        analysis.plot_platoon_lane_change(data)
+    # if scenario.get_n_platoon() == 1:
+    #     analysis.plot_constrained_lane_change(data, 'p1')  # TODO: ego or p1
+    # else:
+    analysis.plot_platoon_lane_change(data)
 
     try:
         scenario.save_cost_data(cost_file_name)
@@ -186,10 +187,10 @@ def mode_convergence_base_tests():
 
 def main():
     n_platoon = 1
-    n_orig_ahead, n_orig_behind = 0, 0
-    n_dest_ahead, n_dest_behind = 0, 0
+    n_orig_ahead, n_orig_behind = 1, 0
+    n_dest_ahead, n_dest_behind = 1, 0
 
-    configure_optimal_controller(max_iter=1, solver_max_iter=300,
+    configure_optimal_controller(max_iter=2, solver_max_iter=300,
                                  discretization_step=0.2, time_horizon=5.0,
                                  ftol=1.0e-3,
                                  has_terminal_constraints=False,

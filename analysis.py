@@ -78,7 +78,10 @@ def plot_trajectory(data: pd.DataFrame):
     # min_y, max_y = data['y'].min(), data['y'].max()
     min_x, max_x = data['x'].min(), data['x'].max()
     dt = 1.0  # [s]
-    time = np.arange(data['t'].min(), data['t'].max(), dt)
+    tf = data['t'].max()
+    n = round(tf / dt) + 1
+    time = np.arange(data['t'].min(), tf + dt / 2, dt)
+    # time = np.linspace(data['t'].min(), tf, n)
     step = round(dt / (data['t'].iloc[1] - data['t'].iloc[0]))
     fig, ax = plt.subplots(len(time), 1)
     fig.set_size_inches(6, 6)
@@ -89,13 +92,11 @@ def plot_trajectory(data: pd.DataFrame):
             color = _get_color_by_name(veh_name)
             ax[i].scatter(data=veh_data.iloc[i * step],
                           x='x', y='y', marker='>', color=color, )
-        # sns.scatterplot(data, x='x', y='y', hue='name', palette=colors,
-        #                 markers='>', legend=False, marker='>')
 
         ax[i].set_title('t = {}'.format(time[i]), loc='left')
         ax[i].axhline(y=const.LANE_WIDTH / 2, linestyle='--', color='black')
         # ax[i].set_aspect('equal', adjustable='box')
-        ax[i].set(xlim=(min_x - 2, max_x),
+        ax[i].set(xlim=(min_x - 2, max_x + 3),
                   ylim=(-const.LANE_WIDTH / 2, 3 * const.LANE_WIDTH / 2))
         if i == len(time) - 1:
             ax[i].set(xlabel=_get_variable_with_unit('x'))
@@ -202,8 +203,8 @@ def plot_constrained_lane_change(data: pd.DataFrame,
     pp.compute_all_relative_values(data)
 
     sns.set_style('whitegrid')
-    x_axes = ['t', 't', 't']
-    y_axes = ['y', 'v', 'phi']
+    x_axes = ['t', 't', 't', 't']
+    y_axes = ['y', 'v', 'phi', 'a']
 
     fig, ax = plt.subplots(len(y_axes) + 1)
     fig.set_size_inches(12, 8)
@@ -217,13 +218,16 @@ def plot_platoon_lane_change(data: pd.DataFrame):
     pp.compute_all_relative_values(data)
 
     sns.set_style('whitegrid')
-    x_axes = ['t', 't', 't']
-    y_axes = ['y', 'v', 'phi']
+    x_axes = ['t', 't', 't', 't']
+    y_axes = ['y', 'v', 'phi', 'a']
 
     fig, ax = plt.subplots(len(y_axes) + 1)
     fig.set_size_inches(12, 8)
     # TODO: veh pairs depend on the scenario
-    plot_gap_errors(data, {'p1': ['ld1', 'lo1'], 'p2': ['p1', 'ld1']}, ax[0])
+    plot_gap_errors(data, {'p1': ['ld1', 'lo1', 'fd1'],
+                           # 'p2': ['p1', 'ld1']
+                           },
+                    ax[0])
     plot_scenario_results(x_axes, y_axes, data, ax[1:])
     fig.tight_layout()
     fig.show()

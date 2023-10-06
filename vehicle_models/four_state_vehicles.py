@@ -412,8 +412,8 @@ class PlatoonVehicle(OptimalControlVehicle):
         super().__init__()
         self.set_mode(modes.PlatoonVehicleLaneKeepingMode())
 
-    def get_surrounding_vehicle_ids(self) -> List[int]:
-        ids = super().get_surrounding_vehicle_ids()
+    def get_possible_target_leader_ids(self) -> List[int]:
+        ids = super().get_possible_target_leader_ids()
         if self.is_in_a_platoon():
             ids.append(self._platoon.get_preceding_vehicle_id(self.get_id()))
         return ids
@@ -623,6 +623,10 @@ class OpenLoopVehicleInterface(FourStateVehicleInterface):
     def get_input_limits(self) -> (List[float], List[float]):
         return [self.brake_max, -self.phi_max], [self.accel_max, self.phi_max]
 
+    # def determine_inputs(self, ego_states, optimal_inputs, leader_states):
+    #     return (optimal_inputs[self.optimal_input_idx['a']],
+    #             optimal_inputs[self.optimal_input_idx['phi']])
+
 
 class SafeAccelVehicleInterface(FourStateVehicleInterface):
     """ States: [x, y, theta, v], inputs: [phi], centered at the C.G.
@@ -640,6 +644,10 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
 
     def get_input_limits(self) -> (List[float], List[float]):
         return [-self.phi_max], [self.phi_max]
+
+    # def determine_inputs(self, ego_states, optimal_inputs, leader_states):
+    #     return (self.compute_acceleration(ego_states, leader_states),
+    #             optimal_inputs[self.optimal_input_idx['phi']])
 
     # TODO: concentrate all accel computation functions in the control class
     def compute_acceleration(self, ego_states, inputs, leader_states) -> float:
@@ -672,7 +680,7 @@ class ClosedLoopVehicleInterface(SafeAccelVehicleInterface):
         super().__init__(vehicle)
         # self._set_model(self._state_names, self._input_names)
 
-    def select_input_from_vector(self, inputs: List, input_name: str) -> float:
+    def select_input_from_vector(self, optimal_inputs: List, input_name: str) -> float:
         return 0.0  # all inputs are computed internally
 
     def get_desired_input(self) -> List[float]:
@@ -680,6 +688,12 @@ class ClosedLoopVehicleInterface(SafeAccelVehicleInterface):
 
     def get_input_limits(self) -> (List[float], List[float]):
         return [], []
+
+    # def determine_inputs(self, ego_states, optimal_inputs, leader_states):
+    #     # TODO: for completeness, we could include the feedback
+    #     #  computation of phi here, but this will not be used [Oct 5, 23]
+    #     return (self.compute_acceleration(ego_states, leader_states),
+    #             0.0)
 
 
 class SafeLongitudinalVehicleInterface(ClosedLoopVehicleInterface):
@@ -689,3 +703,7 @@ class SafeLongitudinalVehicleInterface(ClosedLoopVehicleInterface):
     def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
         self._position_derivative_longitudinal_only(vel, derivatives)
         derivatives[self.state_idx['v']] = accel
+
+    # def determine_inputs(self, ego_states, optimal_inputs, leader_states):
+    #     return (self.compute_acceleration(ego_states, leader_states),
+    #             0.0)

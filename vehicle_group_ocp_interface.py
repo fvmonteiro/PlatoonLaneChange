@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -11,19 +11,20 @@ import vehicle_models.base_vehicle as base
 
 
 # ========= Functions passed to the optimal control library methods ========== #
-def vehicles_derivatives(t, states, inputs, params):
+def update_vehicles(t, states, inputs, params):
     """
     Follows the model of updfcn of the control package.
     :param t: time
     :param states: Array with states of all vehicles [x1, y1, ..., xN, yN]
     :param inputs: Array with inputs of all vehicles [u11, u12, ..., u1N, u2N]
     :param params: Dictionary which must contain the vehicle type
-    :return: state update function
+    :return: the derivative of the state
     """
     vehicle_group_interface: VehicleGroupInterface = (
         params['vehicle_group_interface']
     )
-    return vehicle_group_interface.compute_derivatives(t, states, inputs)
+    vehicle_group_interface.update_surrounding_vehicles(t)
+    return vehicle_group_interface.update_vehicles(states, inputs)
 
 
 def vehicle_output(t, x, u, params):
@@ -141,8 +142,8 @@ class VehicleGroupInterface:
         return vehicle.select_input_from_vector(vehicle_inputs, input_name)
 
     def set_mode_sequence(self, mode_sequence: som.ModeSequence):
-        leader_sequences = som.mode_sequence_to_leader_sequence(mode_sequence)
-        for foll_id, sequence in leader_sequences.items():
+        sv_sequences = som.mode_sequence_to_sv_sequence(mode_sequence)
+        for foll_id, sequence in sv_sequences.items():
             self.vehicles[foll_id].set_leader_sequence(sequence)
 
     def create_input_names(self) -> List[str]:
@@ -203,10 +204,11 @@ class VehicleGroupInterface:
             veh = self.vehicles[veh_id]
             veh_states = veh.get_initial_state()
             try:
-                vf = veh.select_state_from_vector(veh_states, 'v')
+                v0 = veh.select_state_from_vector(veh_states, 'v')
             except KeyError:  # three-state vehicles have v as an input
-                vf = veh.select_input_from_vector(veh.get_desired_input(), 'v')
-            xf = veh.select_state_from_vector(veh_states, 'x') + vf * tf
+                v0 = veh.select_input_from_vector(veh.get_desired_input(), 'v')
+            vf = veh.free_flow_speed  # v0? Do we want const speed LC?
+            xf = veh.select_state_from_vector(veh_states, 'x') + v0 * tf
             yf = veh.get_target_y()
             thetaf = 0.0
             desired_state.extend(veh.create_state_vector(xf, yf, thetaf, vf))
@@ -266,13 +268,16 @@ class VehicleGroupInterface:
 
         return np.diag(veh_costs)
 
-    def compute_derivatives(self, t, states, inputs):
+    def update_surrounding_vehicles(self, time: float):
+        for veh_id in self.sorted_vehicle_ids:
+            self.vehicles[veh_id].set_time_interval(time)
+
+    def update_vehicles(self, states, inputs):
         """
         Computes the states derivatives
-        :param t: used to get the current leader
         :param states: Current states of all vehicles
         :param inputs: Current inputs of all vehicles
-        :return:
+        :return: state derivative
         """
         dxdt = []
         for veh_id in self.sorted_vehicle_ids:
@@ -281,9 +286,9 @@ class VehicleGroupInterface:
                                                              states)
             ego_inputs = self.get_vehicle_inputs_vector_by_id(
                 vehicle.get_id(), inputs)
-            if vehicle.has_leader(t):
+            if vehicle.has_leader():
                 leader_states = self.get_vehicle_state_vector_by_id(
-                    vehicle.get_current_leader_id(t), states)
+                    vehicle.get_current_leader_id(), states)
             else:
                 leader_states = None
             dxdt.extend(vehicle.compute_derivatives(ego_states, ego_inputs,
@@ -293,12 +298,42 @@ class VehicleGroupInterface:
     def lane_changing_safety_constraint(self, states, inputs, lc_veh_id: int,
                                         other_id: int, is_other_behind: bool,
                                         make_smooth: bool = True):
+        gap_error = self.compute_gap_error(states, lc_veh_id, other_id,
+                                           is_other_behind)
+        phi = self.get_a_vehicle_input_by_id(lc_veh_id, inputs, 'phi')
+        margin = 1e-1
+        if make_smooth:
+            return self._smooth_min_0(gap_error + margin) * phi
+        else:
+            return min(gap_error + margin, 0) * phi
+
+    def lane_changing_safety_constraint_new(
+            self, lc_veh_id: int):
+        ego_veh = self.vehicles[lc_veh_id]
+
+        def support(states, inputs):
+            gap_errors = [
+                self.compute_gap_error(
+                    states, lc_veh_id, ego_veh.get_orig_lane_leader_id(), False),
+                self.compute_gap_error(
+                    states, lc_veh_id, ego_veh.get_dest_lane_leader_id(), False),
+                self.compute_gap_error(
+                    states, lc_veh_id, ego_veh.get_dest_lane_follower_id(), True)
+                ]
+            phi = self.get_a_vehicle_input_by_id(lc_veh_id, inputs, 'phi')
+            margin = 1e-1
+            return np.sum([self._smooth_min_0(ge + margin)
+                           for ge in gap_errors]) * phi
+
+        return support
+
+    def compute_gap_error(self, states, ego_id, other_id, is_other_behind):
         if other_id < 0:  # no risk
             return 0
         if is_other_behind:
-            follower_id, leader_id = other_id, lc_veh_id
+            follower_id, leader_id = other_id, ego_id
         else:
-            follower_id, leader_id = lc_veh_id, other_id
+            follower_id, leader_id = ego_id, other_id
         follower_veh = self.vehicles[follower_id]
         follower_states = (
             self.get_vehicle_state_vector_by_id(
@@ -306,14 +341,8 @@ class VehicleGroupInterface:
         leader_states = (
             self.get_vehicle_state_vector_by_id(
                 leader_id, states))
-        gap_error = follower_veh.compute_error_to_safe_gap(follower_states,
-                                                           leader_states)
-        phi = self.get_a_vehicle_input_by_id(lc_veh_id, inputs, 'phi')
-        margin = 1e-1
-        if make_smooth:
-            return self._smooth_min_0(gap_error + margin) * phi
-        else:
-            return min(gap_error + margin, 0) * phi
+        return follower_veh.compute_error_to_safe_gap(follower_states,
+                                                      leader_states)
 
     @staticmethod
     def _smooth_min_0(x, epsilon: float = 1e-5):

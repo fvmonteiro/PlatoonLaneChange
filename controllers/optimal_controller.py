@@ -180,7 +180,8 @@ class VehicleOptimalController:
 
     def find_single_vehicle_trajectory(
             self, vehicles: Dict[int, base.BaseVehicle],
-            ego_id: int, mode_sequence: som.ModeSequence = None):
+            ego_id: int,  # mode_sequence: som.ModeSequence = None
+    ):
         """
         Solves the OPC assuming only the vehicle calling this function will
         perform a lane change
@@ -190,12 +191,13 @@ class VehicleOptimalController:
         :return: nothing
         """
         self.find_multiple_vehicle_trajectory(vehicles,
-                                              [ego_id], mode_sequence)
+                                              [ego_id])
 
     def find_multiple_vehicle_trajectory(
             self, vehicles: Dict[int, base.BaseVehicle],
             controlled_veh_ids: List[int],
-            mode_sequence: som.ModeSequence = None):
+            # mode_sequence: som.ModeSequence = None
+    ):
         """
         Solves the OPC for all listed controlled vehicles
         :param vehicles: All relevant vehicles
@@ -204,17 +206,20 @@ class VehicleOptimalController:
         :return:
         """
 
-        if mode_sequence is None:
-            input_sequence: som.ModeSequence = [(0.0, som.SystemMode(vehicles))]
-        else:
-            input_sequence = mode_sequence
+        # if mode_sequence is None:
+        input_sequence: som.ModeSequence = [(0.0, som.SystemMode(vehicles))]
+        # else:
+        #     input_sequence = mode_sequence
 
         # We put the vehicle below at the origin (0, 0) when solving the opc
         # to make the solution independent of shifts in initial position
         center_veh_id = controlled_veh_ids[0]
         self._ocp_interface = vgi.VehicleGroupInterface(vehicles,
                                                         center_veh_id)
-        self._set_ocp_configuration()
+        self._set_ocp_dynamics()
+        self._initial_state = self._ocp_interface.get_initial_state()
+        self._desired_state = self._ocp_interface.create_desired_state(
+            self.time_horizon)
         self._create_cost_with_tracker()
 
         converged = False
@@ -235,11 +240,11 @@ class VehicleOptimalController:
 
             # Just checking what the optimizer "sees"
             alt = self.get_ocp_solver_simulation(vehicles)
-            if len(alt.get_platoon_vehicles()) == 1:  # TODO: also temp checking
-                analysis.plot_constrained_lane_change(
-                    alt.to_dataframe(), vehicles[center_veh_id].get_id())
-            else:
-                analysis.plot_platoon_lane_change(alt.to_dataframe())
+            # if len(alt.get_platoon_vehicles()) == 1:  # TODO: also temp checking
+            #     analysis.plot_constrained_lane_change(
+            #         alt.to_dataframe(), vehicles[center_veh_id].get_id())
+            # else:
+            analysis.plot_platoon_lane_change(alt.to_dataframe())
 
             # TODO: big problem here. How to force this simulation NOT to run
             #  the ocp solver? When we find a solution, it's OK. But if we don't
@@ -250,12 +255,12 @@ class VehicleOptimalController:
                 vehicles)
             self._data_per_iteration.append(
                 simulated_vehicle_group.to_dataframe())
-            if len(simulated_vehicle_group.get_platoon_vehicles()) == 1:
-                analysis.plot_constrained_lane_change(
-                    self._data_per_iteration[-1],
-                    vehicles[center_veh_id].get_id())
-            else:
-                analysis.plot_platoon_lane_change(self._data_per_iteration[-1])
+            # if len(simulated_vehicle_group.get_platoon_vehicles()) == 1:
+            #     analysis.plot_constrained_lane_change(
+            #         self._data_per_iteration[-1],
+            #         vehicles[center_veh_id].get_id())
+            # else:
+            analysis.plot_platoon_lane_change(self._data_per_iteration[-1])
             output_sequence = simulated_vehicle_group.get_mode_sequence()
 
             output_seq_str = som.mode_sequence_to_str(output_sequence)
@@ -386,7 +391,7 @@ class VehicleOptimalController:
         n_states = self._ocp_interface.n_states
         # Define the vehicle dynamics as an input/output system
         self._dynamic_system = ct.NonlinearIOSystem(
-            vgi.vehicles_derivatives, vgi.vehicle_output,
+            vgi.update_vehicles, vgi.vehicle_output,
             params=params, states=n_states, name='vehicle_group',
             inputs=input_names, outputs=output_names)
 
@@ -500,33 +505,39 @@ class VehicleOptimalController:
                                             ub=veh.get_target_y() + 1)
             if self.has_lateral_constraint:
                 self._constraints.append(stay_in_lane)
-            if veh.has_orig_lane_leader():
-                orig_lane_safety = NonlinearConstraint(
-                    partial(
-                        self._ocp_interface.lane_changing_safety_constraint,
-                        lc_veh_id=veh.get_id(),
-                        other_id=veh.get_orig_lane_leader_id(),
-                        is_other_behind=False),
-                    -epsilon, epsilon)
-                self._constraints.append(orig_lane_safety)
-            if veh.has_dest_lane_leader():
-                dest_lane_leader_safety = NonlinearConstraint(
-                    partial(
-                        self._ocp_interface.lane_changing_safety_constraint,
-                        lc_veh_id=veh.get_id(),
-                        other_id=veh.get_dest_lane_leader_id(),
-                        is_other_behind=False),
-                    -epsilon, epsilon)
-                self._constraints.append(dest_lane_leader_safety)
-            if veh.has_dest_lane_follower():
-                dest_lane_follower_safety = NonlinearConstraint(
-                    partial(
-                        self._ocp_interface.lane_changing_safety_constraint,
-                        lc_veh_id=veh.get_id(),
-                        other_id=veh.get_dest_lane_follower_id(),
-                        is_other_behind=True),
-                    -epsilon, epsilon)
-                self._constraints.append(dest_lane_follower_safety)
+
+            lc_safety_constraint = NonlinearConstraint(
+                self._ocp_interface.lane_changing_safety_constraint_new(
+                    veh.get_id()
+                ), -epsilon, epsilon)
+            self._constraints.append(lc_safety_constraint)
+            # if veh.has_orig_lane_leader():
+            #     orig_lane_safety = NonlinearConstraint(
+            #         partial(
+            #             self._ocp_interface.lane_changing_safety_constraint,
+            #             lc_veh_id=veh.get_id(),
+            #             other_id=veh.get_orig_lane_leader_id(),
+            #             is_other_behind=False),
+            #         -epsilon, epsilon)
+            #     self._constraints.append(orig_lane_safety)
+            # if veh.has_dest_lane_leader():
+            #     dest_lane_leader_safety = NonlinearConstraint(
+            #         partial(
+            #             self._ocp_interface.lane_changing_safety_constraint,
+            #             lc_veh_id=veh.get_id(),
+            #             other_id=veh.get_dest_lane_leader_id(),
+            #             is_other_behind=False),
+            #         -epsilon, epsilon)
+            #     self._constraints.append(dest_lane_leader_safety)
+            # if veh.has_dest_lane_follower():
+            #     dest_lane_follower_safety = NonlinearConstraint(
+            #         partial(
+            #             self._ocp_interface.lane_changing_safety_constraint,
+            #             lc_veh_id=veh.get_id(),
+            #             other_id=veh.get_dest_lane_follower_id(),
+            #             is_other_behind=True),
+            #         -epsilon, epsilon)
+            #     self._constraints.append(dest_lane_follower_safety)
 
     def _solve_ocp(self, custom_initial_guess: np.ndarray = None):
         time_pts = self.get_time_points()
