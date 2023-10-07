@@ -424,8 +424,8 @@ class PlatoonVehicle(OptimalControlVehicle):
         except AttributeError:
             return None
 
-    def set_acceleration_controller_type(self,
-                                         is_acceleration_optimal: bool = False):
+    def set_acceleration_controller_type(
+            self, is_acceleration_optimal: bool = False) -> None:
         """
         Must be called after instantiation of an object (but we don't want to
         add a parameter to the constructor)
@@ -462,10 +462,10 @@ class PlatoonVehicle(OptimalControlVehicle):
         new_vehicle._platoon = None
         return new_vehicle
 
-    def set_platoon(self, new_platoon: platoon.Platoon):
+    def set_platoon(self, new_platoon: platoon.Platoon) -> None:
         self._platoon = new_platoon
 
-    def update_mode(self, vehicles: Dict[int, base.BaseVehicle]):
+    def update_mode(self, vehicles: Dict[int, base.BaseVehicle]) -> None:
         if self.has_lane_change_intention():
             self._mode.handle_lane_changing_intention(vehicles)
         else:
@@ -476,7 +476,7 @@ class PlatoonVehicle(OptimalControlVehicle):
     #     delta_t = self.get_current_time() - self._lc_start_time
     #     return delta_t <= self.opt_controller.get_time_horizon()
 
-    def is_platoon_leader(self):
+    def is_platoon_leader(self) -> bool:
         return self._id == self._platoon.get_platoon_leader_id()
 
     def can_start_lane_change(self, vehicles: Dict[int, base.BaseVehicle]
@@ -498,7 +498,7 @@ class PlatoonVehicle(OptimalControlVehicle):
         return self._platoon.can_start_lane_change()
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
-                          vehicles: Dict[int, base.BaseVehicle]):
+                          vehicles: Dict[int, base.BaseVehicle]) -> None:
         """
         Sets the open loop controls a (acceleration) and phi (steering wheel
         angle)
@@ -525,7 +525,8 @@ class PlatoonVehicle(OptimalControlVehicle):
         self._inputs[self._input_idx['a']] = accel
         self._inputs[self._input_idx['phi']] = phi
 
-    def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]):
+    def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]
+                              ) -> None:
         # TODO: vary when lane-changing?
         self._leader_id[self._iter_counter] = (
             self.long_controller.get_more_critical_leader(vehicles))
@@ -534,10 +535,11 @@ class PlatoonVehicle(OptimalControlVehicle):
             self, vehicles: Dict[int, base.BaseVehicle]) -> None:
         pass
 
-    def _set_up_lane_change_control(self):
+    def _set_up_lane_change_control(self) -> None:
         self._platoon.set_lc_start_time(self._lc_start_time)
 
-    def analyze_platoons(self, vehicles: Dict[int, base.BaseVehicle]):
+    def analyze_platoons(self, vehicles: Dict[int, base.BaseVehicle]
+                         ) -> None:
 
         # [Aug 23] We are only simulating simple scenarios. At the start of
         # the simulation, every vehicle will either create its own platoon
@@ -597,11 +599,8 @@ class FourStateVehicleInterface(base.BaseVehicleInterface, ABC):
         self.brake_max = vehicle.brake_max
         self.accel_max = vehicle.accel_max
 
-    def get_desired_input(self) -> List[float]:
-        return [0] * self.n_inputs
-
-    # def get_vel(self, values):
-    #     return self.select_state_from_vector(values, 'v')
+    def get_desired_input(self) -> np.ndarray:
+        return np.array([0] * self.n_inputs)
 
     def _set_speed(self, v0, state):
         state[self.state_idx['v']] = v0
@@ -613,6 +612,7 @@ class FourStateVehicleInterface(base.BaseVehicleInterface, ABC):
 
 class OpenLoopVehicleInterface(FourStateVehicleInterface):
     """ States: [x, y, theta, v], inputs: [a, phi], centered at the C.G. """
+    _input_names = ['a', 'phi']
 
     def __init__(self, vehicle: OpenLoopVehicle):
         super().__init__(vehicle)
@@ -682,9 +682,6 @@ class ClosedLoopVehicleInterface(SafeAccelVehicleInterface):
 
     def select_input_from_vector(self, optimal_inputs: List, input_name: str) -> float:
         return 0.0  # all inputs are computed internally
-
-    def get_desired_input(self) -> List[float]:
-        return []
 
     def get_input_limits(self) -> (List[float], List[float]):
         return [], []

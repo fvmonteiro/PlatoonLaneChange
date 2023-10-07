@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -230,7 +230,7 @@ class VehicleGroupInterface:
             veh = self.vehicles[veh_id]
             if veh.n_inputs == 0:
                 veh_costs.extend([0.0] * veh.n_states)
-            elif veh.n_inputs == 1:  # only steering wheel optimal control
+            elif not veh.is_long_control_optimal():
                 if x_cost > 0 or v_cost > 0:
                     warnings.warn('Trying to pass non-zero position or '
                                   'velocity cost to a vehicle with feedback '
@@ -244,7 +244,7 @@ class VehicleGroupInterface:
         return np.diag(veh_costs)
 
     def create_input_cost_matrix(self, accel_cost: float = 0,
-                                 phi_cost: float = 0,):
+                                 phi_cost: float = 0, ):
         """
         Creates a diagonal cost function where each input of all controlled
         vehicles gets the same weight
@@ -295,35 +295,82 @@ class VehicleGroupInterface:
                                                     leader_states))
         return np.array(dxdt)
 
-    def lane_changing_safety_constraint(self, states, inputs, lc_veh_id: int,
-                                        other_id: int, is_other_behind: bool,
-                                        make_smooth: bool = True):
+    def cost_function(self, controlled_veh_ids: List[int]) -> Callable:
+        tf = 0.0  # only relevant for desired final position
+        x_ref = self.create_desired_state(tf)
+        u_ref = self.get_desired_input()
+        Q = self.create_state_cost_matrix(
+            y_cost=0.1, theta_cost=0., v_cost=0.1)
+        # Very specific to scenario with one platoon veh and fd
+        # d = np.array([[1, 0, 0, 0, -1, 0, 0, -1]])
+        # w_eg = 0.1
+        # Q_eg = w_eg * np.matmul(d.transpose(), d)
+        # Q += Q_eg
+        R = self.create_input_cost_matrix(accel_cost=0.1,
+                                          phi_cost=0.)
+
+        def support(states, inputs):
+            w_eg = 1.  # gap error weight
+            cost = ((states - x_ref) @ Q @ (states - x_ref)
+                    + (inputs - u_ref) @ R @ (inputs - u_ref)).item()
+            eg_cost = []
+            for ego_id in controlled_veh_ids:
+                ego_veh = self.vehicles[ego_id]
+                gap_error = self.compute_gap_error(
+                    states, ego_id, ego_veh.get_dest_lane_follower_id(),
+                    True)
+                eg_cost.append(w_eg * min(gap_error, 0) ** 2)
+            cost += sum(eg_cost)
+            return cost
+
+        return support
+
+    def lane_changing_safety_constraint_old(
+            self, states, inputs, lc_veh_id: int, other_id: int,
+            is_other_behind: bool, make_smooth: bool = True
+    ):
         gap_error = self.compute_gap_error(states, lc_veh_id, other_id,
                                            is_other_behind)
         phi = self.get_a_vehicle_input_by_id(lc_veh_id, inputs, 'phi')
         margin = 1e-1
         if make_smooth:
-            return self._smooth_min_0(gap_error + margin) * phi
+            return _smooth_min_0(gap_error + margin) * phi
         else:
             return min(gap_error + margin, 0) * phi
 
-    def lane_changing_safety_constraint_new(
-            self, lc_veh_id: int):
-        ego_veh = self.vehicles[lc_veh_id]
+    def lane_changing_safety_constraint(self, ego_id: int):
+        ego_veh = self.vehicles[ego_id]
 
         def support(states, inputs):
             gap_errors = [
                 self.compute_gap_error(
-                    states, lc_veh_id, ego_veh.get_orig_lane_leader_id(), False),
+                    states, ego_id, ego_veh.get_orig_lane_leader_id(),
+                    False),
                 self.compute_gap_error(
-                    states, lc_veh_id, ego_veh.get_dest_lane_leader_id(), False),
+                    states, ego_id, ego_veh.get_dest_lane_leader_id(),
+                    False),
                 self.compute_gap_error(
-                    states, lc_veh_id, ego_veh.get_dest_lane_follower_id(), True)
-                ]
-            phi = self.get_a_vehicle_input_by_id(lc_veh_id, inputs, 'phi')
+                    states, ego_id, ego_veh.get_dest_lane_follower_id(),
+                    True)
+            ]
+            phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
             margin = 1e-1
-            return np.sum([self._smooth_min_0(ge + margin)
-                           for ge in gap_errors]) * phi
+            min_sum = np.sum([min(ge + margin, 0) ** 2
+                              # self._smooth_min_0(ge + margin)
+                              for ge in gap_errors])
+            return min_sum * phi
+
+        return support
+
+    def vehicle_following_safety_constraint(self, ego_id: int):
+        ego_veh = self.vehicles[ego_id]
+
+        def support(states, inputs):
+            if ego_veh.has_orig_lane_leader():
+                gap_error = self.compute_gap_error(
+                    states, ego_id, ego_veh.get_orig_lane_leader_id(), False)
+                return gap_error  # min(gap_error, 0) ** 2
+            return 0.0
 
         return support
 
@@ -338,20 +385,10 @@ class VehicleGroupInterface:
         follower_states = (
             self.get_vehicle_state_vector_by_id(
                 follower_id, states))
-        leader_states = (
-            self.get_vehicle_state_vector_by_id(
-                leader_id, states))
+        leader_x = (
+            self.get_a_vehicle_state_by_id(leader_id, states, 'x'))
         return follower_veh.compute_error_to_safe_gap(follower_states,
-                                                      leader_states)
-
-    @staticmethod
-    def _smooth_min_0(x, epsilon: float = 1e-5):
-        if x < -epsilon:
-            return x
-        elif x > epsilon:
-            return 0
-        else:
-            return -(x - epsilon) ** 2 / 4 / epsilon
+                                                      leader_x)
 
     def map_input_to_vehicle_ids(self, array) -> Dict[int, np.ndarray]:
         """
@@ -399,3 +436,12 @@ class VehicleGroupInterface:
             data_per_vehicle.append(vehicle_df)
         all_data = pd.concat(data_per_vehicle).reset_index()
         return all_data.fillna(0)
+
+
+def _smooth_min_0(x, epsilon: float = 1e-5):
+    if x < -epsilon:
+        return x
+    elif x > epsilon:
+        return 0
+    else:
+        return -(x - epsilon) ** 2 / 4 / epsilon

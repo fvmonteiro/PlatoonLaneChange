@@ -245,14 +245,21 @@ def plot_gap_errors(data: pd.DataFrame,
             warnings.warn(f'No data for vehicle {ego_identifier}')
             continue
         ego_name = ego_data['name'].iloc[0]
-        ego_safe_gap = pp.compute_default_safe_gap(
-            ego_data['v'].to_numpy())
         for other_identifier in others:
             other_data = get_veh_data(data, other_identifier)
             if not other_data.empty:
+                if other_data['x'].iloc[0] < ego_data['x'].iloc[0]:
+                    follower_data = other_data
+                    leader_data = ego_data
+                else:
+                    follower_data = ego_data
+                    leader_data = other_data
+                safe_gap = pp.compute_default_safe_gap(
+                    follower_data['v'].to_numpy())
+                gap = (leader_data['x'].to_numpy()
+                       - follower_data['x'].to_numpy())
+                gap_error = gap - safe_gap
                 other_name = other_data['name'].iloc[0]
-                gap = other_data['x'].to_numpy() - ego_data['x'].to_numpy()
-                gap_error = gap - ego_safe_gap
                 ax.plot(ego_data['t'].to_numpy(), gap_error,
                         label=f'{ego_name} to {other_name}')
     ax.legend()

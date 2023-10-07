@@ -90,6 +90,7 @@ class OCPCostTracker:
             cost = self._running_cost_fun(states, inputs)
             self._save_running_cost_per_call(cost)
             return cost
+
         return support
 
     def get_terminal_cost_fun(self):
@@ -97,6 +98,7 @@ class OCPCostTracker:
             cost = self._terminal_cost_fun(states, inputs)
             self._terminal_cost_per_call[-1].append(cost)
             return cost
+
         if self.has_terminal_cost():
             return support
         return None
@@ -191,8 +193,10 @@ class OCPCostTracker:
             iterations = len(self._running_cost_per_iteration[-1])
             percentage = iterations * 100 / self._max_iterations
             if percentage % 5 == 0:
-                print('{}/{} iterations'.format(iterations,
-                                                self._max_iterations))
+                print('{}/{} iterations. Last cost: {:.5g}. '
+                      'Best cost so far {:.5g}'.format(
+                        iterations, self._max_iterations, iteration_cost,
+                        self._best_cost))
 
         # Compare iterations:
         # delta_cost = (np.diff(self._running_cost_per_iteration[-1][-2:])
@@ -364,10 +368,8 @@ def quadratic_cost(n_states: int, n_inputs: int, Q, R,
 
     if Q is None:
         return lambda x, u: ((u - u0) @ R @ (u - u0)).item()
-
     if R is None:
         return lambda x, u: ((x - x0) @ Q @ (x - x0)).item()
-
     # Received both Q and R matrices
     return lambda x, u: (
             (x - x0) @ Q @ (x - x0) + (u - u0) @ R @ (u - u0)).item()
@@ -392,10 +394,7 @@ def quadratic_cost_gradient(n_states: int, n_inputs: int, n_times: int, Q, R,
     big_u0 = np.tile(u0, n_times)
 
     def support(x):
-        # Note 1: this only works if we are not using any basis functions for
-        # the control input.
-        # Note 2: we have to rearrange the terms to organize them by time and
-        # then return it in the original form...
+        # Note 1: this only works for simple quadratic costs
         inputs = x[:n_inputs * n_times].reshape(n_inputs, -1
                                                 ).transpose().flatten()
         states = x[n_inputs * n_times:].reshape(n_states, -1

@@ -701,6 +701,9 @@ class BaseVehicleInterface(ABC):
     def get_target_y(self) -> float:
         return self.target_lane * const.LANE_WIDTH
 
+    def is_long_control_optimal(self):
+        return 'a' in self.input_names or 'v' in self.input_names
+
     def set_leader_sequence(self, leader_sequence: som.SVSequence
                             ) -> None:
         self._interval_number = 0
@@ -772,9 +775,8 @@ class BaseVehicleInterface(ABC):
     def compute_safe_gap(self, v_ego) -> float:
         return self.safe_h * v_ego + self.c
 
-    def compute_error_to_safe_gap(self, ego_states, leader_states) -> float:
-        gap = (self.select_state_from_vector(leader_states, 'x')
-               - self.select_state_from_vector(ego_states, 'x'))
+    def compute_error_to_safe_gap(self, ego_states, leader_x) -> float:
+        gap = leader_x - self.select_state_from_vector(ego_states, 'x')
         safe_gap = self.compute_safe_gap(self.select_state_from_vector(
             ego_states, 'v'))
         return gap - safe_gap

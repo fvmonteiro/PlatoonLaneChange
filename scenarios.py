@@ -351,14 +351,14 @@ class LaneChangeScenario(SimulationScenario):
         print("======= RUNNING AN EXPLORATORY TEST SCENARIO =======")
         v_orig_leader = 10.
         v_dest_leader = 10.
-        v_others = 15.
+        v_others = 10.
         v_orig_foll = 10.
         v_ff_array = ([v_orig_leader] * self._n_orig_ahead
                       + [v_others] * self._n_platoon
                       + [v_orig_foll] * self._n_orig_behind
                       + [v_dest_leader] + [v_others] * (self.n_per_lane[1] - 1))
         self.vehicle_group.set_free_flow_speeds(v_ff_array)
-        delta_x = {'lo': 0.0, 'ld': 0.0,
+        delta_x = {'lo': 0.0, 'ld': 4.0,
                    'fd': 0.0}  # deviation from equilibrium
         self.create_initial_state(v_orig_leader, v_dest_leader, delta_x)
 

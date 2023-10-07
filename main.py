@@ -76,19 +76,6 @@ def run_constraints_scenario(has_lo: bool, has_fo: bool, has_ld: bool,
         scenario.boundary_conditions_to_dataframe(), data)
 
 
-def load_and_plot_latest_scenario():
-    trajectory_data = analysis.load_latest_simulated_scenario(
-        trajectory_file_name)
-    analysis.plot_trajectory(trajectory_data)
-    # analysis.plot_constrained_lane_change(trajectory_data, 'p1')
-    analysis.plot_platoon_lane_change(trajectory_data)
-    # analysis.plot_platoon_lane_change(trajectory_data)
-
-    cost_data = analysis.load_latest_simulated_scenario(cost_file_name)
-    analysis.plot_costs_vs_iteration(cost_data[0], cost_data[1],
-                                     plot_separately=False)
-
-
 def run_cbf_lc_scenario(n_orig_ahead: int, n_orig_behind: int,
                         n_dest_ahead: int, n_dest_behind: int):
     scenario = scenarios.LaneChangeScenario.single_vehicle_feedback_lane_change(
@@ -117,6 +104,18 @@ def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
         is_acceleration_optimal
     )
     run_save_and_plot(scenario, tf)
+
+
+def load_and_plot_latest_scenario():
+    trajectory_data = analysis.load_latest_simulated_scenario(
+        trajectory_file_name)
+    analysis.plot_trajectory(trajectory_data)
+    # analysis.plot_constrained_lane_change(trajectory_data, 'p1')
+    analysis.plot_platoon_lane_change(trajectory_data)
+
+    cost_data = analysis.load_latest_simulated_scenario(cost_file_name)
+    analysis.plot_costs_vs_iteration(cost_data[0], cost_data[1],
+                                     plot_separately=False)
 
 
 def run_save_and_plot(scenario: scenarios.LaneChangeScenario, tf: float = 10.):
@@ -186,23 +185,20 @@ def mode_convergence_base_tests():
 
 
 def main():
-    n_platoon = 1
-    n_orig_ahead, n_orig_behind = 1, 0
+    n_platoon = 2
+    n_orig_ahead, n_orig_behind = 0, 0
     n_dest_ahead, n_dest_behind = 1, 0
 
-    configure_optimal_controller(max_iter=2, solver_max_iter=300,
+    configure_optimal_controller(max_iter=3, solver_max_iter=300,
                                  discretization_step=0.2, time_horizon=5.0,
-                                 ftol=1.0e-3,
+                                 ftol=1.0e-2,
                                  has_terminal_constraints=False,
-                                 jumpstart_next_solver_call=False,
+                                 jumpstart_next_solver_call=True,
                                  has_lateral_constraint=False,
                                  estimate_gradient=True)
 
     start_time = time.time()
 
-    # run_no_lc_scenario()
-    # run_fast_lane_change()
-    # run_base_opc_scenario(max_iter=400)
     # run_constraints_scenario(n_orig_ahead > 0, n_orig_behind > 0,
     #                          n_dest_ahead > 0, n_dest_behind > 0)
     # run_cbf_lc_scenario(n_orig_ahead, n_orig_behind, n_dest_ahead,
