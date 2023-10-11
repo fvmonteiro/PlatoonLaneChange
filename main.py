@@ -110,7 +110,7 @@ def load_and_plot_latest_scenario():
     trajectory_data = analysis.load_latest_simulated_scenario(
         trajectory_file_name)
     analysis.plot_trajectory(trajectory_data)
-    # analysis.plot_constrained_lane_change(trajectory_data, 'p1')
+    analysis.plot_constrained_lane_change(trajectory_data, 'p1')
     analysis.plot_platoon_lane_change(trajectory_data)
 
     cost_data = analysis.load_latest_simulated_scenario(cost_file_name)
@@ -185,9 +185,9 @@ def mode_convergence_base_tests():
 
 
 def main():
-    n_platoon = 2
+    n_platoon = 1
     n_orig_ahead, n_orig_behind = 0, 0
-    n_dest_ahead, n_dest_behind = 1, 0
+    n_dest_ahead, n_dest_behind = 0, 1
 
     configure_optimal_controller(max_iter=3, solver_max_iter=300,
                                  discretization_step=0.2, time_horizon=5.0,

@@ -24,6 +24,7 @@ class VehicleGroup:
         # The full system (all vehicles) mode is defined by follower/leader
         # pairs.
         self.mode_sequence: som.ModeSequence = []
+        # self._is_controller_centralized = False
         self._is_verbose = True
 
     def get_n_vehicles(self):
@@ -50,11 +51,23 @@ class VehicleGroup:
     def get_all_vehicles(self) -> Iterable[base.BaseVehicle]:
         return self.vehicles.values()
 
+    def get_current_state(self):
+        states = []
+        for veh_id in self.sorted_vehicle_ids:
+            states.append(self.vehicles[veh_id].get_states())
+        return np.hstack(states)
+
     def get_all_states(self):
         states = []
         for veh_id in self.sorted_vehicle_ids:
             states.append(self.vehicles[veh_id].get_state_history())
         return np.vstack(states)
+
+    def get_current_inputs(self):
+        inputs = []
+        for veh_id in self.sorted_vehicle_ids:
+            inputs.append(self.vehicles[veh_id].get_inputs())
+        return np.hstack(inputs)
 
     def get_all_inputs(self):
         inputs = []
@@ -168,6 +181,14 @@ class VehicleGroup:
         for vehicle in self.vehicles.values():
             vehicle.make_connected()
 
+    # def make_control_centralized(self):
+    #     """
+    #     The work-around to have a centralized controller is to add the
+    #     vehicles to the same platoon.
+    #     :return:
+    #     """
+    #     self._is_controller_centralized = True
+
     def map_values_to_names(self, values) -> Dict[str, Any]:
         """
         Receives variables ordered in the same order as the vehicles were
@@ -216,6 +237,7 @@ class VehicleGroup:
             else:
                 initial_state = None
             vehicle = vehicles[veh_id].make_reset_copy(initial_state)
+            vehicle = vehicles[veh_id].make_open_loop_copy(initial_state)
             self.sorted_vehicle_ids.append(veh_id)
             self.vehicles[veh_id] = vehicle
             self.name_to_id[vehicle.get_name()] = veh_id
@@ -239,15 +261,18 @@ class VehicleGroup:
                 x[veh_id], y[veh_id], theta[veh_id], v[veh_id]))
         return np.array(full_state)
 
-    def simulate_one_time_step(self, new_time, open_loop_controls=None):
+    def simulate_one_time_step(
+            self, new_time: float,
+            open_loop_controls: Dict[int, np.ndarray] = None):
         if open_loop_controls is None:
             open_loop_controls = {}
+        self.update_surrounding_vehicles()  # TODO: testing different order
         self.update_platoons()
         self.update_vehicle_modes()
         self.determine_inputs(open_loop_controls)
         self.compute_derivatives()
         self.update_states(new_time)
-        self.update_surrounding_vehicles()
+        # self.update_surrounding_vehicles()  # TODO: testing different order
 
     def write_vehicle_states(self, time, state_vectors: Dict[int, np.ndarray],
                              optimal_inputs: Dict[int, np.ndarray]):
@@ -288,8 +313,12 @@ class VehicleGroup:
         for ego_vehicle in self.vehicles.values():
             ego_vehicle.analyze_platoons(self.vehicles)
 
+    def centralize_control(self):
+        for ego_vehicle in self.vehicles.values():
+            ego_vehicle.join_centrally_controlled_platoon(self.vehicles)
+
     def determine_inputs(
-            self, open_loop_controls: Dict[int, Dict[str, float]]):
+            self, open_loop_controls: Dict[int, np.ndarray]):
         """
         Sets the open loop controls and computes the closed loop controls for
         all vehicles.
@@ -298,7 +327,7 @@ class VehicleGroup:
         :return: Nothing. Each vehicle stores the computed input values
         """
         for veh_id, vehicle in self.vehicles.items():
-            vehicle.determine_inputs(open_loop_controls.get(veh_id, {}),
+            vehicle.determine_inputs(open_loop_controls.get(veh_id, []),
                                      self.vehicles)
 
     def update_vehicle_modes(self):

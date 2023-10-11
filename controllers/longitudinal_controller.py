@@ -44,7 +44,9 @@ class LongitudinalController:
                 accel = self.compute_velocity_control(v_ff, v_ego)
         return accel
 
-    def compute_accel_to_a_leader(self, other_id, vehicles) -> float:
+    def compute_accel_to_a_leader(
+            self, other_id: int, vehicles: Dict[int, base.BaseVehicle]
+    ) -> float:
         if other_id >= 0:
             other_vehicle = vehicles[other_id]
             gap = self.vehicle.compute_gap_to_a_leader(other_vehicle)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC
 import copy
-from typing import Dict, List, Union
+from typing import Dict, List, TypeVar, Union
 
 import numpy as np
 
@@ -20,6 +20,10 @@ class FourStateVehicle(base.BaseVehicle, ABC):
 
     _state_names = ['x', 'y', 'theta', 'v']
     _input_names = ['a', 'phi']
+
+    static_attribute_names = base.BaseVehicle.static_attribute_names.union(
+        {'brake_max', 'accel_max'}
+    )
 
     def __init__(self):
         super().__init__()
@@ -75,6 +79,9 @@ class OpenLoopVehicle(FourStateVehicle):
         self._inputs[self._input_idx['phi']] = open_loop_controls[
             self._input_idx['phi']]
 
+    def _write_optimal_inputs(self, optimal_inputs):
+        self._inputs = optimal_inputs
+
     def _set_up_longitudinal_adjustments_control(
             self, vehicles: Dict[int, base.BaseVehicle]):
         pass
@@ -111,6 +118,9 @@ class SafeAccelOpenLoopLCVehicle(OpenLoopVehicle):
             self.long_controller.compute_acceleration(vehicles))
         self._inputs[self._input_idx['phi']] = open_loop_controls[0]
 
+    def _write_optimal_inputs(self, optimal_phi):
+        self._inputs[self._input_idx['phi']] = optimal_phi[0]
+
     def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]):
         self._leader_id[self._iter_counter] = (
             self.long_controller.get_more_critical_leader(vehicles))
@@ -140,21 +150,39 @@ class OptimalControlVehicle(FourStateVehicle):
     def reset_ocp_initial_time(self):
         self._ocp_initial_time = 0.0
 
-    def make_reset_copy(self, initial_state=None) -> OptimalControlVehicle:
-        """
-        Returns a copy of the vehicle with initial state equal the vehicle's
-        current state and with no memory. In addition, sets ocp_initial_time to
-        zero
-        :return:
-        """
-        new_vehicle = copy.deepcopy(self)
-        self._reset_copied_vehicle(new_vehicle, initial_state)
-        new_vehicle.reset_ocp_initial_time()
-        # TODO: temp solution to avoid looking for an optimal solution when we
-        #  just want to simulate an open loop system. Same code in
-        #  PlatoonVehicle class
-        new_vehicle.opt_controller._ocp_has_solution = True
-        return new_vehicle
+    # def make_reset_copy(self, initial_state=None) -> OCV:
+    #     """
+    #     Returns a copy of the vehicle with initial state equal the vehicle's
+    #     current state and with no memory. In addition, sets ocp_initial_time to
+    #     zero
+    #     :return:
+    #     """
+    #     # Old
+    #     # new_vehicle = copy.deepcopy(self)
+    #     # self._reset_copied_vehicle(new_vehicle, initial_state)
+    #
+    #     # New attempt
+    #     # vehicle_type = type(self)
+    #     # new_vehicle = vehicle_type()
+    #     # for attr_name in self.static_attribute_names:
+    #     #     setattr(new_vehicle, attr_name, getattr(self, attr_name))
+    #     # if initial_state is None:
+    #     #     initial_state = self.get_states()
+    #     # new_vehicle.copy_initial_state(initial_state)
+    #     # new_vehicle.target_lane = self.target_lane
+    #
+    #     # New attempt with super
+    #     new_vehicle = super().make_reset_copy(initial_state)
+    #     new_vehicle.reset_ocp_initial_time()
+    #     new_vehicle.opt_controller = copy.deepcopy(self.opt_controller)
+    #     # TODO: temp solution to avoid looking for an optimal solution when we
+    #     #  just want to simulate an open loop system. Same code in
+    #     #  PlatoonVehicle class
+    #     new_vehicle.opt_controller._ocp_has_solution = True
+    #     return new_vehicle
+
+    def make_open_loop_copy(self, initial_state=None):
+        return self.make_reset_copy(initial_state, OpenLoopVehicle)
 
     def get_intermediate_steps_data(self):
         return self.opt_controller.get_data_per_iteration()
@@ -251,6 +279,9 @@ class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
     def __init__(self):
         super().__init__()
         self._ocp_interface = SafeAccelVehicleInterface
+
+    def make_open_loop_copy(self, initial_state=None):
+        return self.make_reset_copy(initial_state, SafeAccelOpenLoopLCVehicle)
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
                           vehicles: Dict[int, base.BaseVehicle]):
@@ -408,15 +439,26 @@ class PlatoonVehicle(OptimalControlVehicle):
     _is_acceleration_optimal: bool
     _platoon: platoon.Platoon
 
+    static_attribute_names = FourStateVehicle.static_attribute_names.union(
+        {'_is_acceleration_optimal'}
+    )
+
     def __init__(self):
         super().__init__()
         self.set_mode(modes.PlatoonVehicleLaneKeepingMode())
 
-    def get_possible_target_leader_ids(self) -> List[int]:
-        ids = super().get_possible_target_leader_ids()
-        if self.is_in_a_platoon():
-            ids.append(self._platoon.get_preceding_vehicle_id(self.get_id()))
-        return ids
+    def make_open_loop_copy(self, initial_state=None):
+        if self._is_acceleration_optimal:
+            return self.make_reset_copy(initial_state, OpenLoopVehicle)
+        else:
+            return self.make_reset_copy(initial_state,
+                                        SafeAccelOpenLoopLCVehicle)
+
+    # def get_possible_target_leader_ids(self) -> List[int]:
+    #     ids = super().get_possible_target_leader_ids()
+    #     if self.is_in_a_platoon():
+    #         ids.append(self._platoon.get_preceding_vehicle_id(self.get_id()))
+    #     return ids
 
     def get_platoon(self):
         try:
@@ -440,27 +482,40 @@ class PlatoonVehicle(OptimalControlVehicle):
             self._ocp_interface = SafeAccelVehicleInterface
         self._is_acceleration_optimal = is_acceleration_optimal
 
-    def make_reset_copy(self, initial_state=None) -> PlatoonVehicle:
-        """
-        Returns a copy of the vehicle with initial state equal the vehicle's
-        current state and with no memory. In addition, sets ocp_initial_time to
-        zero and removes the vehicle from platoons.
-        :return:
-        """
-        # When we make a deepcopy of the vehicle, we copy the platoon, which
-        # has itself vehicles. This has two issues:
-        # 1. The vehicles in the copied platoons are not the vehicles being
-        # created.
-        # 2. The copied vehicles are no longer grouped in platoons (each one has
-        # its own platoon)
-        # The easiest solution is to have an empty platoon now and let the
-        # simulation figure out who goes in which platoons
-        new_vehicle = copy.deepcopy(self)
-        self._reset_copied_vehicle(new_vehicle, initial_state)
-        new_vehicle.reset_ocp_initial_time()
-        new_vehicle.opt_controller._ocp_has_solution = True
-        new_vehicle._platoon = None
-        return new_vehicle
+    # def make_reset_copy(self, initial_state=None) -> PlatoonVehicle:
+    #     """
+    #     Returns a copy of the vehicle with initial state equal the vehicle's
+    #     current state and with no memory. In addition, sets ocp_initial_time to
+    #     zero and removes the vehicle from platoons.
+    #     :return:
+    #     """
+    #     # When we make a deepcopy of the vehicle, we copy the platoon, which
+    #     # has itself vehicles. This has two issues:
+    #     # 1. The vehicles in the copied platoons are not the vehicles being
+    #     # created.
+    #     # 2. The copied vehicles are no longer grouped in platoons (each one has
+    #     # its own platoon)
+    #     # The easiest solution is to have an empty platoon now and let the
+    #     # simulation figure out who goes in which platoons
+    #     # new_vehicle = copy.deepcopy(self)
+    #     # self._reset_copied_vehicle(new_vehicle, initial_state)
+    #
+    #     # vehicle_type = type(self)
+    #     # new_vehicle = vehicle_type()
+    #     # for attr_name in self.static_attribute_names:
+    #     #     setattr(new_vehicle, attr_name, getattr(self, attr_name))
+    #     # if initial_state is None:
+    #     #     initial_state = self.get_states()
+    #     # new_vehicle.copy_initial_state(initial_state)
+    #     # new_vehicle.target_lane = self.target_lane
+    #
+    #     # New attempt with super
+    #     new_vehicle = super().make_reset_copy(initial_state)
+    #
+    #     # new_vehicle.reset_ocp_initial_time()
+    #     # new_vehicle.opt_controller._ocp_has_solution = True
+    #     # new_vehicle._platoon = None
+    #     return new_vehicle
 
     def set_platoon(self, new_platoon: platoon.Platoon) -> None:
         self._platoon = new_platoon
@@ -576,12 +631,26 @@ class PlatoonVehicle(OptimalControlVehicle):
         #             leader_platoon.add_vehicle(self)
         #             self.set_platoon(leader_platoon)
 
-    def _create_platoon(self):
+    def join_centrally_controlled_platoon(
+            self, vehicles: Dict[int, base.BaseVehicle]) -> None:
+        # Find the "central" platoon
+        central_platoon = None
+        for veh in vehicles.values():
+            if veh.is_in_a_platoon():
+                central_platoon = veh.get_platoon()
+                break
+        if central_platoon is None:
+            self._create_platoon()
+        else:
+            central_platoon.add_vehicle(self)
+            self.set_platoon(central_platoon)
+
+    def _create_platoon(self) -> None:
         self.set_platoon(platoon.Platoon(self))
         # platoons[new_platoon.id] = new_platoon
         # self._platoon
 
-    def _write_optimal_inputs(self, optimal_inputs):
+    def _write_optimal_inputs(self, optimal_inputs) -> None:
         if self._is_acceleration_optimal:
             self._inputs = optimal_inputs
         else:
@@ -704,3 +773,6 @@ class SafeLongitudinalVehicleInterface(ClosedLoopVehicleInterface):
     # def determine_inputs(self, ego_states, optimal_inputs, leader_states):
     #     return (self.compute_acceleration(ego_states, leader_states),
     #             0.0)
+
+
+OCV = TypeVar('V', bound=OptimalControlVehicle)

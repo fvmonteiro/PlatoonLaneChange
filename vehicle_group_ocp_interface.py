@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import warnings
+from functools import partial
 from typing import Callable, Dict, List
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -23,7 +24,7 @@ def update_vehicles(t, states, inputs, params):
     vehicle_group_interface: VehicleGroupInterface = (
         params['vehicle_group_interface']
     )
-    vehicle_group_interface.update_surrounding_vehicles(t)
+    # vehicle_group_interface.update_surrounding_vehicles(t)
     return vehicle_group_interface.update_vehicles(states, inputs)
 
 
@@ -75,6 +76,14 @@ class VehicleGroupInterface:
             desired_inputs.extend(veh_desired_inputs)
         return desired_inputs
 
+    def get_desired_input_per_vehicle(self):
+        desired_inputs = {}
+        for veh_id in self.sorted_vehicle_ids:
+            vehicle = self.vehicles[veh_id]
+            veh_desired_inputs = vehicle.get_desired_input()
+            desired_inputs[veh_id] = veh_desired_inputs
+        return desired_inputs
+
     def get_initial_state(self):
         """
         Gets all vehicles' current states, which are used as the starting
@@ -83,7 +92,7 @@ class VehicleGroupInterface:
         initial_state = []
         for veh_id in self.sorted_vehicle_ids:
             initial_state.extend(self.vehicles[veh_id].get_initial_state())
-        return np.array(initial_state)
+        return np.array(initial_state + [0.])  # time is the last state
 
     # def get_initial_guess(self, time_points: np.ndarray):
     #     # estimated_safe_time: float):
@@ -141,6 +150,10 @@ class VehicleGroupInterface:
         vehicle = self.vehicles[veh_id]
         return vehicle.select_input_from_vector(vehicle_inputs, input_name)
 
+    @staticmethod
+    def get_time(states):
+        return states[-1]
+
     def set_mode_sequence(self, mode_sequence: som.ModeSequence):
         sv_sequences = som.mode_sequence_to_sv_sequence(mode_sequence)
         for foll_id, sequence in sv_sequences.items():
@@ -181,6 +194,7 @@ class VehicleGroupInterface:
             self.input_idx_map[veh_id] = self.n_inputs
             self.n_states += vehicle_interface.n_states
             self.n_inputs += vehicle_interface.n_inputs
+        self.n_states += 1  # time
         self.n_vehs = len(self.vehicles)
 
     def create_output_names(self) -> List[str]:
@@ -190,7 +204,7 @@ class VehicleGroupInterface:
             str_id = str(veh_id)
             output_names.extend([name + str_id for name
                                  in vehicle.state_names])
-        return output_names
+        return output_names + ['time']
 
     def create_desired_state(self, tf: float):
         """
@@ -212,7 +226,7 @@ class VehicleGroupInterface:
             yf = veh.get_target_y()
             thetaf = 0.0
             desired_state.extend(veh.create_state_vector(xf, yf, thetaf, vf))
-        return np.array(desired_state)
+        return np.array(desired_state + [0.])  # time is the last state
 
     def create_state_cost_matrix(self, x_cost: float = 0, y_cost: float = 0,
                                  theta_cost: float = 0, v_cost: float = 0):
@@ -241,7 +255,7 @@ class VehicleGroupInterface:
                 veh_costs.extend(self.vehicles[veh_id].create_state_vector(
                     x_cost, y_cost, theta_cost, v_cost))
 
-        return np.diag(veh_costs)
+        return np.diag(veh_costs + [0.])  # time is the last state
 
     def create_input_cost_matrix(self, accel_cost: float = 0,
                                  phi_cost: float = 0, ):
@@ -268,9 +282,9 @@ class VehicleGroupInterface:
 
         return np.diag(veh_costs)
 
-    def update_surrounding_vehicles(self, time: float):
-        for veh_id in self.sorted_vehicle_ids:
-            self.vehicles[veh_id].set_time_interval(time)
+    # def update_surrounding_vehicles(self, time: float):
+    #     for veh_id in self.sorted_vehicle_ids:
+    #         self.vehicles[veh_id].set_time_interval(time)
 
     def update_vehicles(self, states, inputs):
         """
@@ -286,14 +300,15 @@ class VehicleGroupInterface:
                                                              states)
             ego_inputs = self.get_vehicle_inputs_vector_by_id(
                 vehicle.get_id(), inputs)
-            if vehicle.has_leader():
+            t = self.get_time(states)
+            if vehicle.has_leader(t):
                 leader_states = self.get_vehicle_state_vector_by_id(
-                    vehicle.get_current_leader_id(), states)
+                    vehicle.get_current_leader_id(t), states)
             else:
                 leader_states = None
             dxdt.extend(vehicle.compute_derivatives(ego_states, ego_inputs,
                                                     leader_states))
-        return np.array(dxdt)
+        return np.array(dxdt + [1])  # time is the last state
 
     def cost_function(self, controlled_veh_ids: List[int]) -> Callable:
         tf = 0.0  # only relevant for desired final position
@@ -310,6 +325,7 @@ class VehicleGroupInterface:
                                           phi_cost=0.)
 
         def support(states, inputs):
+            t = self.get_time(states)
             w_eg = 1.  # gap error weight
             cost = ((states - x_ref) @ Q @ (states - x_ref)
                     + (inputs - u_ref) @ R @ (inputs - u_ref)).item()
@@ -317,7 +333,7 @@ class VehicleGroupInterface:
             for ego_id in controlled_veh_ids:
                 ego_veh = self.vehicles[ego_id]
                 gap_error = self.compute_gap_error(
-                    states, ego_id, ego_veh.get_dest_lane_follower_id(),
+                    states, ego_id, ego_veh.get_dest_lane_follower_id(t),
                     True)
                 eg_cost.append(w_eg * min(gap_error, 0) ** 2)
             cost += sum(eg_cost)
@@ -342,19 +358,20 @@ class VehicleGroupInterface:
         ego_veh = self.vehicles[ego_id]
 
         def support(states, inputs):
+            t = self.get_time(states)
             gap_errors = [
                 self.compute_gap_error(
-                    states, ego_id, ego_veh.get_orig_lane_leader_id(),
+                    states, ego_id, ego_veh.get_orig_lane_leader_id(t),
                     False),
                 self.compute_gap_error(
-                    states, ego_id, ego_veh.get_dest_lane_leader_id(),
+                    states, ego_id, ego_veh.get_dest_lane_leader_id(t),
                     False),
                 self.compute_gap_error(
-                    states, ego_id, ego_veh.get_dest_lane_follower_id(),
+                    states, ego_id, ego_veh.get_dest_lane_follower_id(t),
                     True)
             ]
             phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
-            margin = 1e-1
+            margin = 1e-3
             min_sum = np.sum([min(ge + margin, 0) ** 2
                               # self._smooth_min_0(ge + margin)
                               for ge in gap_errors])
@@ -366,13 +383,17 @@ class VehicleGroupInterface:
         ego_veh = self.vehicles[ego_id]
 
         def support(states, inputs):
-            if ego_veh.has_orig_lane_leader():
+            t = self.get_time(states)
+            if ego_veh.has_orig_lane_leader(t):
                 gap_error = self.compute_gap_error(
-                    states, ego_id, ego_veh.get_orig_lane_leader_id(), False)
-                return gap_error  # min(gap_error, 0) ** 2
-            return 0.0
+                    states, ego_id, ego_veh.get_orig_lane_leader_id(t), False)
+                return gap_error
+            return 1.0e-3  # anything greater or equal to zero
 
         return support
+        # return partial(self.compute_gap_error, ego_id=ego_id,
+        #                other_id=ego_veh.get_orig_lane_leader_id(),
+        #                is_other_behind=False)
 
     def compute_gap_error(self, states, ego_id, other_id, is_other_behind):
         if other_id < 0:  # no risk

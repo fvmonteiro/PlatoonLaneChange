@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import copy
-from typing import Dict, Iterable, List, Tuple, Type, Union
+from typing import Dict, Iterable, List, TypeVar, Type, Union
 import warnings
 
 import numpy as np
@@ -16,6 +16,15 @@ import vehicle_operating_modes.base_operating_modes as modes
 class BaseVehicle(ABC):
     _counter = 0
 
+    free_flow_speed: float
+    initial_state: np.ndarray
+    target_lane: int
+    state_names: List[str]
+    input_names: List[str]
+    _n_states: int
+    _n_inputs: int
+    _state_idx: Dict[str, int]
+    _input_idx: Dict[str, int]
     _time: np.ndarray
     _states: np.ndarray
     _inputs: np.ndarray
@@ -34,22 +43,24 @@ class BaseVehicle(ABC):
     _long_adjust_start_time: float
     _lc_start_time: float
 
+    # Used when we need to copy a vehicle
+    static_attribute_names = {
+        'free_flow_speed', '_id', '_name', 'lr', 'lf', '_wheelbase',
+        'phi_max', 'h', 'safe_h', 'h', 'c', '_is_connected', '_is_verbose',
+    }
+
     def __init__(self):
         """
 
         """
 
-        self.free_flow_speed = None
-        self.initial_state = None
-        self.target_lane = None
+        # self.free_flow_speed = None
+        # self.initial_state = None
+        # self.target_lane = None
         # self.target_y = None
-        self.state_names, self.input_names = None, None
-        self._n_states, self._n_inputs = None, None
-        self._state_idx, self._input_idx = {}, {}
-        # self._desired_future_follower_id = -1
-        # self._long_adjust_start_time = -np.inf
-        # self._lc_start_time = -np.inf
-        # self._platoon = None
+        # self.state_names, self.input_names = None, None
+        # self._n_states, self._n_inputs = None, None
+        # self._state_idx, self._input_idx = {}, {}
 
         # Some parameters
         self._id: int = BaseVehicle._counter
@@ -81,6 +92,12 @@ class BaseVehicle(ABC):
     @staticmethod
     def reset_vehicle_counter():
         BaseVehicle._counter = 0
+
+    @staticmethod
+    def copy_from_other(vehicle_to: BaseVehicle, vehicle_from: BaseVehicle):
+        for attr_name in vehicle_from.static_attribute_names:
+            setattr(vehicle_to, attr_name, getattr(vehicle_from, attr_name))
+        vehicle_to.copy_initial_state(vehicle_from.get_states())
 
     def get_id(self) -> int:
         return self._id
@@ -120,6 +137,9 @@ class BaseVehicle(ABC):
 
     def get_state_history(self) -> np.ndarray:
         return self._states_history
+
+    def get_inputs(self) -> np.ndarray:
+        return self._inputs.copy()
 
     def get_input_history(self) -> np.ndarray:
         return self._inputs_history
@@ -179,29 +199,56 @@ class BaseVehicle(ABC):
 
     # TODO: figure out more descriptive name. This is a copy used for iterative
     #  simulations
-    def make_reset_copy(self, initial_state=None
-                        ) -> BaseVehicle:
+    def make_reset_copy(self, initial_state=None,
+                        new_vehicle_type: Type[BaseVehicle] = None) -> V:
         """
-        Returns a copy of the vehicle with initial state equal the vehicle's
-        current state and with no memory.
+        Creates copies of vehicles used in internal iterations of our optimal
+        controller. For vehicles without optimal control, the method returns
+        an "empty" copy of the vehicle (without any state history). For
+        vehicles with optimal control, the method returns the equivalent
+        open loop type vehicle.
+        :param initial_state: If None, sets the new vehicle's initial state
+        equal to the most recent state of this instance
+        :param new_vehicle_type: If None, the new vehicle is of the same type
+        as this instance
         :return:
         """
-        new_vehicle = copy.deepcopy(self)
-        self._reset_copied_vehicle(new_vehicle, initial_state)
+        # new_vehicle = copy.deepcopy(self)
+        # self._reset_copied_vehicle(new_vehicle, initial_state)
+        if new_vehicle_type is None:
+            new_vehicle_type = type(self)
+        new_vehicle = new_vehicle_type()
+        for attr_name in self.static_attribute_names:
+            setattr(new_vehicle, attr_name, getattr(self, attr_name))
+        if initial_state is None:
+            initial_state = self.get_states()
+        new_vehicle.copy_initial_state(initial_state)
+        new_vehicle.target_lane = self.target_lane
         return new_vehicle
+
+    def make_open_loop_copy(self, initial_state=None) -> V:
+        """
+        Creates copies of vehicles used in internal iterations of our optimal
+        controller. For vehicles without optimal control, the method returns
+        an "empty" copy of the vehicle (without any state history). For
+        vehicles with optimal control, the method returns the equivalent
+        open loop type vehicle.
+        :return:
+        """
+        return self.make_reset_copy(initial_state, type(self))
 
     def _reset_copied_vehicle(self, new_vehicle: BaseVehicle,
                               initial_state=None):
         if initial_state is None:
             initial_state = self.get_states()
-        x = initial_state[self._state_idx['x']]
-        y = initial_state[self._state_idx['y']]
-        theta = initial_state[self._state_idx['theta']]
-        try:
-            v = initial_state[self._state_idx['v']]
-        except KeyError:
-            v = None
-        new_vehicle.set_initial_state(x, y, theta, v)
+        # x = initial_state[self._state_idx['x']]
+        # y = initial_state[self._state_idx['y']]
+        # theta = initial_state[self._state_idx['theta']]
+        # try:
+        #     v = initial_state[self._state_idx['v']]
+        # except KeyError:
+        #     v = None
+        new_vehicle.copy_initial_state(initial_state)
         new_vehicle.target_lane = self.target_lane
         new_vehicle.reset_simulation_logs()
 
@@ -219,6 +266,14 @@ class BaseVehicle(ABC):
         self.initial_state = self.create_state_vector(x, y, theta, v)
         self._states = self.initial_state
         self.target_lane = self.get_current_lane()
+
+    def copy_initial_state(self, initial_state: np.ndarray):
+        if len(initial_state) != self._n_states:
+            raise ValueError('Wrong size of initial state vector ({} instead'
+                             'of {})'.format(len(initial_state),
+                                             self._n_states))
+        self.initial_state = initial_state
+        self._states = self.initial_state
 
     def set_mode(self, mode: modes.VehicleMode):
         if self._is_verbose:
@@ -249,6 +304,7 @@ class BaseVehicle(ABC):
         self._time[self._iter_counter] = time
         self._states = states
         self._states_history[:, self._iter_counter] = self._states
+        self._inputs = np.zeros(self._n_inputs)
         if len(optimal_inputs) > 0:
             self._write_optimal_inputs(optimal_inputs)
         self._inputs_history[:, self._iter_counter] = self._inputs
@@ -385,6 +441,10 @@ class BaseVehicle(ABC):
         self._incoming_vehicle_id[self._iter_counter] = new_incoming_vehicle_id
 
     def analyze_platoons(self, vehicles: Dict[int, BaseVehicle]):
+        pass
+
+    def join_centrally_controlled_platoon(self,
+                                          vehicles: Dict[int, BaseVehicle]):
         pass
 
     def request_cooperation(self):
@@ -604,20 +664,30 @@ class BaseVehicle(ABC):
 #  vehicles and their interfaces with the opc solver
 class BaseVehicleInterface(ABC):
 
+    state_names: List[str]
+    n_states: int
+    input_names: List[str]
+    n_inputs: int
+    state_idx: Dict[str, int]
+    optimal_input_idx: Dict[str, int]
+
     def __init__(self, vehicle: BaseVehicle):
         """
 
         """
-        self.state_names, self.n_states = None, None
-        self.input_names, self.n_inputs = None, None
-        self.state_idx, self.optimal_input_idx = {}, {}
+        # self.state_names, self.n_states = None, None
+        # self.input_names, self.n_inputs = None, None
+        # self.state_idx, self.optimal_input_idx = {}, {}
+        self._time: float = 0.
 
         # Copy values from the vehicle
+        # for attr_name in vehicle.static_attribute_names:
+        #     setattr(self, attr_name, getattr(vehicle, attr_name))
         self._id: int = vehicle.get_id()
         self._name: str = vehicle.get_name()
         self.lr: float = vehicle.lr  # dist from C.G. to rear wheel
         self.lf: float = vehicle.lf  # dist from C.G. to front wheel
-        self.wheelbase: float = self.lr + self.lf
+        self._wheelbase: float = self.lr + self.lf
         self.phi_max: float = vehicle.phi_max  # max steering wheel angle
         self.safe_h: float = vehicle.safe_h
         self.c: float = vehicle.c  # standstill distance [m]
@@ -661,22 +731,29 @@ class BaseVehicleInterface(ABC):
     def get_y0(self):
         return self.select_state_from_vector(self._initial_state, 'y')
 
-    def get_orig_lane_leader_id(self):
+    def get_orig_lane_leader_id(self, time: float):
         if len(self.ocp_origin_leader_sequence) == 0:
             return self._origin_leader_id
-        return self.ocp_origin_leader_sequence[self._interval_number]
+        if time is None:  # TODO: testing
+            return self.ocp_origin_leader_sequence[self._interval_number]
+        idx = np.searchsorted(self.ocp_mode_switch_times, time,
+                              side='right')
+        interval_number = idx - 1
+        return self.ocp_origin_leader_sequence[interval_number]
 
-    def get_dest_lane_leader_id(self):
+    def get_dest_lane_leader_id(self, time: float):
         if len(self.ocp_destination_leader_sequence) == 0:
             return self._destination_leader_id
+        self.set_time_interval(time)
         return self.ocp_destination_leader_sequence[self._interval_number]
 
-    def get_dest_lane_follower_id(self):
+    def get_dest_lane_follower_id(self, time: float):
         if len(self.ocp_destination_follower_sequence) == 0:
             return self._destination_follower_id
+        self.set_time_interval(time)
         return self.ocp_destination_follower_sequence[self._interval_number]
 
-    def get_current_leader_id(self) -> int:
+    def get_current_leader_id(self, time: float) -> int:
         """
         The 'current' leader is the vehicle being used to define this vehicle's
          acceleration
@@ -684,24 +761,25 @@ class BaseVehicleInterface(ABC):
         """
         if len(self.ocp_target_leader_sequence) == 0:
             return self._leader_id
+        self.set_time_interval(time)
         return self.ocp_target_leader_sequence[self._interval_number]
 
-    def has_orig_lane_leader(self):
-        return self.get_orig_lane_leader_id() >= 0
+    def has_orig_lane_leader(self, time: float) -> bool:
+        return self.get_orig_lane_leader_id(time) >= 0
 
-    def has_dest_lane_leader(self):
-        return self.get_dest_lane_leader_id() >= 0
+    def has_dest_lane_leader(self, time: float) -> bool:
+        return self.get_dest_lane_leader_id(time) >= 0
 
-    def has_dest_lane_follower(self):
-        return self.get_dest_lane_follower_id() >= 0
+    def has_dest_lane_follower(self, time: float) -> bool:
+        return self.get_dest_lane_follower_id(time) >= 0
 
-    def has_leader(self) -> bool:
-        return self.get_current_leader_id() >= 0
+    def has_leader(self, time: float) -> bool:
+        return self.get_current_leader_id(time) >= 0
 
     def get_target_y(self) -> float:
         return self.target_lane * const.LANE_WIDTH
 
-    def is_long_control_optimal(self):
+    def is_long_control_optimal(self) -> bool:
         return 'a' in self.input_names or 'v' in self.input_names
 
     def set_leader_sequence(self, leader_sequence: som.SVSequence
@@ -748,9 +826,11 @@ class BaseVehicleInterface(ABC):
         #             self._interval_number + 1]):
         #     self._interval_number += 1
         # Old approach: search every time
-        idx = np.searchsorted(self.ocp_mode_switch_times, time,
-                              side='right')
-        self._interval_number = idx - 1
+        if not np.isclose(self._time, time):
+            self._time = time
+            idx = np.searchsorted(self.ocp_mode_switch_times, time,
+                                  side='right')
+            self._interval_number = idx - 1
 
     def create_state_vector(self, x: float, y: float, theta: float,
                             v: float = None) -> np.ndarray:
@@ -826,7 +906,7 @@ class BaseVehicleInterface(ABC):
         derivatives[self.state_idx['x']] = vel * np.cos(theta)
         derivatives[self.state_idx['y']] = vel * np.sin(theta)
         derivatives[self.state_idx['theta']] = (vel * np.tan(phi)
-                                                / self.wheelbase)
+                                                / self._wheelbase)
 
     def to_dataframe(self, time, states, inputs):
         data = np.concatenate([time.reshape(1, -1), states, inputs])
@@ -885,6 +965,10 @@ class BaseVehicleInterface(ABC):
         self.n_inputs = len(input_names)
         self.input_names = input_names
         self.state_idx = {state_names[i]: i for i in range(self.n_states)}
-        self.optimal_input_idx = {input_names[i]: i for i in range(self.n_inputs)}
+        self.optimal_input_idx = {input_names[i]: i for i in
+                                  range(self.n_inputs)}
         self._states = np.zeros(self.n_states)
         self._derivatives = np.zeros(self.n_states)
+
+
+V = TypeVar('V', bound=BaseVehicle)

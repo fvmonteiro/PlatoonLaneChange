@@ -26,17 +26,18 @@ class OCPCostTracker:
     def __init__(
             self, time_points: np.ndarray, n_states: int,
             running_cost: Callable, terminal_cost: Callable = None,
-            constraints: List[Union[LinearConstraint, NonlinearConstraint]]
-            = None, max_iterations: int = None
+            max_iterations: int = None
     ):
         self._time_points = time_points
         self._n_states = n_states
         self._running_cost_fun = running_cost
         self._terminal_cost_fun = terminal_cost
-        self._set_constraints_(constraints)
         self._max_iterations = max_iterations
 
         self._n_time_points: int = len(time_points)
+        self._linear_constraints = []
+        self._lc_absolute_tolerance = []
+        self._non_linear_constraints = []
         self._current_call_costs: np.ndarray = np.zeros(self._n_time_points)
         self._call_counter: int = 0
         # One list of costs/states/inputs for each time we call the ocp solver
@@ -269,7 +270,7 @@ class OCPCostTracker:
 
         return states, inputs
 
-    def _set_constraints_(self, constraints):
+    def set_constraints(self, constraints):
         self._linear_constraints = []
         self._lc_absolute_tolerance = []
         self._non_linear_constraints = []

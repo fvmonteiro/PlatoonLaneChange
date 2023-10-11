@@ -225,7 +225,7 @@ def plot_platoon_lane_change(data: pd.DataFrame):
     fig.set_size_inches(12, 8)
     # TODO: veh pairs depend on the scenario
     plot_gap_errors(data, {'p1': ['ld1', 'lo1', 'fd1'],
-                           # 'p2': ['p1', 'ld1']
+                           'p2': ['p1', 'ld1']
                            },
                     ax[0])
     plot_scenario_results(x_axes, y_axes, data, ax[1:])
@@ -339,10 +339,11 @@ def plot_scenario_results(x_axes: List[str], y_axes: List[str],
     if axs is None:
         fig, ax = plt.subplots(len(y_axes))
     else:
+        fig = None
         ax = axs
 
-    final_t = data['t'].max()
     for i, (x, y) in enumerate(zip(x_axes, y_axes)):
+        final_x = data[x].max()
         show_legend = True if i == len(x_axes) - 1 else False
         sns.lineplot(data, x=x, y=y, hue='name', ax=ax[i], palette='tab10',
                      legend=show_legend)
@@ -351,7 +352,7 @@ def plot_scenario_results(x_axes: List[str], y_axes: List[str],
             low, high = np.floor(low - 0.5), np.ceil(high + 0.5)
         ax[i].set(xlabel=_get_variable_with_unit(x),
                   ylabel=_get_variable_with_unit(y),
-                  xlim=(0, final_t), ylim=(low, high))
+                  xlim=(0, final_x), ylim=(low, high))
 
     if axs is None:
         fig.tight_layout()
