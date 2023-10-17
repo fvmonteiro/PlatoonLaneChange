@@ -35,9 +35,6 @@ class SystemMode:
     def __str__(self):
         pairs = []
         for ego_id, surrounding_ids in self.mode.items():
-            # pairs.append(self.id_to_name_map[ego_id] + '->'
-            #              + (self.id_to_name_map[surrounding_ids]
-            #                 if surrounding_ids > -1 else ' '))
             surrounding_names = {name: self.id_to_name_map[veh_id]
                                  for name, veh_id in surrounding_ids.items()
                                  # if veh_id > -1
@@ -48,38 +45,42 @@ class SystemMode:
         res = ', '.join(pairs)
         return '{' + res + '}'
 
-    # def create_altered_mode(
-    #         self, follower_leader_pairs: List[Tuple[str, Union[str, None]]]
-    # ) -> SystemMode:
-    #     """
-    #     Creates another SystemMode instance similar to the original one
-    #     except for the given follower/leader pair
-    #     :param follower_leader_pairs:
-    #     :return:
-    #     """
-    #     new_mode = copy.deepcopy(self)
-    #     name_to_id: Dict[str, int] = {}
-    #     for veh_id, veh_name in self.id_to_name_map.items():
-    #         name_to_id[veh_name] = veh_id
-    #     for follower, leader in follower_leader_pairs:
-    #         foll_id = name_to_id[follower]
-    #         lead_id = name_to_id[leader] if leader is not None else -1
-    #         new_mode.mode[foll_id] = lead_id
-    #     return new_mode
+    def create_altered_mode(
+            self, ego_surrounding_map: Dict[str, Dict[str, str]]
+    ) -> SystemMode:
+        """
+        Creates another SystemMode instance similar to the original one
+        except for the given follower/leader pair
+        :param ego_surrounding_map:
+        :return:
+        """
+        new_mode = copy.deepcopy(self)
+        # Get id per name
+        name_to_id: Dict[str, int] = {}
+        for veh_id, veh_name in self.id_to_name_map.items():
+            name_to_id[veh_name] = veh_id
+        # Change only the requested pairs
+        for ego, surrounding_veh_map in ego_surrounding_map.items():
+            ego_id = name_to_id[ego]
+            for surrounding_pos, veh_name in surrounding_veh_map.items():
+                surrounding_veh_id = name_to_id[veh_name]
+                new_mode.mode[ego_id][surrounding_pos] = surrounding_veh_id
+        return new_mode
 
 
 # Aliases for easier typing hints
 ModeSequence = List[Tuple[float, SystemMode]]
 # Surrounding Vehicle Sequence:
-# a sequence of times and the surrounding vehs at each time
+# a sequence of times and the surrounding vehicles at each time
 SVSequence = List[Tuple[float, Dict[str, int]]]
 
-# def append_mode_to_sequence(input_sequence: ModeSequence, time: float,
-#                             follower_leader_changes: List[Tuple[str, str]]
-#                             ) -> None:
-#     last_mode = input_sequence[-1][1]
-#     new_mode = last_mode.create_altered_mode(follower_leader_changes)
-#     input_sequence.append((time, new_mode))
+
+def append_mode_to_sequence(input_sequence: ModeSequence, time: float,
+                            follower_leader_changes: Dict[str, Dict[str, str]]
+                            ) -> None:
+    last_mode = input_sequence[-1][1]
+    new_mode = last_mode.create_altered_mode(follower_leader_changes)
+    input_sequence.append((time, new_mode))
 
 
 def mode_sequence_to_sv_sequence(mode_sequence: ModeSequence

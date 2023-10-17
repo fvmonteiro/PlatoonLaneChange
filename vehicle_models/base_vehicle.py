@@ -734,12 +734,8 @@ class BaseVehicleInterface(ABC):
     def get_orig_lane_leader_id(self, time: float):
         if len(self.ocp_origin_leader_sequence) == 0:
             return self._origin_leader_id
-        if time is None:  # TODO: testing
-            return self.ocp_origin_leader_sequence[self._interval_number]
-        idx = np.searchsorted(self.ocp_mode_switch_times, time,
-                              side='right')
-        interval_number = idx - 1
-        return self.ocp_origin_leader_sequence[interval_number]
+        self.set_time_interval(time)
+        return self.ocp_origin_leader_sequence[self._interval_number]
 
     def get_dest_lane_leader_id(self, time: float):
         if len(self.ocp_destination_leader_sequence) == 0:
@@ -931,7 +927,11 @@ class BaseVehicleInterface(ABC):
         pass
 
     @abstractmethod
-    def get_desired_input(self) -> List[float]:
+    def get_desired_input(self) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def get_initial_input_guess(self) -> np.ndarray:
         pass
 
     @abstractmethod

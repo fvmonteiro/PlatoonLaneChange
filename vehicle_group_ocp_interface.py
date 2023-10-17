@@ -68,21 +68,29 @@ class VehicleGroupInterface:
             upper_bounds.extend(veh_upper_input)
         return lower_bounds, upper_bounds
 
-    def get_desired_input(self):
+    def get_desired_input(self) -> np.ndarray:
         desired_inputs = []
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
             veh_desired_inputs = vehicle.get_desired_input()
             desired_inputs.extend(veh_desired_inputs)
-        return desired_inputs
+        return np.array(desired_inputs)
 
-    def get_desired_input_per_vehicle(self):
-        desired_inputs = {}
+    def get_initial_inputs_guess(self) -> np.ndarray:
+        initial_guess = []
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
-            veh_desired_inputs = vehicle.get_desired_input()
-            desired_inputs[veh_id] = veh_desired_inputs
-        return desired_inputs
+            veh_desired_inputs = vehicle.get_initial_input_guess()
+            initial_guess.extend(veh_desired_inputs)
+        return np.array(initial_guess)
+
+    def get_initial_input_guess_per_vehicle(self) -> Dict[int, np.ndarray]:
+        initial_guess = {}
+        for veh_id in self.sorted_vehicle_ids:
+            vehicle = self.vehicles[veh_id]
+            veh_desired_inputs = vehicle.get_initial_input_guess()
+            initial_guess[veh_id] = veh_desired_inputs
+        return initial_guess
 
     def get_initial_state(self):
         """
@@ -375,6 +383,7 @@ class VehicleGroupInterface:
             min_sum = np.sum([min(ge + margin, 0) ** 2
                               # self._smooth_min_0(ge + margin)
                               for ge in gap_errors])
+            # theta = self.get_a_vehicle_state_by_id(ego_id, states, 'theta')
             return min_sum * phi
 
         return support

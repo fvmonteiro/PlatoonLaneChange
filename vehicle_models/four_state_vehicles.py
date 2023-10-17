@@ -28,8 +28,8 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     def __init__(self):
         super().__init__()
         self._set_model(self._state_names, self._input_names)
-        self.brake_max = -4
-        self.accel_max = 2
+        self.brake_max = -4.0
+        self.accel_max = 2.0
 
         # Controllers
         self.lk_controller: lat_ctrl.LaneKeepingController = (
@@ -692,6 +692,10 @@ class OpenLoopVehicleInterface(FourStateVehicleInterface):
     def get_input_limits(self) -> (List[float], List[float]):
         return [self.brake_max, -self.phi_max], [self.accel_max, self.phi_max]
 
+    def get_initial_input_guess(self) -> np.ndarray:
+        # return np.array([0., 0.])
+        return np.array([self.accel_max, 0.])
+
     # def determine_inputs(self, ego_states, optimal_inputs, leader_states):
     #     return (optimal_inputs[self.optimal_input_idx['a']],
     #             optimal_inputs[self.optimal_input_idx['phi']])
@@ -714,6 +718,9 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
     def get_input_limits(self) -> (List[float], List[float]):
         return [-self.phi_max], [self.phi_max]
 
+    def get_initial_input_guess(self) -> np.ndarray:
+        return self.get_desired_input()
+
     # def determine_inputs(self, ego_states, optimal_inputs, leader_states):
     #     return (self.compute_acceleration(ego_states, leader_states),
     #             optimal_inputs[self.optimal_input_idx['phi']])
@@ -726,7 +733,11 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
         v_ego = self.select_state_from_vector(ego_states, 'v')
         v_ff = self.free_flow_speed
         if leader_states is None or len(leader_states) == 0:
+            # TODO [Oct 16] testing limits on accel
             return self.long_controller.compute_velocity_control(v_ff, v_ego)
+            # accel = self.long_controller.compute_velocity_control(
+            #     v_ff, v_ego)
+            # return max(self.brake_max, min(self.accel_max, accel))
         else:
             gap = (self.select_state_from_vector(leader_states, 'x')
                    - self.select_state_from_vector(ego_states, 'x'))
@@ -749,7 +760,8 @@ class ClosedLoopVehicleInterface(SafeAccelVehicleInterface):
         super().__init__(vehicle)
         # self._set_model(self._state_names, self._input_names)
 
-    def select_input_from_vector(self, optimal_inputs: List, input_name: str) -> float:
+    def select_input_from_vector(self, optimal_inputs: List, input_name: str
+                                 ) -> float:
         return 0.0  # all inputs are computed internally
 
     def get_input_limits(self) -> (List[float], List[float]):
@@ -775,4 +787,4 @@ class SafeLongitudinalVehicleInterface(ClosedLoopVehicleInterface):
     #             0.0)
 
 
-OCV = TypeVar('V', bound=OptimalControlVehicle)
+# OCV = TypeVar('OCV', bound=OptimalControlVehicle)

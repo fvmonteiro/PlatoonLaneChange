@@ -42,6 +42,8 @@ def configure_optimal_controller(
     :param has_lateral_constraint: Whether to include a constraint to keep the
      lane changing vehicles between y(t0)-1 and y(tf)+1. This can sometimes
      speed up simulations or prevent erratic behavior
+    :param estimate_gradient: Allow the optimizer to estimate the gradient
+     or provide analytical cost gradient
     :return:
     """
     if max_iter:
@@ -206,6 +208,9 @@ class VehicleOptimalController:
         """
 
         input_sequence: som.ModeSequence = [(0.0, som.SystemMode(vehicles))]
+        # som.append_mode_to_sequence(input_sequence, 1.0,
+        #                             {#'p1': {'fd': 'x'},
+        #                              'fd1': {'lo': 'p1', 'leader': 'p1'}})
 
         # We put the vehicle below at the origin (0, 0) when solving the opc
         # to make the solution independent of shifts in initial position
@@ -219,7 +224,8 @@ class VehicleOptimalController:
         self._create_cost_with_tracker(controlled_veh_ids)
 
         converged = False
-        initial_guess = None  # self.create_initial_guess(vehicles)
+        initial_guess = None
+        # initial_guess = self.create_initial_guess(vehicles)
         counter = 0
         while not converged and counter < self.max_iter:
             counter += 1
@@ -236,22 +242,22 @@ class VehicleOptimalController:
 
             # Just checking what the optimizer "sees"
             alt = self.get_ocp_solver_simulation(vehicles)
-            # if len(alt.get_platoon_vehicles()) == 1:  # TODO: also temp checking
-            #     analysis.plot_constrained_lane_change(
-            #         alt.to_dataframe(), vehicles[center_veh_id].get_id())
-            # else:
-            analysis.plot_platoon_lane_change(alt.to_dataframe())
+            if len(alt.get_platoon_vehicles()) == 1:  # TODO: also temp checking
+                analysis.plot_constrained_lane_change(
+                    alt.to_dataframe(), vehicles[center_veh_id].get_id())
+            else:
+                analysis.plot_platoon_lane_change(alt.to_dataframe())
 
             simulated_vehicle_group = self.simulate_over_optimization_horizon(
                 vehicles)
             self._data_per_iteration.append(
                 simulated_vehicle_group.to_dataframe())
-            # if len(simulated_vehicle_group.get_platoon_vehicles()) == 1:
-            #     analysis.plot_constrained_lane_change(
-            #         self._data_per_iteration[-1],
-            #         vehicles[center_veh_id].get_id())
-            # else:
-            analysis.plot_platoon_lane_change(self._data_per_iteration[-1])
+            if len(simulated_vehicle_group.get_platoon_vehicles()) == 1:
+                analysis.plot_constrained_lane_change(
+                    self._data_per_iteration[-1],
+                    vehicles[center_veh_id].get_id())
+            else:
+                analysis.plot_platoon_lane_change(self._data_per_iteration[-1])
             output_sequence = simulated_vehicle_group.get_mode_sequence()
 
             output_seq_str = som.mode_sequence_to_str(output_sequence)
@@ -290,7 +296,7 @@ class VehicleOptimalController:
         Q = self._ocp_interface.create_state_cost_matrix(
             y_cost=0.1, theta_cost=0., v_cost=0.1)
         R = self._ocp_interface.create_input_cost_matrix(accel_cost=0.1,
-                                                         phi_cost=0.)
+                                                         phi_cost=0.0)
         running_cost = occ.quadratic_cost(
             self._ocp_interface.n_states, self._ocp_interface.n_inputs,
             Q, R, self._desired_state, u_ref
@@ -393,7 +399,7 @@ class VehicleOptimalController:
         # Safety constraints
         # TODO: play with keep_feasible param for constraints
 
-        epsilon = 1e-10
+        epsilon = 1e-16
         for veh_id in controlled_veh_ids:
             veh = self._ocp_interface.vehicles[veh_id]
 
@@ -428,7 +434,7 @@ class VehicleOptimalController:
         if custom_initial_guess is not None:
             x0 = custom_initial_guess
         else:
-            x0 = self._ocp_interface.get_desired_input()
+            x0 = self._ocp_interface.get_initial_inputs_guess()
 
         # try:
         result = opt.solve_ocp(
@@ -539,15 +545,17 @@ class VehicleOptimalController:
                                              initial_state_per_vehicle)
         vehicle_group.set_verbose(False)
         vehicle_group.prepare_to_start_simulation(len(sim_time))
-        input_guess = self._ocp_interface.get_desired_input_per_vehicle()
+        input_guess = self._ocp_interface.get_initial_input_guess_per_vehicle()
+        # time is the last state
         states = np.zeros([self._ocp_interface.n_states, len(sim_time)])
-        states[:, 0] = vehicle_group.get_current_state()
+        states[:, 0] = np.hstack((vehicle_group.get_current_state(),
+                                  0.0))
         for i in range(1, len(sim_time)):
             vehicle_group.simulate_one_time_step(sim_time[i], input_guess)
-            states[:, i] = vehicle_group.get_current_state()
-        inputs = np.atleast_2d(
-            self._ocp_interface.get_desired_input() * len(sim_time))
-        # analysis.plot_platoon_lane_change(vehicle_group.to_dataframe())
+            states[:, i] = np.hstack((vehicle_group.get_current_state(),
+                                      sim_time[i]))
+        inputs = np.repeat(self._ocp_interface.get_initial_inputs_guess(),
+                           len(sim_time)).reshape(-1, len(sim_time))
         return states, inputs
 
     def _log_results(self, counter: int, input_sequence: str,
