@@ -38,7 +38,8 @@ class BaseVehicle(ABC):
     _leader_id: np.ndarray[int]  # vehicle used to determine current accel
     _derivatives: np.ndarray[float]
     _mode: modes.VehicleMode
-    _ocp_interface: Type[BaseVehicleInterface]
+    _ocp_controllable_interface: Type[BaseVehicleInterface]
+    _ocp_non_controllable_interface: Type[BaseVehicleInterface]
     _desired_future_follower_id: int
     _long_adjust_start_time: float
     _lc_start_time: float
@@ -105,8 +106,19 @@ class BaseVehicle(ABC):
     def get_name(self) -> str:
         return self._name
 
-    def get_ocp_interface(self) -> BaseVehicleInterface:
-        return self._ocp_interface(self)
+    def get_ocp_interface(self, is_vehicle_optimally_controlled: bool
+                          ) -> BaseVehicleInterface:
+        if is_vehicle_optimally_controlled:
+            try:
+                return self._ocp_controllable_interface(self)
+            except AttributeError:
+                warnings.warn(
+                    f'Trying to get a controllable ocp interface for vehicle '
+                    f'{self.get_id()} of type {type(self)}, which does not '
+                    f'have an optimal controller'
+                )
+        else:
+            return self._ocp_non_controllable_interface(self)
 
     def get_current_time(self) -> float:
         return self._time[self._iter_counter]
@@ -235,6 +247,9 @@ class BaseVehicle(ABC):
         open loop type vehicle.
         :return:
         """
+        # TODO if we really want to be able to simulate independent optimally
+        #  controlled vehicles, we need to provide a vehicle copy based on
+        #  whether the vehicle is controlled by the controller calling this
         return self.make_reset_copy(initial_state, type(self))
 
     def _reset_copied_vehicle(self, new_vehicle: BaseVehicle,
@@ -443,9 +458,9 @@ class BaseVehicle(ABC):
     def analyze_platoons(self, vehicles: Dict[int, BaseVehicle]):
         pass
 
-    def join_centrally_controlled_platoon(self,
-                                          vehicles: Dict[int, BaseVehicle]):
-        pass
+    # def join_centrally_controlled_platoon(self,
+    #                                       vehicles: Dict[int, BaseVehicle]):
+    #     pass
 
     def request_cooperation(self):
         if self._is_connected:
@@ -868,6 +883,8 @@ class BaseVehicleInterface(ABC):
     def compute_derivatives(self, ego_states, inputs, leader_states):
         dxdt = np.zeros(self.n_states)
         theta = self.select_state_from_vector(ego_states, 'theta')
+        # TODO: do like with acceleration: create a virtual method that will
+        #  get phi if the vehicle has that input
         phi = self.select_input_from_vector(inputs, 'phi')
         vel = self.select_vel_from_vector(ego_states, inputs)
         accel = self.compute_acceleration(ego_states, inputs, leader_states)

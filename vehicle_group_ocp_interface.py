@@ -36,12 +36,14 @@ class VehicleGroupInterface:
     """ Class to help manage groups of vehicles """
 
     def __init__(self, vehicles: Dict[int, base.BaseVehicle],
-                 ego_id: int = None):
+                 controlled_veh_ids: List[int], ego_id: int = None):
         """
 
         :param vehicles: All simulation vehicles
         :param ego_id: If given, assumes this vehicle as the center of
          the system, i.e., its (x, y) = (0, 0)
+        :param controlled_veh_ids: Ids of vehicles controlled by the optimal
+         controller
         """
         self.vehicles: Dict[int, base.BaseVehicleInterface] = {}
         # Often, we need to iterate over all vehicles in the order they were
@@ -56,7 +58,8 @@ class VehicleGroupInterface:
         # vector
         self.input_idx_map: Dict[int, int] = {}
 
-        self.create_vehicle_interfaces(vehicles, ego_id)
+        self.create_vehicle_interfaces(vehicles, set(controlled_veh_ids),
+                                       ego_id)
 
     def get_input_limits(self):
         lower_bounds = []
@@ -177,11 +180,14 @@ class VehicleGroupInterface:
         return input_names
 
     def create_vehicle_interfaces(
-            self, vehicles: Dict[int, base.BaseVehicle], ego_id: int = None
+            self, vehicles: Dict[int, base.BaseVehicle],
+            controlled_veh_ids: set[int], ego_id: int = None
     ) -> None:
         """
 
         :param vehicles: All simulation vehicles
+        :param controlled_veh_ids: Ids of vehicles controlled by the optimal
+         controller
         :param ego_id: If given, assumes this vehicle as the center of
          the system, i.e., its (x, y) = (0, 0)
         :return:
@@ -194,7 +200,9 @@ class VehicleGroupInterface:
 
         self.sorted_vehicle_ids = []
         for veh_id in sorted(vehicles.keys()):
-            vehicle_interface = vehicles[veh_id].get_ocp_interface()
+            vehicle_interface = vehicles[veh_id].get_ocp_interface(
+                veh_id in controlled_veh_ids
+            )
             vehicle_interface.shift_initial_state(shift_map)
             self.sorted_vehicle_ids.append(vehicle_interface.get_id())
             self.vehicles[veh_id] = vehicle_interface

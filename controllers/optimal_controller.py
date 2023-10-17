@@ -4,6 +4,7 @@ from collections import defaultdict
 from functools import partial
 import time
 from typing import Callable, Dict, List, Union, Tuple
+import warnings
 
 import control as ct
 import control.optimal as opt
@@ -98,6 +99,7 @@ class VehicleOptimalController:
         self._terminal_constraints = None
         self._constraints = []
         self._ocp_has_solution = False
+        self._controlled_veh_ids: List[int] = []
 
         self._data_per_iteration = []
         self._results_summary: defaultdict[str, List] = defaultdict(list)
@@ -169,8 +171,6 @@ class VehicleOptimalController:
             for i in range(n_optimal_inputs):
                 current_inputs[v_id][i] = np.interp(
                     current_time, self._ocp_time, ego_inputs[i])
-                # current_inputs[v_id].append(np.interp(
-                #     current_time, self._ocp_time, ego_inputs[i]))
                 # idx = np.searchsorted(self._ocp_time, delta_t)
                 # current_inputs[v_id].append(ego_inputs[i][idx])
 
@@ -182,28 +182,39 @@ class VehicleOptimalController:
     def set_time_horizon(self, value) -> None:
         self.time_horizon = value
 
-    def find_single_vehicle_trajectory(
-            self, vehicles: Dict[int, base.BaseVehicle],
-            ego_id: int,  # mode_sequence: som.ModeSequence = None
-    ):
-        """
-        Solves the OPC assuming only the vehicle calling this function will
-        perform a lane change
-        :param vehicles: All relevant vehicles
-        :param ego_id: ID of the vehicle calling the method
-        :return: nothing
-        """
-        self.find_multiple_vehicle_trajectory(vehicles,
-                                              [ego_id])
+    def set_controlled_vehicles_ids(
+            self, controlled_veh_ids: Union[int, List[int]]):
+        if np.isscalar(controlled_veh_ids):
+            controlled_veh_ids = [controlled_veh_ids]
+        self._controlled_veh_ids = controlled_veh_ids
 
-    def find_multiple_vehicle_trajectory(
+    def add_controlled_vehicle_id(self, new_vehicle_id: int):
+        if new_vehicle_id in self._controlled_veh_ids:
+            warnings.warn(f'Trying to add vehicle {new_vehicle_id} to '
+                          f'optimal controller twice')
+        else:
+            self._controlled_veh_ids.append(new_vehicle_id)
+
+    # def find_single_vehicle_trajectory(
+    #         self, vehicles: Dict[int, base.BaseVehicle],
+    #         ego_id: int,  # mode_sequence: som.ModeSequence = None
+    # ):
+    #     """
+    #     Solves the OPC assuming only the vehicle calling this function will
+    #     perform a lane change
+    #     :param vehicles: All relevant vehicles
+    #     :param ego_id: ID of the vehicle calling the method
+    #     :return: nothing
+    #     """
+    #     self.find_multiple_vehicle_trajectory(vehicles,
+    #                                           [ego_id])
+
+    def find_trajectory(
             self, vehicles: Dict[int, base.BaseVehicle],
-            controlled_veh_ids: List[int],
     ):
         """
         Solves the OPC for all listed controlled vehicles
         :param vehicles: All relevant vehicles
-        :param controlled_veh_ids: IDs of controlled vehicles
         :return:
         """
 
@@ -214,14 +225,14 @@ class VehicleOptimalController:
 
         # We put the vehicle below at the origin (0, 0) when solving the opc
         # to make the solution independent of shifts in initial position
-        center_veh_id = controlled_veh_ids[0]
-        self._ocp_interface = vgi.VehicleGroupInterface(vehicles,
-                                                        center_veh_id)
+        center_veh_id = self._controlled_veh_ids[0]
+        self._ocp_interface = vgi.VehicleGroupInterface(
+            vehicles, self._controlled_veh_ids, center_veh_id)
         self._set_ocp_dynamics()
         self._initial_state = self._ocp_interface.get_initial_state()
         self._desired_state = self._ocp_interface.create_desired_state(
             self.time_horizon)
-        self._create_cost_with_tracker(controlled_veh_ids)
+        self._create_cost_with_tracker()
 
         converged = False
         initial_guess = None
@@ -233,7 +244,7 @@ class VehicleOptimalController:
             input_seq_str = som.mode_sequence_to_str(input_sequence)
             print("Setting mode sequence to:  {}".format(input_seq_str))
             self._ocp_interface.set_mode_sequence(input_sequence)
-            self._set_constraints(controlled_veh_ids)
+            self._set_constraints()
             self._cost_with_tracker.start_recording()
 
             start_time = time.time()
@@ -288,7 +299,7 @@ class VehicleOptimalController:
         # print(self._initial_state)
         # print(self._desired_state)
 
-    def _create_cost_with_tracker(self, controlled_veh_ids: List[int]):
+    def _create_cost_with_tracker(self):
         # Note: running and terminal costs should depend on vehicle model
         # For three state: running costs y_cost=0, theta_cost=0.1 and
 
@@ -345,18 +356,18 @@ class VehicleOptimalController:
             params=params, states=n_states, name='vehicle_group',
             inputs=input_names, outputs=output_names)
 
-    def _set_constraints(self,  controlled_veh_ids: List[int]):
+    def _set_constraints(self):
         self._constraints = []
         self._set_input_constraints()
         if self.has_terminal_constraints:
-            self._set_terminal_constraints(controlled_veh_ids)
-        self._set_safety_constraints(controlled_veh_ids)
+            self._set_terminal_constraints()
+        self._set_safety_constraints()
 
         self._cost_with_tracker.set_constraints(self._constraints)
 
-    def _set_terminal_constraints(self, controlled_veh_ids: List[int]):
+    def _set_terminal_constraints(self):
         controlled_vehicles = [self._ocp_interface.vehicles[veh_id]
-                               for veh_id in controlled_veh_ids]
+                               for veh_id in self._controlled_veh_ids]
         dim = [2 * len(controlled_vehicles),
                self._ocp_interface.n_states + self._ocp_interface.n_inputs]
         rows = np.zeros(dim)
@@ -395,12 +406,12 @@ class VehicleOptimalController:
         #     self._dynamic_system, input_lower_bounds,
         #     input_upper_bounds)])
 
-    def _set_safety_constraints(self, controlled_veh_ids: List[int]):
+    def _set_safety_constraints(self):
         # Safety constraints
         # TODO: play with keep_feasible param for constraints
 
         epsilon = 1e-16
-        for veh_id in controlled_veh_ids:
+        for veh_id in self._controlled_veh_ids:
             veh = self._ocp_interface.vehicles[veh_id]
 
             lc_safety_constraint = NonlinearConstraint(
@@ -527,7 +538,6 @@ class VehicleOptimalController:
         veh_ids = vehicle_group.sorted_vehicle_ids
         vehicle_group.set_verbose(False)
         vehicle_group.prepare_to_start_simulation(len(sim_time))
-        # vehicle_group.update_surrounding_vehicles()  # TODO: can be out?
         for i in range(len(sim_time) - 1):
             optimal_inputs = self.get_input(sim_time[i], veh_ids)
             vehicle_group.simulate_one_time_step(sim_time[i + 1],

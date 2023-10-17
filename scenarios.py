@@ -241,10 +241,11 @@ class LaneChangeScenario(SimulationScenario):
                 (fsv.SafeLongitudinalVehicle,) * n_orig_ahead
                 + (lc_veh_class,) * n_platoon
                 + (fsv.SafeLongitudinalVehicle,) * n_orig_behind)
-        dest_veh_classes = (fsv.SafeLongitudinalVehicle,) * (n_dest_ahead
-                                                             + n_dest_behind)
+        # dest_veh_classes = (fsv.SafeLongitudinalVehicle,) * (n_dest_ahead
+        #                                                      + n_dest_behind)
         # TODO: quick tests (Oct 10)
-        # dest_veh_classes = (lc_veh_class,) * (n_dest_ahead + n_dest_behind)
+        dest_veh_classes = (fsv.OptimalCoopNoLCVehicle,) * (n_dest_ahead
+                                                            + n_dest_behind)
         self.n_per_lane = [len(orig_veh_classes), len(dest_veh_classes)]
         self.vehicle_group.create_vehicle_array(
             list(orig_veh_classes + dest_veh_classes))
@@ -288,15 +289,17 @@ class LaneChangeScenario(SimulationScenario):
     def get_n_platoon(self):
         return self._n_platoon
 
-    # TODO: both methods below can also work with OptimalControlVehicle class
     def get_opc_results_summary(self):
-        platoon_leader = self.vehicle_group.get_platoon_leader()
-        return platoon_leader.opt_controller.get_results_summary()
+        # We assume there's either a single optimally controlled vehicles
+        # or that they all share the same controller
+        opc_vehicle = self.vehicle_group.get_optimal_control_vehicles()[0]
+        return (opc_vehicle.opt_controller.get_running_cost_history(),
+                opc_vehicle.opt_controller.get_terminal_cost_history())
 
     def get_opc_cost_history(self):
-        platoon_leader = self.vehicle_group.get_platoon_leader()
-        return (platoon_leader.opt_controller.get_running_cost_history(),
-                platoon_leader.opt_controller.get_terminal_cost_history())
+        opc_vehicle = self.vehicle_group.get_optimal_control_vehicles()[0]
+        return (opc_vehicle.opt_controller.get_running_cost_history(),
+                opc_vehicle.opt_controller.get_terminal_cost_history())
 
     def save_cost_data(self, file_name: str) -> None:
         """
@@ -411,16 +414,15 @@ class LaneChangeScenario(SimulationScenario):
         self.vehicle_group.set_vehicles_initial_states(x0_array, y0_array,
                                                        theta0_array, v0_array)
 
-    # def make_control_centralized(self):
-    #     self.vehicle_group.make_control_centralized()
+    def make_control_centralized(self):
+        self.vehicle_group.centralize_control()
 
     def run(self, final_time):
         dt = 1e-2
         time = np.arange(0, final_time + dt, dt)
         self.vehicle_group.prepare_to_start_simulation(len(time))
         # analysis.plot_initial_state(self.response_to_dataframe())
-        # self.vehicle_group.update_surrounding_vehicles()  # TODO: testing out
-        # self.vehicle_group.centralize_control()
+        self.make_control_centralized()
         for i in range(len(time) - 1):
             if np.isclose(time[i], self.lc_intention_time, atol=dt / 10):
                 self.vehicle_group.set_vehicles_lane_change_direction(
@@ -476,9 +478,9 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
     def solve(self):
         self.controller = opt_ctrl.VehicleOptimalController()
         self.controller.set_time_horizon(self.tf)
-        self.controller.find_multiple_vehicle_trajectory(
-            self.vehicle_group.vehicles,
-            [self.vehicle_group.get_vehicle_id_by_name('ego')])
+        self.controller.set_controlled_vehicles_ids(
+            self.vehicle_group.get_vehicle_id_by_name('ego'))
+        self.controller.find_trajectory(self.vehicle_group.vehicles)
         # return self.controller.ocp_result
 
     def run_ocp_solution(self) -> None:

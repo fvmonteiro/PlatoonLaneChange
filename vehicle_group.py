@@ -3,7 +3,7 @@ from typing import Any, Dict, Iterable, List, Type, Union, TypeVar
 import numpy as np
 import pandas as pd
 
-# import platoon
+import controllers.optimal_controller as opt_ctrl
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
 import system_operating_mode as som
@@ -236,7 +236,9 @@ class VehicleGroup:
                 initial_state = initial_state_per_vehicle[veh_id]
             else:
                 initial_state = None
-            vehicle = vehicles[veh_id].make_reset_copy(initial_state)
+            # TODO: call reset copy or open loop copy based on whether
+            #  the vehicle's control is determined by the opt controller
+            # vehicle = vehicles[veh_id].make_reset_copy(initial_state)
             vehicle = vehicles[veh_id].make_open_loop_copy(initial_state)
             self.sorted_vehicle_ids.append(veh_id)
             self.vehicles[veh_id] = vehicle
@@ -266,13 +268,12 @@ class VehicleGroup:
             open_loop_controls: Dict[int, np.ndarray] = None):
         if open_loop_controls is None:
             open_loop_controls = {}
-        self.update_surrounding_vehicles()  # TODO: testing different order
+        self.update_surrounding_vehicles()
         self.update_platoons()
         self.update_vehicle_modes()
         self.determine_inputs(open_loop_controls)
         self.compute_derivatives()
         self.update_states(new_time)
-        # self.update_surrounding_vehicles()  # TODO: testing different order
 
     def write_vehicle_states(self, time, state_vectors: Dict[int, np.ndarray],
                              optimal_inputs: Dict[int, np.ndarray]):
@@ -314,8 +315,10 @@ class VehicleGroup:
             ego_vehicle.analyze_platoons(self.vehicles)
 
     def centralize_control(self):
-        for ego_vehicle in self.vehicles.values():
-            ego_vehicle.join_centrally_controlled_platoon(self.vehicles)
+        centralized_controller = opt_ctrl.VehicleOptimalController()
+        ocv = self.get_optimal_control_vehicles()
+        for vehicle in ocv:
+            vehicle.set_centralized_controller(centralized_controller)
 
     def determine_inputs(
             self, open_loop_controls: Dict[int, np.ndarray]):

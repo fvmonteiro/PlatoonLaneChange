@@ -60,7 +60,8 @@ class OpenLoopVehicle(FourStateVehicle):
 
     def __init__(self):
         super().__init__()
-        self._ocp_interface = OpenLoopVehicleInterface
+        # self._ocp_controllable_interface = OpenLoopVehicleInterface
+        # self._ocp_non_controllable_interface = ClosedLoopVehicleInterface
 
     def update_mode(self, vehicles: Dict[int, base.BaseVehicle]):
         pass
@@ -104,7 +105,8 @@ class SafeAccelOpenLoopLCVehicle(OpenLoopVehicle):
 
     def __init__(self):
         super().__init__()
-        self._ocp_interface = SafeAccelVehicleInterface
+        # self._ocp_controllable_interface = SafeAccelVehicleInterface
+        # self._ocp_non_controllable_interface = ClosedLoopVehicleInterface
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
                           vehicles: Dict[int, base.BaseVehicle]):
@@ -126,17 +128,34 @@ class SafeAccelOpenLoopLCVehicle(OpenLoopVehicle):
             self.long_controller.get_more_critical_leader(vehicles))
 
 
+class OpenLoopNoLCVehicle(OpenLoopVehicle):
+
+    def __init__(self):
+        super().__init__()
+        # self._ocp_controllable_interface = OpenLoopNoLCVehicleInterface
+
+    def _determine_inputs(self, open_loop_controls: np.ndarray,
+                          vehicles: Dict[int, base.BaseVehicle]):
+        self._inputs[self._input_idx['a']] = open_loop_controls[0]
+        self._inputs[self._input_idx['phi']] = 0.
+
+    def _write_optimal_inputs(self, optimal_accel):
+        self._inputs[self._input_idx['a']] = optimal_accel[0]
+
+
 class OptimalControlVehicle(FourStateVehicle):
     """ States: [x, y, theta, v], inputs: [a, phi], centered at the C.G.
     Accel and phi computed by optimal control when there is lane change
-    intention. Otherwise, zero accel and lane keeping phi. """
+    intention. Otherwise, constant time headway policy for accel and
+    a CBF computed lane keeping phi. """
 
     _solver_wait_time = 20.0  # [s] time between attempts to solve an ocp
     _n_optimal_inputs = 2
 
     def __init__(self):
         super().__init__()
-        self._ocp_interface = OpenLoopVehicleInterface
+        self._ocp_controllable_interface = OpenLoopVehicleInterface
+        self._ocp_non_controllable_interface = ClosedLoopVehicleInterface
         self.set_mode(modes.OCPLaneKeepingMode())
 
         # self._n_feedback_inputs = self._n_inputs - self._n_optimal_inputs
@@ -146,40 +165,15 @@ class OptimalControlVehicle(FourStateVehicle):
         self.opt_controller: opt_ctrl.VehicleOptimalController = (
             opt_ctrl.VehicleOptimalController()
         )
+        self.opt_controller.set_controlled_vehicles_ids(self.get_id())
+
+    def set_centralized_controller(
+            self, centralized_controller: opt_ctrl.VehicleOptimalController):
+        centralized_controller.add_controlled_vehicle_id(self.get_id())
+        self.opt_controller = centralized_controller
 
     def reset_ocp_initial_time(self):
         self._ocp_initial_time = 0.0
-
-    # def make_reset_copy(self, initial_state=None) -> OCV:
-    #     """
-    #     Returns a copy of the vehicle with initial state equal the vehicle's
-    #     current state and with no memory. In addition, sets ocp_initial_time to
-    #     zero
-    #     :return:
-    #     """
-    #     # Old
-    #     # new_vehicle = copy.deepcopy(self)
-    #     # self._reset_copied_vehicle(new_vehicle, initial_state)
-    #
-    #     # New attempt
-    #     # vehicle_type = type(self)
-    #     # new_vehicle = vehicle_type()
-    #     # for attr_name in self.static_attribute_names:
-    #     #     setattr(new_vehicle, attr_name, getattr(self, attr_name))
-    #     # if initial_state is None:
-    #     #     initial_state = self.get_states()
-    #     # new_vehicle.copy_initial_state(initial_state)
-    #     # new_vehicle.target_lane = self.target_lane
-    #
-    #     # New attempt with super
-    #     new_vehicle = super().make_reset_copy(initial_state)
-    #     new_vehicle.reset_ocp_initial_time()
-    #     new_vehicle.opt_controller = copy.deepcopy(self.opt_controller)
-    #     # TODO: temp solution to avoid looking for an optimal solution when we
-    #     #  just want to simulate an open loop system. Same code in
-    #     #  PlatoonVehicle class
-    #     new_vehicle.opt_controller._ocp_has_solution = True
-    #     return new_vehicle
 
     def make_open_loop_copy(self, initial_state=None):
         return self.make_reset_copy(initial_state, OpenLoopVehicle)
@@ -223,8 +217,7 @@ class OptimalControlVehicle(FourStateVehicle):
             if self._is_verbose:
                 print("t={:.2f}, veh:{}. Calling ocp solver...".format(
                     t, self._id))
-            self.opt_controller.find_single_vehicle_trajectory(vehicles,
-                                                               self._id)
+            self.opt_controller.find_trajectory(vehicles)
         return True  # TODO self.opt_controller.has_solution()
 
     def is_lane_changing(self) -> bool:
@@ -242,12 +235,12 @@ class OptimalControlVehicle(FourStateVehicle):
         """
         if self.is_lane_changing():
             delta_t = self.get_current_time() - self._ocp_initial_time
-            self._inputs = self.opt_controller.get_input(
-                delta_t, [self._id])
+            self._inputs = self.opt_controller.get_input(delta_t, [self._id])
         else:
-            self._inputs[self._input_idx['a']] = 0.0
-            self._inputs[self._input_idx['phi']] = (
-                self.lk_controller.compute_steering_wheel_angle())
+            accel = self.long_controller.compute_acceleration(vehicles)
+            phi = self.lk_controller.compute_steering_wheel_angle()
+            self._inputs[self._input_idx['a']] = accel
+            self._inputs[self._input_idx['phi']] = phi
 
     def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]):
         """
@@ -278,7 +271,7 @@ class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
 
     def __init__(self):
         super().__init__()
-        self._ocp_interface = SafeAccelVehicleInterface
+        self._ocp_controllable_interface = SafeAccelVehicleInterface
 
     def make_open_loop_copy(self, initial_state=None):
         return self.make_reset_copy(initial_state, SafeAccelOpenLoopLCVehicle)
@@ -310,13 +303,67 @@ class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
         self._inputs[self._input_idx['phi']] = optimal_phi[0]
 
 
+class OptimalCoopNoLCVehicle(OptimalControlVehicle):
+    """
+    In scenarios with a centralized controller, this vehicle type can be used
+    to represent surrounding cooperating vehicles.
+    States: [x, y, theta, v], optimal input: [a], centered at the C.G.
+    """
+
+    _n_optimal_inputs = 1
+
+    def __init__(self):
+        super().__init__()
+        self._ocp_controllable_interface = OpenLoopNoLCVehicleInterface
+        self._ocp_non_controllable_interface = SafeLongitudinalVehicleInterface
+        # self.set_mode(modes.CLLaneKeepingMode())  # TODO
+        raise NotImplementedError(
+            'Code is not ready for OpenLoopNoLCVehicle class. We first need to'
+            'address the To Dos in the BaseVehicle class methods '
+            'compute_derivatives and make_open_loop_copy and in the '
+            'VehicleGroup class method populate_with_vehicles')
+
+    def update_mode(self, vehicles: Dict[int, base.BaseVehicle]):
+        pass  # TODO: modes could be cooperating or not
+
+    def make_open_loop_copy(self, initial_state=None):
+        return self.make_reset_copy(initial_state, OpenLoopNoLCVehicle)
+
+    def _compute_derivatives(self, vel, theta, phi):
+        self._position_derivative_longitudinal_only(vel)
+        self._derivatives[self._state_idx['v']] = self.get_an_input_by_name('a')
+
+    def _determine_inputs(self, open_loop_controls: np.ndarray,
+                          vehicles: Dict[int, base.BaseVehicle]) -> None:
+        """
+        Sets the open loop controls a (acceleration) and phi (steering wheel
+        angle)
+        :param open_loop_controls: Vector with accel and phi values
+        :param vehicles: Surrounding vehicles
+        :return: Nothing. The vehicle stores the computed input values
+        """
+
+        if self.is_lane_changing():
+            delta_t = self.get_current_time() - self._ocp_initial_time
+            optimal_inputs = self.opt_controller.get_input(delta_t,
+                                                           self.get_id())
+            accel = optimal_inputs[self._input_idx['a']]
+        else:
+            accel = self.long_controller.compute_acceleration(vehicles)
+
+        self._inputs[self._input_idx['a']] = accel
+
+    def _set_up_lane_change_control(self):
+        pass
+
+
 class ClosedLoopVehicle(FourStateVehicle):
     """ Vehicle that computes all of its inputs by feedback laws.
      States: [x, y, theta, v], external input: None, centered at the C.G. """
 
     def __init__(self):
         super().__init__()
-        self._ocp_interface = ClosedLoopVehicleInterface
+        self._ocp_non_controllable_interface = ClosedLoopVehicleInterface
         # self.long_controller = long_ctrl.LongitudinalController(self)
         self.set_mode(modes.CLLaneKeepingMode())
         self.lc_controller = lat_ctrl.LaneChangingController(self)
@@ -401,7 +448,7 @@ class ClosedLoopVehicle(FourStateVehicle):
 class SafeLongitudinalVehicle(ClosedLoopVehicle):
     def __init__(self):
         super().__init__()
-        self._ocp_interface = SafeLongitudinalVehicleInterface
+        self._ocp_non_controllable_interface = SafeLongitudinalVehicleInterface
         # self.set_mode(modes.CLLaneKeepingMode())  # TODO
 
     def update_mode(self, vehicles: Dict[int, base.BaseVehicle]):
@@ -476,46 +523,11 @@ class PlatoonVehicle(OptimalControlVehicle):
         """
         if is_acceleration_optimal:
             self._n_optimal_inputs = 2
-            self._ocp_interface = OpenLoopVehicleInterface
+            self._ocp_controllable_interface = OpenLoopVehicleInterface
         else:
             self._n_optimal_inputs = 1
-            self._ocp_interface = SafeAccelVehicleInterface
+            self._ocp_controllable_interface = SafeAccelVehicleInterface
         self._is_acceleration_optimal = is_acceleration_optimal
-
-    # def make_reset_copy(self, initial_state=None) -> PlatoonVehicle:
-    #     """
-    #     Returns a copy of the vehicle with initial state equal the vehicle's
-    #     current state and with no memory. In addition, sets ocp_initial_time to
-    #     zero and removes the vehicle from platoons.
-    #     :return:
-    #     """
-    #     # When we make a deepcopy of the vehicle, we copy the platoon, which
-    #     # has itself vehicles. This has two issues:
-    #     # 1. The vehicles in the copied platoons are not the vehicles being
-    #     # created.
-    #     # 2. The copied vehicles are no longer grouped in platoons (each one has
-    #     # its own platoon)
-    #     # The easiest solution is to have an empty platoon now and let the
-    #     # simulation figure out who goes in which platoons
-    #     # new_vehicle = copy.deepcopy(self)
-    #     # self._reset_copied_vehicle(new_vehicle, initial_state)
-    #
-    #     # vehicle_type = type(self)
-    #     # new_vehicle = vehicle_type()
-    #     # for attr_name in self.static_attribute_names:
-    #     #     setattr(new_vehicle, attr_name, getattr(self, attr_name))
-    #     # if initial_state is None:
-    #     #     initial_state = self.get_states()
-    #     # new_vehicle.copy_initial_state(initial_state)
-    #     # new_vehicle.target_lane = self.target_lane
-    #
-    #     # New attempt with super
-    #     new_vehicle = super().make_reset_copy(initial_state)
-    #
-    #     # new_vehicle.reset_ocp_initial_time()
-    #     # new_vehicle.opt_controller._ocp_has_solution = True
-    #     # new_vehicle._platoon = None
-    #     return new_vehicle
 
     def set_platoon(self, new_platoon: platoon.Platoon) -> None:
         self._platoon = new_platoon
@@ -536,21 +548,32 @@ class PlatoonVehicle(OptimalControlVehicle):
 
     def can_start_lane_change(self, vehicles: Dict[int, base.BaseVehicle]
                               ) -> bool:
-        if self._platoon.can_start_lane_change():
+        if self.opt_controller.has_solution():
+            # The optimization can be called by another vehicle in the case
+            # of platoons or centralized control, so we need to update the
+            # ocp initial time here
+            if self._ocp_initial_time == -np.inf:
+                self._ocp_initial_time = self.get_current_time()
             return True
-        # t = self.get_current_time()
-        # if self._is_platoon_leader():
-        #     self._platoon.compute_lane_change_trajectory(t, vehicles)
-        # return self._platoon.trajectory_exists
-        if self.is_platoon_leader():
-            t = self.get_current_time()
-            self._ocp_initial_time = t
-            if self._is_verbose:
-                print("t={:.2f}, veh:{}. Calling ocp solver...".format(
-                    t, self._id))
-            self.opt_controller.find_multiple_vehicle_trajectory(
-                vehicles, self._platoon.get_vehicle_ids())
-        return self._platoon.can_start_lane_change()
+        # if self._platoon.can_start_lane_change():
+        #     return True
+
+        t = self.get_current_time()
+        self._ocp_initial_time = t
+        if self._is_verbose:
+            print("t={:.2f}, veh:{}. Calling ocp solver...".format(
+                t, self._id))
+        self.opt_controller.find_trajectory(vehicles)
+        return self.opt_controller.has_solution()
+
+        # if self.is_platoon_leader():
+        #     t = self.get_current_time()
+        #     self._ocp_initial_time = t
+        #     if self._is_verbose:
+        #         print("t={:.2f}, veh:{}. Calling ocp solver...".format(
+        #             t, self._id))
+        #     self.opt_controller.find_trajectory(vehicles)
+        # return self._platoon.can_start_lane_change()
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
                           vehicles: Dict[int, base.BaseVehicle]) -> None:
@@ -563,11 +586,16 @@ class PlatoonVehicle(OptimalControlVehicle):
         """
 
         if self.is_lane_changing():
-            if self.is_platoon_leader():
-                delta_t = self.get_current_time() - self._ocp_initial_time
-                self._platoon.retrieve_all_inputs(delta_t)
+            # Ensure all vehicles have access to the control inputs
+            # computed by the platoon leader optimal controller
+            # if self.is_platoon_leader():
+            #     delta_t = self.get_current_time() - self._ocp_initial_time
+            #     self._platoon.retrieve_all_inputs(delta_t)
             if self._is_acceleration_optimal:
-                optimal_inputs = self._platoon.get_input_for_vehicle(self._id)
+                # optimal_inputs = self._platoon.get_input_for_vehicle(self._id)
+                delta_t = self.get_current_time() - self._ocp_initial_time
+                optimal_inputs = self.opt_controller.get_input(delta_t,
+                                                               self.get_id())
                 accel = optimal_inputs[self._input_idx['a']]
                 phi = optimal_inputs[self._input_idx['phi']]
             else:
@@ -590,8 +618,8 @@ class PlatoonVehicle(OptimalControlVehicle):
             self, vehicles: Dict[int, base.BaseVehicle]) -> None:
         pass
 
-    def _set_up_lane_change_control(self) -> None:
-        self._platoon.set_lc_start_time(self._lc_start_time)
+    # def _set_up_lane_change_control(self) -> None:
+    #     self._platoon.set_lc_start_time(self._lc_start_time)
 
     def analyze_platoons(self, vehicles: Dict[int, base.BaseVehicle]
                          ) -> None:
@@ -631,19 +659,19 @@ class PlatoonVehicle(OptimalControlVehicle):
         #             leader_platoon.add_vehicle(self)
         #             self.set_platoon(leader_platoon)
 
-    def join_centrally_controlled_platoon(
-            self, vehicles: Dict[int, base.BaseVehicle]) -> None:
-        # Find the "central" platoon
-        central_platoon = None
-        for veh in vehicles.values():
-            if veh.is_in_a_platoon():
-                central_platoon = veh.get_platoon()
-                break
-        if central_platoon is None:
-            self._create_platoon()
-        else:
-            central_platoon.add_vehicle(self)
-            self.set_platoon(central_platoon)
+    # def join_centrally_controlled_platoon(
+    #         self, vehicles: Dict[int, base.BaseVehicle]) -> None:
+    #     # Find the "central" platoon
+    #     central_platoon = None
+    #     for veh in vehicles.values():
+    #         if veh.is_in_a_platoon():
+    #             central_platoon = veh.get_platoon()
+    #             break
+    #     if central_platoon is None:
+    #         self._create_platoon()
+    #     else:
+    #         central_platoon.add_vehicle(self)
+    #         self.set_platoon(central_platoon)
 
     def _create_platoon(self) -> None:
         self.set_platoon(platoon.Platoon(self))
@@ -696,9 +724,23 @@ class OpenLoopVehicleInterface(FourStateVehicleInterface):
         # return np.array([0., 0.])
         return np.array([self.accel_max, 0.])
 
-    # def determine_inputs(self, ego_states, optimal_inputs, leader_states):
-    #     return (optimal_inputs[self.optimal_input_idx['a']],
-    #             optimal_inputs[self.optimal_input_idx['phi']])
+
+class OpenLoopNoLCVehicleInterface(FourStateVehicleInterface):
+    """ States: [x, y, theta, v], inputs: [a], centered at the C.G. """
+
+    _input_names = ['a']
+
+    def __init__(self, vehicle: OptimalCoopNoLCVehicle):
+        super().__init__(vehicle)
+
+    def compute_acceleration(self, ego_states, inputs, leader_states):
+        return self.select_input_from_vector(inputs, 'a')
+
+    def get_input_limits(self) -> (List[float], List[float]):
+        return [self.brake_max], [self.accel_max]
+
+    def get_initial_input_guess(self) -> np.ndarray:
+        return self.get_desired_input()
 
 
 class SafeAccelVehicleInterface(FourStateVehicleInterface):
@@ -720,10 +762,6 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
 
     def get_initial_input_guess(self) -> np.ndarray:
         return self.get_desired_input()
-
-    # def determine_inputs(self, ego_states, optimal_inputs, leader_states):
-    #     return (self.compute_acceleration(ego_states, leader_states),
-    #             optimal_inputs[self.optimal_input_idx['phi']])
 
     # TODO: concentrate all accel computation functions in the control class
     def compute_acceleration(self, ego_states, inputs, leader_states) -> float:
@@ -767,12 +805,6 @@ class ClosedLoopVehicleInterface(SafeAccelVehicleInterface):
     def get_input_limits(self) -> (List[float], List[float]):
         return [], []
 
-    # def determine_inputs(self, ego_states, optimal_inputs, leader_states):
-    #     # TODO: for completeness, we could include the feedback
-    #     #  computation of phi here, but this will not be used [Oct 5, 23]
-    #     return (self.compute_acceleration(ego_states, leader_states),
-    #             0.0)
-
 
 class SafeLongitudinalVehicleInterface(ClosedLoopVehicleInterface):
     def __init__(self, vehicle: SafeLongitudinalVehicle):
@@ -781,10 +813,5 @@ class SafeLongitudinalVehicleInterface(ClosedLoopVehicleInterface):
     def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
         self._position_derivative_longitudinal_only(vel, derivatives)
         derivatives[self.state_idx['v']] = accel
-
-    # def determine_inputs(self, ego_states, optimal_inputs, leader_states):
-    #     return (self.compute_acceleration(ego_states, leader_states),
-    #             0.0)
-
 
 # OCV = TypeVar('OCV', bound=OptimalControlVehicle)

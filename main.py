@@ -135,7 +135,7 @@ def run_save_and_plot(scenario: scenarios.LaneChangeScenario, tf: float = 10.):
         running_cost, terminal_cost = scenario.get_opc_cost_history()
         analysis.plot_costs_vs_iteration(running_cost, terminal_cost)
     except AttributeError:
-        warnings.warn('Trying to get cost of scenario without platoons.'
+        warnings.warn('Trying to get cost of scenario without optimal control.'
                       '\nCommand ignored.')
 
 
