@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Tuple
 import warnings
 
 import numpy as np
@@ -104,22 +104,6 @@ class VehicleGroupInterface:
         for veh_id in self.sorted_vehicle_ids:
             initial_state.extend(self.vehicles[veh_id].get_initial_state())
         return np.array(initial_state + [0.])  # time is the last state
-
-    # def get_initial_guess(self, time_points: np.ndarray):
-    #     # estimated_safe_time: float):
-    #     n_ctrl_points = len(time_points)
-    #     initial_guess = []
-    #     samples_in_a_second = sum(time_points < 1.0)
-    #     for veh_id in self.sorted_vehicle_ids:
-    #         min_phi, max_phi = self.vehicles[veh_id].get_input_limits()
-    #         # only vehs with optimal control have bounds, but we should find a
-    #         # better way of testing here since this might change
-    #         if len(min_phi) > 0:
-    #             initial_guess.extend(
-    #                 max_phi * samples_in_a_second
-    #                 + min_phi * samples_in_a_second
-    #                 + [0.0] * (len(time_points) - 2 * samples_in_a_second))
-    #     return np.array(initial_guess).reshape(-1, n_ctrl_points)
 
     def get_state_indices(self, state_name: str) -> List[int]:
         """
@@ -340,7 +324,7 @@ class VehicleGroupInterface:
         R = self.create_input_cost_matrix(accel_cost=0.1,
                                           phi_cost=0.)
 
-        def support(states, inputs):
+        def support(states, inputs) -> float:
             t = self.get_time(states)
             w_eg = 1.  # gap error weight
             cost = ((states - x_ref) @ Q @ (states - x_ref)
@@ -357,23 +341,10 @@ class VehicleGroupInterface:
 
         return support
 
-    def lane_changing_safety_constraint_old(
-            self, states, inputs, lc_veh_id: int, other_id: int,
-            is_other_behind: bool, make_smooth: bool = True
-    ):
-        gap_error = self.compute_gap_error(states, lc_veh_id, other_id,
-                                           is_other_behind)
-        phi = self.get_a_vehicle_input_by_id(lc_veh_id, inputs, 'phi')
-        margin = 1e-1
-        if make_smooth:
-            return _smooth_min_0(gap_error + margin) * phi
-        else:
-            return min(gap_error + margin, 0) * phi
-
-    def lane_changing_safety_constraint(self, ego_id: int):
+    def lane_changing_safety_constraint(self, ego_id: int) -> Callable:
         ego_veh = self.vehicles[ego_id]
 
-        def support(states, inputs):
+        def support(states, inputs) -> float:
             t = self.get_time(states)
             gap_errors = [
                 self.compute_gap_error(
@@ -396,10 +367,10 @@ class VehicleGroupInterface:
 
         return support
 
-    def vehicle_following_safety_constraint(self, ego_id: int):
+    def vehicle_following_safety_constraint(self, ego_id: int) -> Callable:
         ego_veh = self.vehicles[ego_id]
 
-        def support(states, inputs):
+        def support(states, inputs) -> float:
             t = self.get_time(states)
             if ego_veh.has_orig_lane_leader(t):
                 gap_error = self.compute_gap_error(
@@ -408,9 +379,19 @@ class VehicleGroupInterface:
             return 1.0e-3  # anything greater or equal to zero
 
         return support
-        # return partial(self.compute_gap_error, ego_id=ego_id,
-        #                other_id=ego_veh.get_orig_lane_leader_id(),
-        #                is_other_behind=False)
+
+    def platoon_constraint(self, platoon_ids: Tuple[int, int], other_id: int
+                           ) -> Callable:
+        def support(states, inputs) -> float:
+            other_x = self.get_a_vehicle_state_by_id(other_id, states, 'x')
+            ret = 1.
+            for p_id in platoon_ids:
+                platoon_veh_x = self.get_a_vehicle_state_by_id(p_id, states,
+                                                               'x')
+                gap = other_x - platoon_veh_x
+                ret *= gap
+            return ret
+        return support
 
     def compute_gap_error(self, states, ego_id, other_id, is_other_behind):
         if other_id < 0:  # no risk

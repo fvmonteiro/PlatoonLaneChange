@@ -83,9 +83,9 @@ class OpenLoopVehicle(FourStateVehicle):
     def _write_optimal_inputs(self, optimal_inputs):
         self._inputs = optimal_inputs
 
-    def _set_up_longitudinal_adjustments_control(
-            self, vehicles: Dict[int, base.BaseVehicle]):
-        pass
+    # def _set_up_longitudinal_adjustments_control(
+    #         self, vehicles: Dict[int, base.BaseVehicle]):
+    #     pass
 
     def _set_up_lane_change_control(self):
         pass
@@ -249,10 +249,9 @@ class OptimalControlVehicle(FourStateVehicle):
         """
         pass
 
-    def _set_up_longitudinal_adjustments_control(
-            self, vehicles: Dict[int, base.BaseVehicle]) -> None:
-        # self.update_target_y()
-        pass
+    # def _set_up_longitudinal_adjustments_control(
+    #         self, vehicles: Dict[int, base.BaseVehicle]) -> None:
+    #     pass
 
     def _set_up_lane_change_control(self):
         pass
@@ -426,14 +425,12 @@ class ClosedLoopVehicle(FourStateVehicle):
         self._leader_id[self._iter_counter] = (
             self.long_controller.get_more_critical_leader(vehicles))
 
-    def _set_up_longitudinal_adjustments_control(
-            self, vehicles: Dict[int, base.BaseVehicle]):
-        pass
+    # def _set_up_longitudinal_adjustments_control(
+    #         self, vehicles: Dict[int, base.BaseVehicle]):
+    #     pass
 
     def _set_up_lane_change_control(self):
-        # self.update_target_y()
-        self.lc_controller.start(self._lc_start_time,
-                                 self._lc_duration)
+        self.lc_controller.start(self._lc_start_time, self._lc_duration)
 
     @staticmethod
     def is_gap_safe_for_lane_change(leading_vehicle: base.BaseVehicle,
@@ -555,25 +552,20 @@ class PlatoonVehicle(OptimalControlVehicle):
             if self._ocp_initial_time == -np.inf:
                 self._ocp_initial_time = self.get_current_time()
             return True
-        # if self._platoon.can_start_lane_change():
-        #     return True
 
         t = self.get_current_time()
         self._ocp_initial_time = t
+        # if self.is_in_a_platoon():
+        #     dest_lane_ids = [veh.get_id() for veh in vehicles.values()
+        #                      if veh.get_current_lane() == self.target_lane]
+        #     self.opt_controller.set_platoon_formation_constraint_parameters(
+        #         self._platoon.get_vehicle_ids(), dest_lane_ids
+        #     )
         if self._is_verbose:
             print("t={:.2f}, veh:{}. Calling ocp solver...".format(
                 t, self._id))
         self.opt_controller.find_trajectory(vehicles)
         return self.opt_controller.has_solution()
-
-        # if self.is_platoon_leader():
-        #     t = self.get_current_time()
-        #     self._ocp_initial_time = t
-        #     if self._is_verbose:
-        #         print("t={:.2f}, veh:{}. Calling ocp solver...".format(
-        #             t, self._id))
-        #     self.opt_controller.find_trajectory(vehicles)
-        # return self._platoon.can_start_lane_change()
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
                           vehicles: Dict[int, base.BaseVehicle]) -> None:
@@ -610,16 +602,22 @@ class PlatoonVehicle(OptimalControlVehicle):
 
     def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]
                               ) -> None:
-        # TODO: vary when lane-changing?
-        self._leader_id[self._iter_counter] = (
-            self.long_controller.get_more_critical_leader(vehicles))
+        if (self._is_acceleration_optimal
+                and self.is_performing_long_adjustment()):
+            # During the lane change, there is no target leader for the
+            # longitudinal controller since the optimal controller takes over
+            self._leader_id[self._iter_counter] = -1
+        else:
+            self._leader_id[self._iter_counter] = (
+                self.long_controller.get_more_critical_leader(vehicles))
 
-    def _set_up_longitudinal_adjustments_control(
-            self, vehicles: Dict[int, base.BaseVehicle]) -> None:
-        pass
+    def is_performing_long_adjustment(self) -> bool:
+        delta_t = self.get_current_time() - self._long_adjust_start_time
+        return delta_t <= self.opt_controller.get_time_horizon()
 
-    # def _set_up_lane_change_control(self) -> None:
-    #     self._platoon.set_lc_start_time(self._lc_start_time)
+    # def _set_up_longitudinal_adjustments_control(
+    #         self, vehicles: Dict[int, base.BaseVehicle]) -> None:
+    #     pass
 
     def analyze_platoons(self, vehicles: Dict[int, base.BaseVehicle]
                          ) -> None:
@@ -721,8 +719,8 @@ class OpenLoopVehicleInterface(FourStateVehicleInterface):
         return [self.brake_max, -self.phi_max], [self.accel_max, self.phi_max]
 
     def get_initial_input_guess(self) -> np.ndarray:
-        # return np.array([0., 0.])
-        return np.array([self.accel_max, 0.])
+        return np.array([0., 0.])
+        # return np.array([self.accel_max, 0.])
 
 
 class OpenLoopNoLCVehicleInterface(FourStateVehicleInterface):

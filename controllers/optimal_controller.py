@@ -96,10 +96,12 @@ class VehicleOptimalController:
 
     def __init__(self):
         self._terminal_cost = None
-        self._terminal_constraints = None
+        self._terminal_constraints = []
         self._constraints = []
         self._ocp_has_solution = False
         self._controlled_veh_ids: List[int] = []
+        self._platoon_vehicle_pairs: List[Tuple[int, int]] = []
+        self._dest_lane_vehicles_ids: List[int] = []
 
         self._data_per_iteration = []
         self._results_summary: defaultdict[str, List] = defaultdict(list)
@@ -195,19 +197,18 @@ class VehicleOptimalController:
         else:
             self._controlled_veh_ids.append(new_vehicle_id)
 
-    # def find_single_vehicle_trajectory(
-    #         self, vehicles: Dict[int, base.BaseVehicle],
-    #         ego_id: int,  # mode_sequence: som.ModeSequence = None
-    # ):
-    #     """
-    #     Solves the OPC assuming only the vehicle calling this function will
-    #     perform a lane change
-    #     :param vehicles: All relevant vehicles
-    #     :param ego_id: ID of the vehicle calling the method
-    #     :return: nothing
-    #     """
-    #     self.find_multiple_vehicle_trajectory(vehicles,
-    #                                           [ego_id])
+    def set_platoon_formation_constraint_parameters(
+            self, platoon_vehicles_ids: List[int],
+            dest_lane_vehicles_ids: List[int]):
+        self._platoon_vehicle_pairs = []
+        for i in range(len(platoon_vehicles_ids)):
+            for j in range(i + 1, len(platoon_vehicles_ids)):
+                self._platoon_vehicle_pairs.append(
+                    (platoon_vehicles_ids[i], platoon_vehicles_ids[j]))
+        self._dest_lane_vehicles_ids = dest_lane_vehicles_ids
+
+        print('Platoon veh pairs:', self._platoon_vehicle_pairs)
+        print('Dest lane vehs:', self._dest_lane_vehicles_ids)
 
     def find_trajectory(
             self, vehicles: Dict[int, base.BaseVehicle],
@@ -253,7 +254,7 @@ class VehicleOptimalController:
 
             # Just checking what the optimizer "sees"
             alt = self.get_ocp_solver_simulation(vehicles)
-            if len(alt.get_platoon_vehicles()) == 1:  # TODO: also temp checking
+            if len(self._platoon_vehicle_pairs) < 1:  # TODO: temp checking
                 analysis.plot_constrained_lane_change(
                     alt.to_dataframe(), vehicles[center_veh_id].get_id())
             else:
@@ -263,7 +264,7 @@ class VehicleOptimalController:
                 vehicles)
             self._data_per_iteration.append(
                 simulated_vehicle_group.to_dataframe())
-            if len(simulated_vehicle_group.get_platoon_vehicles()) == 1:
+            if len(self._platoon_vehicle_pairs) < 1:
                 analysis.plot_constrained_lane_change(
                     self._data_per_iteration[-1],
                     vehicles[center_veh_id].get_id())
@@ -362,6 +363,7 @@ class VehicleOptimalController:
         if self.has_terminal_constraints:
             self._set_terminal_constraints()
         self._set_safety_constraints()
+        self._set_platoon_formation_constraints()
 
         self._cost_with_tracker.set_constraints(self._constraints)
 
@@ -388,8 +390,8 @@ class VehicleOptimalController:
             upper_boundaries[y_idx] = veh.get_target_y() + y_margin
             upper_boundaries[theta_idx] = theta_margin
 
-        self._terminal_constraints = LinearConstraint(
-            rows, lb=lower_boundaries, ub=upper_boundaries)
+        self._terminal_constraints.append(LinearConstraint(
+            rows, lb=lower_boundaries, ub=upper_boundaries))
 
     def _set_input_constraints(self):
         input_lower_bounds, input_upper_bounds = (
@@ -436,6 +438,16 @@ class VehicleOptimalController:
                 stay_in_lane = LinearConstraint(d, lb=veh.get_y0() - 1,
                                                 ub=veh.get_target_y() + 1)
                 self._constraints.append(stay_in_lane)
+
+    def _set_platoon_formation_constraints(self):
+        for other_id in self._dest_lane_vehicles_ids:
+            for id_pair in self._platoon_vehicle_pairs:
+                print(f'Creating terminal constraint that prevents veh '
+                      f'{other_id} from ending between vehs {id_pair}')
+                self._terminal_constraints.append(NonlinearConstraint(
+                    self._ocp_interface.platoon_constraint(id_pair, other_id),
+                    0., np.inf
+                ))
 
     def _solve_ocp(self, custom_initial_guess: np.ndarray = None):
         time_pts = self.get_time_points()

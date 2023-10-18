@@ -241,11 +241,11 @@ class LaneChangeScenario(SimulationScenario):
                 (fsv.SafeLongitudinalVehicle,) * n_orig_ahead
                 + (lc_veh_class,) * n_platoon
                 + (fsv.SafeLongitudinalVehicle,) * n_orig_behind)
-        # dest_veh_classes = (fsv.SafeLongitudinalVehicle,) * (n_dest_ahead
-        #                                                      + n_dest_behind)
+        dest_veh_classes = (fsv.SafeLongitudinalVehicle,) * (n_dest_ahead
+                                                             + n_dest_behind)
         # TODO: quick tests (Oct 10)
-        dest_veh_classes = (fsv.OptimalCoopNoLCVehicle,) * (n_dest_ahead
-                                                            + n_dest_behind)
+        # dest_veh_classes = (fsv.OptimalCoopNoLCVehicle,) * (n_dest_ahead
+        #                                                     + n_dest_behind)
         self.n_per_lane = [len(orig_veh_classes), len(dest_veh_classes)]
         self.vehicle_group.create_vehicle_array(
             list(orig_veh_classes + dest_veh_classes))
@@ -364,7 +364,7 @@ class LaneChangeScenario(SimulationScenario):
                       + [v_dest_leader] + [v_others] * (self.n_per_lane[1] - 1))
         self.vehicle_group.set_free_flow_speeds(v_ff_array)
         # Deviation from equilibrium position:
-        delta_x = {'lo': 0.0, 'ld': 3.0, 'fd': 3.0}
+        delta_x = {'lo': 0.0, 'ld': 11., 'fd': 0.0}
         self.create_initial_state(v_orig_leader, v_dest_leader, delta_x)
 
     def create_initial_state(self, v_orig: float, v_dest: float,

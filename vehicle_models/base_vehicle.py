@@ -55,14 +55,6 @@ class BaseVehicle(ABC):
 
         """
 
-        # self.free_flow_speed = None
-        # self.initial_state = None
-        # self.target_lane = None
-        # self.target_y = None
-        # self.state_names, self.input_names = None, None
-        # self._n_states, self._n_inputs = None, None
-        # self._state_idx, self._input_idx = {}, {}
-
         # Some parameters
         self._id: int = BaseVehicle._counter
         BaseVehicle._counter += 1
@@ -434,7 +426,7 @@ class BaseVehicle(ABC):
                 other_x = other_vehicle.get_x()
                 other_y = other_vehicle.get_y()
                 if np.abs(other_y - y_target_lane) < const.LANE_WIDTH / 2:
-                    if ego_x < other_x < dest_lane_leader_x:
+                    if ego_x <= other_x < dest_lane_leader_x:
                         dest_lane_leader_x = other_x
                         new_dest_leader_id = other_vehicle._id
                     elif dest_lane_follower_x < other_x < ego_x:
@@ -581,7 +573,7 @@ class BaseVehicle(ABC):
     def prepare_for_longitudinal_adjustments_start(
             self, vehicles: Dict[int, BaseVehicle]):
         self._long_adjust_start_time = self.get_current_time()
-        self._set_up_longitudinal_adjustments_control(vehicles)
+        # self._set_up_longitudinal_adjustments_control(vehicles)
 
     def prepare_for_lane_change_start(self):
         self._lc_start_time = self.get_current_time()
@@ -644,10 +636,10 @@ class BaseVehicle(ABC):
         """
         pass
 
-    @abstractmethod
-    def _set_up_longitudinal_adjustments_control(
-            self, vehicles: Dict[int, BaseVehicle]):
-        pass
+    # @abstractmethod
+    # def _set_up_longitudinal_adjustments_control(
+    #         self, vehicles: Dict[int, BaseVehicle]):
+    #     pass
 
     @abstractmethod
     def _set_up_lane_change_control(self):

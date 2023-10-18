@@ -217,6 +217,14 @@ def plot_constrained_lane_change(data: pd.DataFrame,
 def plot_platoon_lane_change(data: pd.DataFrame):
     pp.compute_all_relative_values(data)
 
+    n_platoon = np.max([int(name[1]) for name in data['name'].unique()
+                        if name[0] == 'p'])
+    vehicle_pairs = {'p1': ['ld1', 'lo1']}
+    for i in range(2, n_platoon + 1):
+        vehicle_pairs['p' + str(i)] = ['p' + str(i - 1)]
+    vehicle_pairs['p' + str(n_platoon)].append('fd1')
+    vehicle_pairs['p' + str(n_platoon)].append('ld1')
+
     sns.set_style('whitegrid')
     x_axes = ['t', 't', 't', 't']
     y_axes = ['y', 'v', 'phi', 'a']
@@ -224,10 +232,7 @@ def plot_platoon_lane_change(data: pd.DataFrame):
     fig, ax = plt.subplots(len(y_axes) + 1)
     fig.set_size_inches(12, 8)
     # TODO: veh pairs depend on the scenario
-    plot_gap_errors(data, {'p1': ['ld1', 'lo1', 'fd1'],
-                           'p2': ['p1', 'ld1']
-                           },
-                    ax[0])
+    plot_gap_errors(data, vehicle_pairs, ax[0])
     plot_scenario_results(x_axes, y_axes, data, ax[1:])
     fig.tight_layout()
     fig.show()

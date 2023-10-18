@@ -54,9 +54,9 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
         self._inputs[self._input_idx['phi']] = open_loop_controls[
             self._input_idx['phi']]
 
-    def _set_up_longitudinal_adjustments_control(
-            self, vehicles: Dict[int, base.BaseVehicle]):
-        pass
+    # def _set_up_longitudinal_adjustments_control(
+    #         self, vehicles: Dict[int, base.BaseVehicle]):
+    #     pass
 
     def _set_up_lane_change_control(self):
         pass
