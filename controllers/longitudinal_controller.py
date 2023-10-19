@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Union
+from typing import Dict
 
 import numpy as np
 
@@ -40,7 +40,7 @@ class LongitudinalController:
         else:
             accel = self.compute_gap_control(gap, v_ego, v_leader)
             # Stay under free flow speed
-            if v_ego >= self.vehicle.free_flow_speed and accel > 0:
+            if v_ego >= v_ff and accel > 0:
                 accel = self.compute_velocity_control(v_ff, v_ego)
         return accel
 
@@ -79,5 +79,6 @@ class LongitudinalController:
 
     def compute_gap_control(self, gap: float, v_ego: float,
                             v_leader: float) -> float:
-        return (self.kg * (gap - self.vehicle.h * v_ego - self.vehicle.c)
+        h_ref = self.vehicle.get_reference_time_headway()
+        return (self.kg * (gap - h_ref * v_ego - self.vehicle.c)
                 + self.kv * (v_leader - v_ego))

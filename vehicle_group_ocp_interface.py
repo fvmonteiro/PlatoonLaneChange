@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple, Union
 import warnings
 
 import numpy as np
@@ -72,28 +72,50 @@ class VehicleGroupInterface:
         return lower_bounds, upper_bounds
 
     def get_desired_input(self) -> np.ndarray:
-        desired_inputs = []
+        desired_inputs_array = []
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
             veh_desired_inputs = vehicle.get_desired_input()
-            desired_inputs.extend(veh_desired_inputs)
-        return np.array(desired_inputs)
+            desired_inputs_array.extend(veh_desired_inputs)
+        return np.array(desired_inputs_array)
 
-    def get_initial_inputs_guess(self) -> np.ndarray:
-        initial_guess = []
+    def get_initial_inputs_guess(
+            self, accel_guess: Union[str, float], as_dict: bool = False
+    ) -> Union[np.ndarray, Dict[int, np.ndarray]]:
+        initial_guess_array = []
+        initial_guess_dict = {}
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
-            veh_desired_inputs = vehicle.get_initial_input_guess()
-            initial_guess.extend(veh_desired_inputs)
-        return np.array(initial_guess)
+            veh_desired_inputs = vehicle.get_desired_input()
+            if vehicle.is_long_control_optimal():
+                if isinstance(accel_guess, str):
+                    if accel_guess == 'zero':
+                        accel = 0.
+                    elif accel_guess == 'max':
+                        accel = vehicle.get_accel_max()
+                    elif accel_guess == 'min':
+                        accel = vehicle.get_brake_max()
+                    else:
+                        warnings.warn(
+                            'Unrecognized string value for initial accel guess:'
+                            f' {accel_guess}. Accepted values are zero, max, '
+                            'min. Setting to zero.')
+                        accel = 0.0
+                else:
+                    accel = accel_guess
+                veh_desired_inputs[vehicle.optimal_input_idx['a']] = accel
+            initial_guess_array.extend(veh_desired_inputs)
+            initial_guess_dict[veh_id] = veh_desired_inputs
+        return (initial_guess_dict if as_dict
+                else np.array(initial_guess_array))
 
-    def get_initial_input_guess_per_vehicle(self) -> Dict[int, np.ndarray]:
-        initial_guess = {}
-        for veh_id in self.sorted_vehicle_ids:
-            vehicle = self.vehicles[veh_id]
-            veh_desired_inputs = vehicle.get_initial_input_guess()
-            initial_guess[veh_id] = veh_desired_inputs
-        return initial_guess
+    # def get_initial_inputs_guess_per_vehicle(self) -> Dict[int, np.ndarray]:
+    #     initial_guess = {}
+    #     for veh_id in self.sorted_vehicle_ids:
+    #         vehicle = self.vehicles[veh_id]
+    #         veh_desired_inputs = vehicle.get_initial_input_guess()
+    #         initial_guess[veh_id] = veh_desired_inputs
+    #     return initial_guess
 
     def get_initial_state(self):
         """
@@ -150,7 +172,7 @@ class VehicleGroupInterface:
         return states[-1]
 
     def set_mode_sequence(self, mode_sequence: som.ModeSequence):
-        sv_sequences = som.mode_sequence_to_sv_sequence(mode_sequence)
+        sv_sequences = mode_sequence.to_sv_sequence()
         for foll_id, sequence in sv_sequences.items():
             self.vehicles[foll_id].set_leader_sequence(sequence)
 
@@ -221,7 +243,7 @@ class VehicleGroupInterface:
                 v0 = veh.select_state_from_vector(veh_states, 'v')
             except KeyError:  # three-state vehicles have v as an input
                 v0 = veh.select_input_from_vector(veh.get_desired_input(), 'v')
-            vf = veh.free_flow_speed  # v0? Do we want const speed LC?
+            vf = veh.get_free_flow_speed()  # v0? Do we want const speed LC?
             xf = veh.select_state_from_vector(veh_states, 'x') + v0 * tf
             yf = veh.get_target_y()
             thetaf = 0.0
@@ -334,7 +356,7 @@ class VehicleGroupInterface:
                 ego_veh = self.vehicles[ego_id]
                 gap_error = self.compute_gap_error(
                     states, ego_id, ego_veh.get_dest_lane_follower_id(t),
-                    True)
+                    is_other_behind=True, is_follower_lane_changing=False)
                 eg_cost.append(w_eg * min(gap_error, 0) ** 2)
             cost += sum(eg_cost)
             return cost
@@ -349,13 +371,13 @@ class VehicleGroupInterface:
             gap_errors = [
                 self.compute_gap_error(
                     states, ego_id, ego_veh.get_orig_lane_leader_id(t),
-                    False),
+                    False, is_follower_lane_changing=True),
                 self.compute_gap_error(
                     states, ego_id, ego_veh.get_dest_lane_leader_id(t),
-                    False),
+                    False, is_follower_lane_changing=True),
                 self.compute_gap_error(
                     states, ego_id, ego_veh.get_dest_lane_follower_id(t),
-                    True)
+                    True, is_follower_lane_changing=False)
             ]
             phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
             margin = 1e-3
@@ -374,7 +396,8 @@ class VehicleGroupInterface:
             t = self.get_time(states)
             if ego_veh.has_orig_lane_leader(t):
                 gap_error = self.compute_gap_error(
-                    states, ego_id, ego_veh.get_orig_lane_leader_id(t), False)
+                    states, ego_id, ego_veh.get_orig_lane_leader_id(t), False,
+                    is_follower_lane_changing=False)
                 return gap_error
             return 1.0e-3  # anything greater or equal to zero
 
@@ -393,7 +416,10 @@ class VehicleGroupInterface:
             return ret
         return support
 
-    def compute_gap_error(self, states, ego_id, other_id, is_other_behind):
+    def compute_gap_error(
+            self, states, ego_id: int, other_id: int, is_other_behind: bool,
+            is_follower_lane_changing: bool
+    ) -> float:
         if other_id < 0:  # no risk
             return 0
         if is_other_behind:
@@ -406,8 +432,8 @@ class VehicleGroupInterface:
                 follower_id, states))
         leader_x = (
             self.get_a_vehicle_state_by_id(leader_id, states, 'x'))
-        return follower_veh.compute_error_to_safe_gap(follower_states,
-                                                      leader_x)
+        return follower_veh.compute_error_to_safe_gap(
+            follower_states, leader_x, is_follower_lane_changing)
 
     def map_input_to_vehicle_ids(self, array) -> Dict[int, np.ndarray]:
         """

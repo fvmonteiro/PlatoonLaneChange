@@ -70,4 +70,4 @@ def compute_all_relative_values(data: pd.DataFrame):
 
 
 def compute_default_safe_gap(vel):
-    return const.SAFE_LC_TIME_HEADWAY * vel + const.STANDSTILL_DISTANCE
+    return const.LC_TIME_HEADWAY * vel + const.STANDSTILL_DISTANCE

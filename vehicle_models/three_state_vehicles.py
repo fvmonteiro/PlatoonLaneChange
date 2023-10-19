@@ -110,13 +110,11 @@ class ThreeStateVehicleInterface(base.BaseVehicleInterface, ABC):
         pass
 
     def get_desired_input(self) -> np.ndarray:
-        return np.array([self.free_flow_speed, 0])
-
-    def get_initial_input_guess(self) -> np.ndarray:
-        return self.get_desired_input()
+        return np.array([self.get_free_flow_speed(), 0])
 
     def get_input_limits(self) -> (List[float], List[float]):
-        return [0, -self.phi_max], [self.free_flow_speed + 5, self.phi_max]
+        return ([0, -self.get_phi_max()],
+                [self.get_free_flow_speed() + 5, self.get_phi_max()])
 
 
 class ThreeStateVehicleRearWheelInterface(ThreeStateVehicleInterface):

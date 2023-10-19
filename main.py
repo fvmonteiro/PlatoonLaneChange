@@ -7,7 +7,8 @@ import time
 import pandas as pd
 
 import analysis
-from controllers.optimal_controller import configure_optimal_controller
+import constants
+import controllers.optimal_controller as opt_ctrl
 import vehicle_models
 import scenarios
 
@@ -140,11 +141,12 @@ def run_save_and_plot(scenario: scenarios.LaneChangeScenario, tf: float = 10.):
 
 
 def mode_convergence_base_tests():
-    configure_optimal_controller(
-        max_iter=5, solver_max_iter=1000, discretization_step=0.1,
-        time_horizon=5.0, has_terminal_constraints=False,
-        jumpstart_next_solver_call=False, has_lateral_constraint=False
-    )
+    opt_ctrl.set_solver_parameters(max_iter=1000, discretization_step=0.1,
+                                   ftol=1.0e-2, estimate_gradient=True)
+    opt_ctrl.set_controller_parameters(max_iter=5, time_horizon=5.0,
+                                       has_terminal_lateral_constraints=False,
+                                       jumpstart_next_solver_call=False,
+                                       has_lateral_safety_constraint=False)
 
     # Eventually we'll move to descriptive names, but for now let's just avoid
     # overwriting data
@@ -159,10 +161,10 @@ def mode_convergence_base_tests():
             # All combinations
             n_ld, n_fd, n_lo, n_fo = (int(b) for b in "{0:04b}".format(i))
             print("============ Running scenario {} ============\t\n"
-                  "n_ld={}, n_fd={}, n_lo={}, n_fo={}".format(
-                      i, n_ld, n_fd, n_lo, n_fo))
+                  f"n_ld={i}, n_fd={n_ld}, n_lo={n_lo}, n_fo={n_fo}")
             scenario = scenarios.LaneChangeScenario.platoon_lane_change(
-                n_platoon, n_lo, n_fo, n_ld, n_fd)
+                n_platoon, n_lo, n_fo, n_ld, n_fd,
+                is_acceleration_optimal=False)
             scenario.create_safe_uniform_speed_initial_state()
             scenario.run(tf)
             n_iter = len(scenario.get_opc_results_summary()['iteration'])
@@ -185,17 +187,19 @@ def mode_convergence_base_tests():
 
 
 def main():
-    n_platoon = 2
+    n_platoon = 1
     n_orig_ahead, n_orig_behind = 0, 0
-    n_dest_ahead, n_dest_behind = 1, 0
+    n_dest_ahead, n_dest_behind = 1, 1
 
-    configure_optimal_controller(max_iter=3, solver_max_iter=300,
-                                 discretization_step=0.2, time_horizon=5.0,
-                                 ftol=1.0e-2,
-                                 has_terminal_constraints=False,
-                                 jumpstart_next_solver_call=True,
-                                 has_lateral_constraint=False,
-                                 estimate_gradient=True)
+    constants.INCREASE_LC_TIME_HEADWAY = False
+    opt_ctrl.set_solver_parameters(max_iter=100, discretization_step=0.2,
+                                   ftol=1.0e-2, estimate_gradient=True)
+    opt_ctrl.set_controller_parameters(max_iter=3, time_horizon=5.0,
+                                       has_terminal_lateral_constraints=False,
+                                       has_lateral_safety_constraint=False,
+                                       provide_initial_guess=True,
+                                       initial_acceleration_guess='zero',
+                                       jumpstart_next_solver_call=True)
 
     start_time = time.time()
 

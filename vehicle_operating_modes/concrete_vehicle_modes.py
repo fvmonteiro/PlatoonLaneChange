@@ -34,7 +34,7 @@ class CLLaneKeepingMode(CLVehicleMode):
 
     def handle_lane_changing_intention(
             self, vehicles: Dict[int, base.BaseVehicle]) -> None:
-        self.vehicle.prepare_for_longitudinal_adjustments_start(vehicles)
+        self.vehicle.prepare_for_longitudinal_adjustments_start()
         self.vehicle.set_mode(CLLongAdjustmentMode())
 
 
@@ -80,7 +80,7 @@ class OCPLaneKeepingMode(OCPVehicleMode):
 
     def handle_lane_changing_intention(
             self, vehicles: Dict[int, base.BaseVehicle]) -> None:
-        self.vehicle.prepare_for_longitudinal_adjustments_start(vehicles)
+        self.vehicle.prepare_for_longitudinal_adjustments_start()
         self.vehicle.set_mode(OCPLongAdjustmentMode())
 
 
@@ -126,7 +126,7 @@ class PlatoonVehicleLaneKeepingMode(PlatoonVehicleMode):
 
     def handle_lane_changing_intention(
             self, vehicles: Dict[int, base.BaseVehicle]) -> None:
-        self.vehicle.prepare_for_longitudinal_adjustments_start(vehicles)
+        self.vehicle.prepare_for_longitudinal_adjustments_start()
         self.vehicle.set_mode(PlatoonVehicleLongAdjustmentMode())
 
 

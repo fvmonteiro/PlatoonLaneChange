@@ -8,9 +8,10 @@ import numpy as np
 
 import vehicle_models.base_vehicle as base
 
+
 # TODO: with the inclusion of all surrounding vehicles in the mode definition
 #  this is starting to look too convoluted. We transform the current
-#  surrounding vehicles of each vehicle in a mode only to translate if back
+#  surrounding vehicles of each vehicle in a mode only to translate it back
 #  to sequences of surrounding vehicles afterwards
 
 
@@ -20,6 +21,7 @@ class SystemMode:
     The combination of all relevant vehicles for all vehicles describes the
     system operation mode.
     """
+
     def __init__(self, vehicles: Dict[int, base.BaseVehicle]):
         self.mode: Dict[int, Dict[str, int]] = {}
         self.id_to_name_map: Dict[int, str] = {-1: 'x'}  # for easier debugging
@@ -68,72 +70,87 @@ class SystemMode:
         return new_mode
 
 
-# Aliases for easier typing hints
-ModeSequence = List[Tuple[float, SystemMode]]
 # Surrounding Vehicle Sequence:
 # a sequence of times and the surrounding vehicles at each time
 SVSequence = List[Tuple[float, Dict[str, int]]]
 
 
-def append_mode_to_sequence(input_sequence: ModeSequence, time: float,
-                            follower_leader_changes: Dict[str, Dict[str, str]]
-                            ) -> None:
-    last_mode = input_sequence[-1][1]
-    new_mode = last_mode.create_altered_mode(follower_leader_changes)
-    input_sequence.append((time, new_mode))
+class ModeSequence:
 
+    def __init__(self):
+        self.sequence: List[Tuple[float, SystemMode]] = []
 
-def mode_sequence_to_sv_sequence(mode_sequence: ModeSequence
-                                 ) -> Dict[int, SVSequence]:
-    """
-    Transforms a list of (time, mode) tuples into a dictionary where vehicle
-    ids are keys and values are lists of (time, leader id) tuples
-    """
-    surrounding_vehicle_sequences: Dict[int, SVSequence] = defaultdict(list)
-    for time, mode in mode_sequence:
-        for ego_id, surrounding_ids in mode.mode.items():
-            surrounding_vehicle_sequences[ego_id].append(
-                (time, surrounding_ids))
-    return surrounding_vehicle_sequences
+    def __str__(self):
+        ret = []
+        for t, m in self.sequence:
+            ret.append("(" + str(t) + ": " + str(m) + ")")
+        return " ".join(ret)
 
+    def is_equal_to(self, other: ModeSequence, dt: float) -> bool:
+        """
 
-def mode_sequence_to_str(s: ModeSequence) -> str:
-    ret = []
-    for t, m in s:
-        ret.append("(" + str(t) + ": " + str(m) + ")")
-    return " ".join(ret)
-
-
-def compare_mode_sequences(s1: ModeSequence, s2: ModeSequence, dt: float
-                           ) -> bool:
-    """
-
-    :param s1: First mode sequence
-    :param s2: Second mode sequence
-    :param dt: The time tolerance for mode switches in each sequence to be
-     considered the same.
-    :return:
-    """
-    if len(s1) != len(s2):
-        return False
-    for i in range(len(s1)):
-        t1, mode1 = s1[i]
-        t2, mode2 = s2[i]
-        if not (np.abs(t1 - t2) <= dt and mode1 == mode2):
+        :param other: Mode sequence being compared with self
+        :param dt: The time tolerance for mode switches in each sequence to be
+         considered the same.
+        :return:
+        """
+        s1 = self.sequence
+        s2 = other.sequence
+        if len(s1) != len(s2):
             return False
-    return True
+        for i in range(len(s1)):
+            t1, mode1 = s1[i]
+            t2, mode2 = s2[i]
+            if not (np.abs(t1 - t2) <= dt and mode1 == mode2):
+                return False
+        return True
+
+    def is_empty(self):
+        return len(self.sequence) == 0
+
+    def get_latest_switch_time(self):
+        return self.sequence[-1][0]
+
+    def get_latest_mode(self) -> SystemMode:
+        return self.sequence[-1][1]
+
+    def add_mode(self, time: float, mode: SystemMode):
+        self.sequence.append((time, mode))
+
+    def alter_and_add_mode(self, time: float,
+                           follower_leader_changes: Dict[str, Dict[str, str]]):
+        """
+        Copies the latest mode, change it according to the given parameter,
+        and adds it to the sequence
+        :param time:
+        :param follower_leader_changes:
+        :return:
+        """
+        last_mode = self.get_latest_mode()
+        new_mode = last_mode.create_altered_mode(follower_leader_changes)
+        self.add_mode(time, new_mode)
+
+    def to_sv_sequence(self) -> Dict[int, SVSequence]:
+        """
+        Transforms a list of (time, mode) tuples into a dictionary where vehicle
+        ids are keys and values are lists of (time, leader id) tuples
+        """
+        surrounding_vehicle_sequences: Dict[int, SVSequence] = defaultdict(list)
+        for time, mode in self.sequence:
+            for ego_id, surrounding_ids in mode.mode.items():
+                surrounding_vehicle_sequences[ego_id].append(
+                    (time, surrounding_ids))
+        return surrounding_vehicle_sequences
 
 
-def print_vehicles_leader_sequences(
-        vehicles: Dict[int, base.BaseVehicleInterface]):
-    print("OCP leader sequences:")
-    for veh in vehicles.values():
-        if len(veh.ocp_mode_switch_times) == 0:
-            continue
-        print(veh.get_name(), end=": ")
-        for t, lead_id in zip(veh.ocp_mode_switch_times,
-                              veh.ocp_target_leader_sequence):
-            print('(t={}, l={})'.format(
-                t, vehicles[lead_id].get_name()
-                if lead_id >= 0 else lead_id), end="; ")
-        print()
+def create_synchronous_lane_change_mode_sequence(mode_sequence: ModeSequence,
+                                                 platoon_size: int):
+    latest_mode = mode_sequence.get_latest_mode()
+    time = mode_sequence.get_latest_switch_time()
+    switch_time = time + 1.0  # TODO: no idea what value to add here
+    pN = 'p' + str(platoon_size)
+    changes = {
+        'p1': {'lo': 'ld1'},
+        'fd1': {'lo': pN, 'leader': pN}
+        }
+    mode_sequence.alter_and_add_mode(switch_time, changes)

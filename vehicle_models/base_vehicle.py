@@ -46,8 +46,10 @@ class BaseVehicle(ABC):
 
     # Used when we need to copy a vehicle
     static_attribute_names = {
-        'free_flow_speed', '_id', '_name', 'lr', 'lf', '_wheelbase',
-        'phi_max', 'h', 'safe_h', 'h', 'c', '_is_connected', '_is_verbose',
+        'free_flow_speed', '_id', '_name', 'lr', 'lf', 'wheelbase',
+        'phi_max', 'brake_max', 'accel_max',
+        'h_safe_lk', 'h_ref_lk', 'h_safe_lc', 'h_ref_lc', 'c',
+        '_is_connected', '_is_verbose',
     }
 
     def __init__(self):
@@ -61,16 +63,18 @@ class BaseVehicle(ABC):
         self._name: str = str(self._id)  # default
         self.lr = 2  # dist from C.G. to rear wheel
         self.lf = 1  # dist from C.G. to front wheel
-        self._wheelbase = self.lr + self.lf
+        self.wheelbase = self.lr + self.lf
         self.phi_max = 0.1  # max steering wheel angle
+        self.brake_max = -4.0
+        self.accel_max = 2.0
         # self._lateral_gain = 1
         self._lc_duration = 5  # [s]
-        # Note: h and safe_h are a simplification of the system. The time
-        # headway used for vehicle following is computed in a way to
-        # overestimate the nonlinear safe distance. In the above, we just
-        # assume the safe distance is also linear and with a smaller h.
-        self.h = const.TIME_HEADWAY
-        self.safe_h = const.SAFE_LC_TIME_HEADWAY
+        # Note: safe time headway values are used to linearly overestimate
+        # the nonlinear safe gaps
+        self.h_safe_lk = const.LK_TIME_HEADWAY
+        self.h_ref_lk = const.LK_TIME_HEADWAY + 0.1
+        self.h_safe_lc = const.LC_TIME_HEADWAY
+        self.h_ref_lc = const.LC_TIME_HEADWAY + 0.1
         self.c = const.STANDSTILL_DISTANCE
 
         self._is_connected = False
@@ -123,6 +127,10 @@ class BaseVehicle(ABC):
 
     def get_theta(self) -> float:
         return self.get_a_state_by_name('theta')
+
+    def get_reference_time_headway(self):
+        return (self.h_ref_lc if self.has_lane_change_intention()
+                else self.h_ref_lk)
 
     def get_a_state_by_name(self, state_name) -> float:
         return self._states[self._state_idx[state_name]]
@@ -322,8 +330,6 @@ class BaseVehicle(ABC):
         simulated again
         """
         self.initialize_simulation_logs(n_samples)
-        # TODO: maybe all the settings below can be in the constructor
-        #  It depends on whether we need to "restart" vehicles
         self._desired_future_follower_id = -1
         self._long_adjust_start_time = -np.inf
         self._lc_start_time = -np.inf
@@ -476,18 +482,23 @@ class BaseVehicle(ABC):
         return (leading_vehicle.get_x()
                 - following_vehicle.get_x())
 
-    def compute_safe_gap(self, v_ego=None):
+    def compute_safe_lane_change_gap(self, v_ego=None):
         if v_ego is None:
             v_ego = self.get_vel()
-        return self.safe_h * v_ego + self.c
+        return self.h_safe_lc * v_ego + self.c
 
     def compute_free_flow_desired_gap(self):
-        return self.compute_desired_gap(self.free_flow_speed)
+        return self.compute_desired_gap(self.free_flow_speed, self.h_ref_lk)
 
-    def compute_desired_gap(self, vel: float = None):
+    def compute_lane_keeping_desired_gap(self, vel: float = None):
+        return self.compute_desired_gap(vel, self.h_ref_lk)
+
+    def compute_desired_gap(self, vel: float = None, h_ref: float = None):
         if vel is None:
             vel = self.get_vel()
-        return self.h * vel + self.c
+        if h_ref is None:
+            h_ref = self.get_reference_time_headway()
+        return h_ref * vel + self.c
 
     def compute_derivatives(self):
         self._derivatives = np.zeros(self._n_states)
@@ -542,7 +553,7 @@ class BaseVehicle(ABC):
         self._derivatives[self._state_idx['x']] = vel * np.cos(theta)
         self._derivatives[self._state_idx['y']] = vel * np.sin(theta)
         self._derivatives[self._state_idx['theta']] = (vel * np.tan(phi)
-                                                       / self._wheelbase)
+                                                       / self.wheelbase)
 
     # TODO: duplicated at interface
     def create_state_vector(self, x: float, y: float, theta: float,
@@ -570,8 +581,7 @@ class BaseVehicle(ABC):
             df, 'dest_lane_follower_id', self._destination_follower_id)
         return df
 
-    def prepare_for_longitudinal_adjustments_start(
-            self, vehicles: Dict[int, BaseVehicle]):
+    def prepare_for_longitudinal_adjustments_start(self):
         self._long_adjust_start_time = self.get_current_time()
         # self._set_up_longitudinal_adjustments_control(vehicles)
 
@@ -682,23 +692,19 @@ class BaseVehicleInterface(ABC):
         """
 
         """
-        # self.state_names, self.n_states = None, None
-        # self.input_names, self.n_inputs = None, None
-        # self.state_idx, self.optimal_input_idx = {}, {}
+        self.base_vehicle = vehicle
         self._time: float = 0.
 
         # Copy values from the vehicle
-        # for attr_name in vehicle.static_attribute_names:
-        #     setattr(self, attr_name, getattr(vehicle, attr_name))
-        self._id: int = vehicle.get_id()
-        self._name: str = vehicle.get_name()
-        self.lr: float = vehicle.lr  # dist from C.G. to rear wheel
-        self.lf: float = vehicle.lf  # dist from C.G. to front wheel
-        self._wheelbase: float = self.lr + self.lf
-        self.phi_max: float = vehicle.phi_max  # max steering wheel angle
-        self.safe_h: float = vehicle.safe_h
-        self.c: float = vehicle.c  # standstill distance [m]
-        self.free_flow_speed: float = vehicle.free_flow_speed
+        # These commented out values are accessed often. Would it be faster to
+        # copy them instead of always going back to the base_vehicle instance?
+        # self.lr: float = vehicle.lr  # dist from C.G. to rear wheel
+        # self.lf: float = vehicle.lf  # dist from C.G. to front wheel
+        # self._wheelbase: float = self.base_vehicle.lr + self.base_vehicle.lf
+        # self.h_safe_lk: float = vehicle.h_safe_lk
+        # self.h_safe_lc: float = vehicle.h_safe_lc
+        # self.c: float = vehicle.c  # standstill distance [m]
+        # self.free_flow_speed: float = vehicle.free_flow_speed
         self._origin_leader_id: int = vehicle.get_orig_lane_leader_id()
         self._destination_leader_id: int = vehicle.get_dest_lane_leader_id()
         self._destination_follower_id: int = vehicle.get_dest_lane_follower_id()
@@ -717,17 +723,29 @@ class BaseVehicleInterface(ABC):
         self.ocp_target_leader_sequence: List[int] = []
 
     def __repr__(self):
-        return self.__class__.__name__ + ' id=' + str(self._id)
+        return self.__class__.__name__ + ' id=' + str(self.get_id())
 
     def __str__(self):
-        return (self.__class__.__name__ + ": id=" + str(self._id)
-                + "V_f=" + str(self.free_flow_speed))
+        return (self.__class__.__name__ + ": id=" + str(self.get_id())
+                + "V_f=" + str(self.get_free_flow_speed()))
 
     def get_id(self) -> int:
-        return self._id
+        return self.base_vehicle.get_id()
 
     def get_name(self) -> str:
-        return self._name
+        return self.base_vehicle.get_name()
+
+    def get_free_flow_speed(self) -> float:
+        return self.base_vehicle.free_flow_speed
+
+    def get_phi_max(self) -> float:
+        return self.base_vehicle.phi_max
+
+    def get_accel_max(self) -> float:
+        return self.base_vehicle.accel_max
+
+    def get_brake_max(self) -> float:
+        return self.base_vehicle.brake_max
 
     def get_initial_state(self):
         return self._initial_state
@@ -737,6 +755,9 @@ class BaseVehicleInterface(ABC):
 
     def get_y0(self):
         return self.select_state_from_vector(self._initial_state, 'y')
+
+    def get_phi(self, optimal_inputs):
+        return self.select_input_from_vector(optimal_inputs, 'phi')
 
     def get_orig_lane_leader_id(self, time: float):
         if len(self.ocp_origin_leader_sequence) == 0:
@@ -855,13 +876,23 @@ class BaseVehicleInterface(ABC):
             shifted = np.round(original + value, 4)
             self._initial_state[self.state_idx[state_name]] = shifted
 
-    def compute_safe_gap(self, v_ego) -> float:
-        return self.safe_h * v_ego + self.c
+    def compute_lane_keeping_safe_gap(self, v_ego: float) -> float:
+        return self.compute_safe_gap(v_ego, self.base_vehicle.h_safe_lk)
 
-    def compute_error_to_safe_gap(self, ego_states, leader_x) -> float:
+    def compute_lane_changing_safe_gap(self, v_ego: float) -> float:
+        return self.compute_safe_gap(v_ego, self.base_vehicle.h_safe_lc)
+
+    def compute_safe_gap(self, v_ego: float, safe_h: float) -> float:
+        return safe_h * v_ego + self.base_vehicle.c
+
+    def compute_error_to_safe_gap(self, ego_states, leader_x,
+                                  has_lane_change_intention: bool) -> float:
         gap = leader_x - self.select_state_from_vector(ego_states, 'x')
-        safe_gap = self.compute_safe_gap(self.select_state_from_vector(
-            ego_states, 'v'))
+        v_ego = self.select_state_from_vector(ego_states, 'v')
+        if has_lane_change_intention:
+            safe_gap = self.compute_lane_changing_safe_gap(v_ego)
+        else:
+            safe_gap = self.compute_lane_keeping_safe_gap(v_ego)
         return gap - safe_gap
 
     # def lane_changing_safety_constraint(self, ego_states, other_states, phi):
@@ -875,9 +906,7 @@ class BaseVehicleInterface(ABC):
     def compute_derivatives(self, ego_states, inputs, leader_states):
         dxdt = np.zeros(self.n_states)
         theta = self.select_state_from_vector(ego_states, 'theta')
-        # TODO: do like with acceleration: create a virtual method that will
-        #  get phi if the vehicle has that input
-        phi = self.select_input_from_vector(inputs, 'phi')
+        phi = self.get_phi(inputs)
         vel = self.select_vel_from_vector(ego_states, inputs)
         accel = self.compute_acceleration(ego_states, inputs, leader_states)
         self._compute_derivatives(vel, theta, phi, accel, dxdt)
@@ -900,26 +929,27 @@ class BaseVehicleInterface(ABC):
 
     def _position_derivative_cg(self, vel: float, theta: float, phi: float,
                                 derivatives) -> None:
-        beta = np.arctan(self.lr * np.tan(phi) / (self.lf + self.lr))
+        beta = np.arctan(self.base_vehicle.lr * np.tan(phi)
+                         / self.base_vehicle.wheelbase)
         derivatives[self.state_idx['x']] = vel * np.cos(theta + beta)
         derivatives[self.state_idx['y']] = vel * np.sin(theta + beta)
         derivatives[self.state_idx['theta']] = (vel * np.sin(beta)
-                                                / self.lr)
+                                                / self.base_vehicle.lr)
 
     def _position_derivative_rear_wheels(self, vel: float, theta: float,
                                          phi: float, derivatives):
         derivatives[self.state_idx['x']] = vel * np.cos(theta)
         derivatives[self.state_idx['y']] = vel * np.sin(theta)
         derivatives[self.state_idx['theta']] = (vel * np.tan(phi)
-                                                / self._wheelbase)
+                                                / self.base_vehicle.wheelbase)
 
     def to_dataframe(self, time, states, inputs):
         data = np.concatenate([time.reshape(1, -1), states, inputs])
         columns = (['t'] + [s for s in self.state_names]
                    + [i for i in self.input_names])
         df = pd.DataFrame(data=np.transpose(data), columns=columns)
-        df['id'] = self._id
-        df['name'] = self._name
+        df['id'] = self.get_id()
+        df['name'] = self.get_name()
         df['orig_lane_leader_id'] = self._origin_leader_id
         df['dest_lane_leader_id'] = self._destination_leader_id
         df['dest_lane_follower_id'] = self._destination_follower_id
@@ -937,10 +967,6 @@ class BaseVehicleInterface(ABC):
 
     @abstractmethod
     def get_desired_input(self) -> np.ndarray:
-        pass
-
-    @abstractmethod
-    def get_initial_input_guess(self) -> np.ndarray:
         pass
 
     @abstractmethod

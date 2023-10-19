@@ -292,12 +292,18 @@ class LaneChangeScenario(SimulationScenario):
     def get_opc_results_summary(self):
         # We assume there's either a single optimally controlled vehicles
         # or that they all share the same controller
-        opc_vehicle = self.vehicle_group.get_optimal_control_vehicles()[0]
+        try:
+            opc_vehicle = self.vehicle_group.get_optimal_control_vehicles()[0]
+        except IndexError:
+            raise AttributeError  # no optimal control vehicles in this group
         return (opc_vehicle.opt_controller.get_running_cost_history(),
                 opc_vehicle.opt_controller.get_terminal_cost_history())
 
     def get_opc_cost_history(self):
-        opc_vehicle = self.vehicle_group.get_optimal_control_vehicles()[0]
+        try:
+            opc_vehicle = self.vehicle_group.get_optimal_control_vehicles()[0]
+        except IndexError:
+            raise AttributeError  # no optimal control vehicles in this group
         return (opc_vehicle.opt_controller.get_running_cost_history(),
                 opc_vehicle.opt_controller.get_terminal_cost_history())
 
@@ -364,7 +370,7 @@ class LaneChangeScenario(SimulationScenario):
                       + [v_dest_leader] + [v_others] * (self.n_per_lane[1] - 1))
         self.vehicle_group.set_free_flow_speeds(v_ff_array)
         # Deviation from equilibrium position:
-        delta_x = {'lo': 0.0, 'ld': 11., 'fd': 0.0}
+        delta_x = {'lo': 0.0, 'ld': 0.0, 'fd': 0.0}
         self.create_initial_state(v_orig_leader, v_dest_leader, delta_x)
 
     def create_initial_state(self, v_orig: float, v_dest: float,

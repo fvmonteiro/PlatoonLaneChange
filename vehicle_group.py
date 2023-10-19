@@ -23,7 +23,7 @@ class VehicleGroup:
         self.name_to_id: Dict[str, int] = {}
         # The full system (all vehicles) mode is defined by follower/leader
         # pairs.
-        self.mode_sequence: som.ModeSequence = []
+        self.mode_sequence: som.ModeSequence = som.ModeSequence()
         # self._is_controller_centralized = False
         self._is_verbose = True
 
@@ -32,7 +32,7 @@ class VehicleGroup:
 
     def get_current_mode(self) -> som.SystemMode:
         try:
-            return self.mode_sequence[-1][1]
+            return self.mode_sequence.get_latest_mode()
         except IndexError:
             return som.SystemMode({})
 
@@ -75,7 +75,7 @@ class VehicleGroup:
             inputs.append(self.vehicles[veh_id].get_input_history())
         return np.vstack(inputs)
 
-    def get_mode_sequence(self):
+    def get_mode_sequence(self) -> som.ModeSequence:
         return self.mode_sequence
 
     def get_vehicle_id_by_name(self, name: str) -> int:
@@ -122,7 +122,8 @@ class VehicleGroup:
                 v = self.vehicles[veh_id].free_flow_speed
             else:
                 v = v_ref[veh_id]
-            gaps.append(self.vehicles[veh_id].compute_desired_gap(v))
+            gaps.append(
+                self.vehicles[veh_id].compute_lane_keeping_desired_gap(v))
         return gaps
 
     def set_verbose(self, value: bool):
@@ -205,7 +206,7 @@ class VehicleGroup:
         Sets all internal states, inputs and other simulation-related variables
         to zero.
         """
-        self.mode_sequence = []
+        self.mode_sequence = som.ModeSequence()
         for vehicle in self.vehicles.values():
             vehicle.prepare_to_start_simulation(n_samples)
 
@@ -301,14 +302,14 @@ class VehicleGroup:
         if self.get_current_mode() != new_mode:
             time = self.vehicles[0].get_current_time()
             if self._is_verbose:
-                if len(self.mode_sequence) == 0:
+                if self.mode_sequence.is_empty():
                     # print("Initial mode: {}".format(
                     #     new_mode))
                     pass
                 else:
                     print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
                         time, self.get_current_mode(), new_mode))
-            self.mode_sequence.append((time, new_mode))
+            self.mode_sequence.add_mode(time, new_mode)
 
     def update_platoons(self):
         for ego_vehicle in self.vehicles.values():

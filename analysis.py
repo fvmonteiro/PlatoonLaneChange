@@ -223,7 +223,8 @@ def plot_platoon_lane_change(data: pd.DataFrame):
     for i in range(2, n_platoon + 1):
         vehicle_pairs['p' + str(i)] = ['p' + str(i - 1)]
     vehicle_pairs['p' + str(n_platoon)].append('fd1')
-    vehicle_pairs['p' + str(n_platoon)].append('ld1')
+    if n_platoon > 1:
+        vehicle_pairs['p' + str(n_platoon)].append('ld1')
 
     sns.set_style('whitegrid')
     x_axes = ['t', 't', 't', 't']
@@ -265,8 +266,9 @@ def plot_gap_errors(data: pd.DataFrame,
                        - follower_data['x'].to_numpy())
                 gap_error = gap - safe_gap
                 other_name = other_data['name'].iloc[0]
-                ax.plot(ego_data['t'].to_numpy(), gap_error,
-                        label=f'{ego_name} to {other_name}')
+                if np.any(gap_error < 5):
+                    ax.plot(ego_data['t'].to_numpy(), gap_error,
+                            label=f'{ego_name} to {other_name}')
     ax.legend()
     y_low, y_high = ax.get_ylim()
     final_t = data['t'].max()

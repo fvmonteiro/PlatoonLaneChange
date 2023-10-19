@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from functools import partial
 import time
-from typing import Callable, Dict, List, Union, Tuple
+from typing import Dict, List, Union, Tuple
 import warnings
 
 import control as ct
 import control.optimal as opt
-import control.flatsys as flat
 import numpy as np
 from scipy.optimize import LinearConstraint, NonlinearConstraint
 
@@ -20,50 +18,77 @@ import vehicle_group as vg
 import vehicle_group_ocp_interface as vgi
 
 
-def configure_optimal_controller(
-        max_iter: int = None, solver_max_iter: int = None,
-        discretization_step: float = None, time_horizon: float = None,
-        ftol: float = None, has_terminal_constraints: bool = False,
-        jumpstart_next_solver_call: bool = False,
-        has_lateral_constraint: bool = False, estimate_gradient: bool = True):
+def set_solver_parameters(
+        max_iter: int = None, discretization_step: float = None,
+        ftol: float = None, estimate_gradient: bool = True
+) -> None:
     """
-    Sets the configurations of the optimal controller that do not vary during
-    the simulation.
-    :param max_iter: Maximum number of times the ocp will be solved until
-     mode sequence convergence (different from max iteration of the solver)
+    Sets the configurations of the underlying optimization tool.
+    :param max_iter: Maximum number of iterations by the solver
     :param discretization_step: Fixed discretization step of the opc solver
-    :param time_horizon: Final time of the optimal control problem
     :param ftol: Scipy minimize parameter: "Precision goal for the value of f
      in the stopping criterion."
-    :param solver_max_iter: Maximum number of iterations by the solver
-    :param has_terminal_constraints: Whether to include terminal constraints. If
-     true, then there are no terminal costs
-    :param jumpstart_next_solver_call: Whether to use the solution of the
-     previous call to the solver as starting point for the next call
-    :param has_lateral_constraint: Whether to include a constraint to keep the
-     lane changing vehicles between y(t0)-1 and y(tf)+1. This can sometimes
-     speed up simulations or prevent erratic behavior
     :param estimate_gradient: Allow the optimizer to estimate the gradient
      or provide analytical cost gradient
     :return:
     """
     if max_iter:
-        VehicleOptimalController.max_iter = max_iter
-    if solver_max_iter:
-        VehicleOptimalController.solver_max_iter = solver_max_iter
+        VehicleOptimalController.solver_max_iter = max_iter
     if discretization_step:
         VehicleOptimalController.discretization_step = discretization_step
-    if time_horizon:
-        VehicleOptimalController.time_horizon = time_horizon
     if ftol:
         VehicleOptimalController.ftol = ftol
+    VehicleOptimalController.estimate_gradient = estimate_gradient
 
-    VehicleOptimalController.has_terminal_constraints = (
-        has_terminal_constraints)
+
+def set_controller_parameters(
+        max_iter: int = None, time_horizon: float = None,
+        has_terminal_lateral_constraints: bool = False,
+        has_lateral_safety_constraint: bool = False,
+        provide_initial_guess: bool = False,
+        initial_acceleration_guess: Union[str, float] = 0.0,
+        jumpstart_next_solver_call: bool = False
+) -> None:
+    """
+    Sets the configurations of the optimal controller which iteratively
+    calls the optimization tool.
+    :param max_iter: Maximum number of times the ocp will be solved until
+     mode sequence convergence (different from max iteration of the solver).
+    :param time_horizon: Final time of the optimal control problem.
+    :param has_terminal_lateral_constraints: Whether to include terminal
+     lateral constraints, i.e., lane changing vehicles must finish with
+     y_d - e <= y(tf) <= y_d + e. If true, then there are no terminal costs.
+    :param has_lateral_safety_constraint: Whether to include a constraint to
+     keep the lane changing vehicles between y(t0)-1 and y(tf)+1. This can
+     sometimes speed up simulations or prevent erratic behavior.
+    :param provide_initial_guess: If true, simulates the system given the
+     initial input guess and passes an (inputs, states) tuple as initial guess
+     to the solver. It only affects the first call to the solver if
+     jumpstart_next_solver_call is True.
+    :param initial_acceleration_guess: Initial guess of the optimal
+     acceleration. We can provide the exact value or one of the strings 'zero',
+     'max' (max acceleration), 'min' (max brake). The same value is used for
+     the entire time horizon. It only affects the first call to the solver if
+     jumpstart_next_solver_call is True.
+    :param jumpstart_next_solver_call: Whether to use the solution of the
+     previous call to the solver as starting point for the next call.
+    :return:
+    """
+    if max_iter:
+        VehicleOptimalController.max_iter = max_iter
+    if time_horizon:
+        VehicleOptimalController.time_horizon = time_horizon
+
+    VehicleOptimalController.has_terminal_lateral_constraints = (
+        has_terminal_lateral_constraints)
+    VehicleOptimalController.has_safety_lateral_constraint = (
+        has_lateral_safety_constraint)
+    VehicleOptimalController.provide_initial_guess = (
+        provide_initial_guess)
+    VehicleOptimalController.initial_acceleration_guess = (
+        initial_acceleration_guess)
     VehicleOptimalController.jumpstart_next_solver_call = (
         jumpstart_next_solver_call)
-    VehicleOptimalController.has_lateral_constraint = has_lateral_constraint
-    VehicleOptimalController.estimate_gradient = estimate_gradient
 
 
 class VehicleOptimalController:
@@ -84,15 +109,20 @@ class VehicleOptimalController:
     _desired_state: np.ndarray
     _cost_with_tracker: occ.OCPCostTracker
 
+    # Solver params
     solver_max_iter: int = 300
-    max_iter: int = 3
     discretization_step: float = 1.0  # [s]
-    time_horizon: float = 10.0  # [s]
     ftol: float = 1.0e-6  # [s]
-    has_terminal_constraints: bool = False
-    jumpstart_next_solver_call: bool = False
-    has_lateral_constraint: bool = False
     estimate_gradient: bool = True
+
+    # Our controller's params
+    max_iter: int = 3
+    time_horizon: float = 10.0  # [s]
+    has_terminal_lateral_constraints: bool = False
+    has_safety_lateral_constraint: bool = False
+    provide_initial_guess: bool = False,
+    initial_acceleration_guess: Union[str, float] = 0.0
+    jumpstart_next_solver_call: bool = False
 
     def __init__(self):
         self._terminal_cost = None
@@ -210,19 +240,17 @@ class VehicleOptimalController:
         print('Platoon veh pairs:', self._platoon_vehicle_pairs)
         print('Dest lane vehs:', self._dest_lane_vehicles_ids)
 
-    def find_trajectory(
-            self, vehicles: Dict[int, base.BaseVehicle],
-    ):
+    def find_trajectory(self, vehicles: Dict[int, base.BaseVehicle]):
         """
         Solves the OPC for all listed controlled vehicles
         :param vehicles: All relevant vehicles
-        :return:
+        :return: Nothing. All relevant values are stored internally
         """
 
-        input_sequence: som.ModeSequence = [(0.0, som.SystemMode(vehicles))]
-        # som.append_mode_to_sequence(input_sequence, 1.0,
-        #                             {#'p1': {'fd': 'x'},
-        #                              'fd1': {'lo': 'p1', 'leader': 'p1'}})
+        input_sequence: som.ModeSequence = som.ModeSequence()
+        input_sequence.add_mode(0.0, som.SystemMode(vehicles))
+        # som.append_mode_to_sequence(input_sequence, 0.1,
+        #                             {'fd1': {'lo': 'p1', 'leader': 'p1'}})
 
         # We put the vehicle below at the origin (0, 0) when solving the opc
         # to make the solution independent of shifts in initial position
@@ -235,15 +263,15 @@ class VehicleOptimalController:
             self.time_horizon)
         self._create_cost_with_tracker()
 
+        initial_guess = (self.create_initial_guess(vehicles)
+                         if self.provide_initial_guess else None)
         converged = False
-        initial_guess = None
-        # initial_guess = self.create_initial_guess(vehicles)
         counter = 0
         while not converged and counter < self.max_iter:
             counter += 1
 
-            input_seq_str = som.mode_sequence_to_str(input_sequence)
-            print("Setting mode sequence to:  {}".format(input_seq_str))
+            # input_seq_str = som.mode_sequence_to_str(input_sequence)
+            print("Setting mode sequence to:  {}".format(input_sequence))
             self._ocp_interface.set_mode_sequence(input_sequence)
             self._set_constraints()
             self._cost_with_tracker.start_recording()
@@ -252,9 +280,9 @@ class VehicleOptimalController:
             self._solve_ocp(initial_guess)
             solve_time = time.time() - start_time
 
-            # Just checking what the optimizer "sees"
+            # Temp: just checking what the optimizer "sees"
             alt = self.get_ocp_solver_simulation(vehicles)
-            if len(self._platoon_vehicle_pairs) < 1:  # TODO: temp checking
+            if len(self._platoon_vehicle_pairs) < 1:
                 analysis.plot_constrained_lane_change(
                     alt.to_dataframe(), vehicles[center_veh_id].get_id())
             else:
@@ -272,16 +300,19 @@ class VehicleOptimalController:
                 analysis.plot_platoon_lane_change(self._data_per_iteration[-1])
             output_sequence = simulated_vehicle_group.get_mode_sequence()
 
-            output_seq_str = som.mode_sequence_to_str(output_sequence)
+            # output_seq_str = som.mode_sequence_to_str(output_sequence)
             print("Input sequence:  {}\nOutput sequence: {}".format(
-                input_seq_str, output_seq_str
+                input_sequence, output_sequence
             ))
-            self._log_results(counter, input_seq_str, output_seq_str,
-                              solve_time, self.ocp_result)
+            self._log_results(counter, str(input_sequence),
+                              str(output_sequence), solve_time, self.ocp_result)
 
-            converged = som.compare_mode_sequences(
-                input_sequence, output_sequence, self.discretization_step
-            )
+            converged = input_sequence.is_equal_to(output_sequence,
+                                                   self.discretization_step)
+            # converged = som.compare_mode_sequences(
+            #     input_sequence, output_sequence, self.discretization_step
+            # )
+
             print("Converged?", converged)
             input_sequence = output_sequence
             if self.jumpstart_next_solver_call and self.ocp_result.success:
@@ -316,7 +347,7 @@ class VehicleOptimalController:
         # print('===== TRYING NEW COST FUNCTION =====')
         # running_cost = self._ocp_interface.cost_function(controlled_veh_ids)
 
-        if not self.has_terminal_constraints:
+        if not self.has_terminal_lateral_constraints:
             Q_terminal = (
                 self._ocp_interface.create_state_cost_matrix(y_cost=10.,
                                                              theta_cost=1.)
@@ -360,7 +391,7 @@ class VehicleOptimalController:
     def _set_constraints(self):
         self._constraints = []
         self._set_input_constraints()
-        if self.has_terminal_constraints:
+        if self.has_terminal_lateral_constraints:
             self._set_terminal_constraints()
         self._set_safety_constraints()
         self._set_platoon_formation_constraints()
@@ -430,7 +461,7 @@ class VehicleOptimalController:
                 )
                 self._constraints.append(veh_foll_constraint)
 
-            if self.has_lateral_constraint:
+            if self.has_safety_lateral_constraint:
                 d = np.zeros(self._ocp_interface.n_states
                              + self._ocp_interface.n_inputs)
                 d[self._ocp_interface.get_a_vehicle_state_index(
@@ -457,7 +488,8 @@ class VehicleOptimalController:
         if custom_initial_guess is not None:
             x0 = custom_initial_guess
         else:
-            x0 = self._ocp_interface.get_initial_inputs_guess()
+            x0 = self._ocp_interface.get_initial_inputs_guess(
+                self.initial_acceleration_guess, as_dict=False)
 
         # try:
         result = opt.solve_ocp(
@@ -567,7 +599,8 @@ class VehicleOptimalController:
                                              initial_state_per_vehicle)
         vehicle_group.set_verbose(False)
         vehicle_group.prepare_to_start_simulation(len(sim_time))
-        input_guess = self._ocp_interface.get_initial_input_guess_per_vehicle()
+        input_guess = self._ocp_interface.get_initial_inputs_guess(
+            self.initial_acceleration_guess, as_dict=True)
         # time is the last state
         states = np.zeros([self._ocp_interface.n_states, len(sim_time)])
         states[:, 0] = np.hstack((vehicle_group.get_current_state(),
@@ -576,8 +609,10 @@ class VehicleOptimalController:
             vehicle_group.simulate_one_time_step(sim_time[i], input_guess)
             states[:, i] = np.hstack((vehicle_group.get_current_state(),
                                       sim_time[i]))
-        inputs = np.repeat(self._ocp_interface.get_initial_inputs_guess(),
-                           len(sim_time)).reshape(-1, len(sim_time))
+        input_array = []
+        [input_array.extend(a) for a in list(input_guess.values())]
+        inputs = np.repeat(input_array, len(sim_time)
+                           ).reshape(-1, len(sim_time))
         return states, inputs
 
     def _log_results(self, counter: int, input_sequence: str,
