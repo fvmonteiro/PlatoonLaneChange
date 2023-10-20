@@ -1,4 +1,4 @@
-from typing import Any, Dict, Iterable, List, Type, Union, TypeVar
+from typing import Any, Dict, Iterable, List, Type, Union, TypeVar, Set
 
 import numpy as np
 import pandas as pd
@@ -220,15 +220,24 @@ class VehicleGroup:
         """
         self.vehicles = {}
         self.sorted_vehicle_ids = []
-        # self.n_vehs = len(vehicle_classes)
         for veh_class in vehicle_classes:
             vehicle = veh_class()
             self.sorted_vehicle_ids.append(vehicle.get_id())
             self.vehicles[vehicle.get_id()] = vehicle
 
-    # TODO: rename to indicate vehicles are reset to restart simulation
-    def populate_with_vehicles(self, vehicles: Dict[int, base.BaseVehicle],
-                               initial_state_per_vehicle=None):
+    def populate_with_copies(self, vehicles: Dict[int, base.BaseVehicle],
+                             controlled_vehicle_ids: Set[int],
+                             initial_state_per_vehicle=None):
+        """
+        Creates copies of existing vehicles and group in this instance. This
+        is useful for simulations that happen during iterations of the optimal
+        controller
+        :param vehicles: All vehicles in the simulation
+        :param controlled_vehicle_ids: Ids of vehicles being controlled by the
+         optimal controller running the simulation
+        :param initial_state_per_vehicle:
+        :return:
+        """
         if self.get_n_vehicles() > 0:
             raise AttributeError("Cannot set vehicles to a vehicle group "
                                  "that was already initialized")
@@ -237,10 +246,10 @@ class VehicleGroup:
                 initial_state = initial_state_per_vehicle[veh_id]
             else:
                 initial_state = None
-            # TODO: call reset copy or open loop copy based on whether
-            #  the vehicle's control is determined by the opt controller
-            # vehicle = vehicles[veh_id].make_reset_copy(initial_state)
-            vehicle = vehicles[veh_id].make_open_loop_copy(initial_state)
+            if veh_id in controlled_vehicle_ids:
+                vehicle = vehicles[veh_id].make_open_loop_copy(initial_state)
+            else:
+                vehicle = vehicles[veh_id].make_reset_copy(initial_state)
             self.sorted_vehicle_ids.append(veh_id)
             self.vehicles[veh_id] = vehicle
             self.name_to_id[vehicle.get_name()] = veh_id

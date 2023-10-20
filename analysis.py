@@ -232,7 +232,6 @@ def plot_platoon_lane_change(data: pd.DataFrame):
 
     fig, ax = plt.subplots(len(y_axes) + 1)
     fig.set_size_inches(12, 8)
-    # TODO: veh pairs depend on the scenario
     plot_gap_errors(data, vehicle_pairs, ax[0])
     plot_scenario_results(x_axes, y_axes, data, ax[1:])
     fig.tight_layout()
@@ -293,11 +292,15 @@ def plot_single_vehicle_lane_change_gap_errors(
 
     gap = lc_vehicle_data['gap_to_orig_lane_leader'].to_numpy()
     orig_lane_error = gap - ego_safe_gap
-    ax.plot(lc_vehicle_data['t'], orig_lane_error, label=veh_name + ' to lo')
+    if np.any(orig_lane_error < 5):
+        ax.plot(lc_vehicle_data['t'].to_numpy(), orig_lane_error,
+                label=f'{veh_name} to lo')
 
     gap = lc_vehicle_data['gap_to_dest_lane_leader'].to_numpy()
     dest_lane_error = gap - ego_safe_gap
-    ax.plot(lc_vehicle_data['t'], dest_lane_error, label=veh_name + ' to ld')
+    if np.any(dest_lane_error < 5):
+        ax.plot(lc_vehicle_data['t'].to_numpy(), dest_lane_error,
+                label=f'{veh_name} to ld')
 
     dest_follower_ids = lc_vehicle_data['dest_lane_follower_id'].unique()
     dest_follower_id = [veh_id for veh_id in dest_follower_ids if veh_id >= 0]
@@ -309,8 +312,9 @@ def plot_single_vehicle_lane_change_gap_errors(
             follower_data['v'].to_numpy())
         gap = lc_vehicle_data['gap_to_dest_lane_follower'].to_numpy()
         dest_lane_error = gap - foll_safe_gap
-        ax.plot(lc_vehicle_data['t'], dest_lane_error,
-                label='fd to ' + veh_name)
+        if np.any(dest_lane_error < 5):
+            ax.plot(lc_vehicle_data['t'].to_numpy(), dest_lane_error,
+                    label=f'fd to {veh_name}')
 
     ax.legend()
     y_low, y_high = ax.get_ylim()

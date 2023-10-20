@@ -99,13 +99,14 @@ class ThreeStateVehicleInterface(base.BaseVehicleInterface, ABC):
 
     def __init__(self, vehicle: ThreeStateVehicle):
         super().__init__(vehicle)
-        self._set_model(self._state_names, self._input_names)
+        self._set_model()
 
-    def _set_speed(self, v0, state):
+    @classmethod
+    def _set_speed(cls, v0, state):
         # Does nothing because velocity is an input for this model
         pass
 
-    def compute_acceleration(self, ego_states, inputs, leader_states):
+    def get_accel(self, ego_states, inputs, leader_states):
         # Does nothing because velocity is an input for this model
         pass
 

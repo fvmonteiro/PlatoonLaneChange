@@ -35,9 +35,6 @@ class Platoon:
     def get_vehicle_ids(self):
         return [veh.get_id() for veh in self.vehicles]
 
-    # def set_lc_start_time(self, t: float):
-    #     self._lc_start_time = t
-
     def get_preceding_vehicle_id(self, veh_id: int) -> int:
         preceding_position = self._id_to_position_map[veh_id] - 1
         if preceding_position >= 0:
@@ -68,46 +65,3 @@ class Platoon:
                 self._id_to_position_map[veh.get_id()] = i
             opt_control = self.get_optimal_controller()
             new_vehicle.set_centralized_controller(opt_control)
-
-    # def add_vehicles(self, vehicles: List[fsv.PlatoonVehicle]):
-    #     self.vehicle_ids = [
-    #         veh.get_id() for veh
-    #         in sorted(vehicles, key=lambda x: x.get_x(), reverse=True)
-    #     ]
-    #     [veh.set_platoon(self) for veh in vehicles]
-
-    # def is_lane_changing(self, t):
-    #     delta_t = t - self._lc_start_time
-    #     return delta_t <= self._ocp_horizon
-
-    def can_start_lane_change(self):
-        return self.get_platoon_leader().opt_controller.has_solution()
-
-    # def compute_lane_change_trajectory(
-    #         self, t: float, all_vehicles: Dict[int, base.BaseVehicle]):
-    #
-    #     # TODO: [Aug 23] No cooperation checks for now
-    #     # If the OPC solver didn't find a solution at first, we do not want to
-    #     # run it again too soon.
-    #     is_cool_down_period_done = (
-    #             t - self._solver_attempt_time >= Platoon._solver_wait_time
-    #     )
-    #     if is_cool_down_period_done:
-    #         self._solver_attempt_time = t
-    #         print("t={:.2f}, veh:{}. Calling ocp solver...".format(t, self._id))
-    #         self._lc_controller.find_multiple_vehicle_trajectory(
-    #             all_vehicles, [veh.get_id() for veh in self.vehicles]
-    #         )
-    #     self.trajectory_exists = True  # self._lc_controller.has_solution()
-
-    def retrieve_all_inputs(self, t):
-        # self.current_inputs = (
-        #     self.get_platoon_leader().opt_controller.get_input(
-        #         t, self.get_vehicle_ids()))
-        self.current_inputs = self.get_optimal_controller().get_input(
-            t, self.get_vehicle_ids())
-
-    def get_input_for_vehicle(self, veh_id):
-        return self.current_inputs[veh_id]
-        # Alternative to get rid of retrive_all_inputs:
-        # self.get_platoon_leader().opt_controller.get_input(t, veh_id)

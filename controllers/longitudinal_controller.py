@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Type
 
 import numpy as np
 
@@ -30,19 +30,28 @@ class LongitudinalController:
             v_leader = leader.get_vel()
             accel = self.compute_gap_control(gap, v_ego, v_leader)
             # Stay under free flow speed
-            if v_ego >= self.vehicle.free_flow_speed and accel > 0:
-                accel = self.compute_velocity_control(v_ff, v_ego)
+            accel = self.saturate_accel(v_ego, v_ff, accel)
         return accel
 
-    def compute_acceleration_bare(self, v_ego, v_ff, has_leader, gap, v_leader):
-        if has_leader:
+    def compute_acceleration_from_interface(
+            self, ego_class: Type[base.BaseVehicleInterface],
+            ego_states, v_ff, leader_states) -> float:
+        v_ego = ego_class.select_state_from_vector(ego_states, 'v')
+        if leader_states is None or len(leader_states) == 0:
             accel = self.compute_velocity_control(v_ff, v_ego)
         else:
+            gap = (ego_class.select_state_from_vector(leader_states, 'x')
+                   - ego_class.select_state_from_vector(ego_states, 'x'))
+            v_leader = ego_class.select_state_from_vector(leader_states, 'v')
             accel = self.compute_gap_control(gap, v_ego, v_leader)
-            # Stay under free flow speed
-            if v_ego >= v_ff and accel > 0:
-                accel = self.compute_velocity_control(v_ff, v_ego)
+            accel = self.saturate_accel(v_ego, v_ff, accel)
         return accel
+
+    def saturate_accel(self, v_ego, v_ff, desired_accel):
+        if v_ego >= v_ff and desired_accel > 0:
+            return self.compute_velocity_control(v_ff, v_ego)
+        else:
+            return desired_accel
 
     def compute_accel_to_a_leader(
             self, other_id: int, vehicles: Dict[int, base.BaseVehicle]

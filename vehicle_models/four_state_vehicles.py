@@ -158,7 +158,7 @@ class OptimalControlVehicle(FourStateVehicle):
 
         # self._n_feedback_inputs = self._n_inputs - self._n_optimal_inputs
         # self._ocp_has_solution = False
-        self._ocp_initial_time = -np.inf
+        # self._ocp_initial_time = -np.inf
 
         self.opt_controller: opt_ctrl.VehicleOptimalController = (
             opt_ctrl.VehicleOptimalController()
@@ -170,8 +170,8 @@ class OptimalControlVehicle(FourStateVehicle):
         centralized_controller.add_controlled_vehicle_id(self.get_id())
         self.opt_controller = centralized_controller
 
-    def reset_ocp_initial_time(self):
-        self._ocp_initial_time = 0.0
+    # def reset_ocp_initial_time(self):
+    #     self._ocp_initial_time = 0.0
 
     def make_open_loop_copy(self, initial_state=None):
         return self.make_reset_copy(initial_state, OpenLoopVehicle)
@@ -207,11 +207,11 @@ class OptimalControlVehicle(FourStateVehicle):
         # run it again too soon.
         t = self.get_current_time()
         is_cool_down_period_done = (
-                t - self._ocp_initial_time
+                t - self.opt_controller.get_activation_time()
                 >= OptimalControlVehicle._solver_wait_time
         )
         if has_vehicle_configuration_changed or is_cool_down_period_done:
-            self._ocp_initial_time = t
+            # self._ocp_initial_time = t
             if self._is_verbose:
                 print("t={:.2f}, veh:{}. Calling ocp solver...".format(
                     t, self._id))
@@ -231,9 +231,9 @@ class OptimalControlVehicle(FourStateVehicle):
         :param vehicles: Surrounding vehicles
         :return: Nothing. The vehicle stores the computed input values
         """
-        if self.is_lane_changing():
-            delta_t = self.get_current_time() - self._ocp_initial_time
-            self._inputs = self.opt_controller.get_input(delta_t, [self._id])
+        t = self.get_current_time()
+        if self.opt_controller.is_active(t):
+            self._inputs = self.opt_controller.get_input(t, [self._id])
         else:
             accel = self.long_controller.compute_acceleration(vehicles)
             phi = self.lk_controller.compute_steering_wheel_angle()
@@ -285,9 +285,9 @@ class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
         """
         self._inputs[self._input_idx['a']] = (
             self.long_controller.compute_acceleration(vehicles))
-        if self.is_lane_changing():
-            delta_t = self.get_current_time() - self._ocp_initial_time
-            phi = self.opt_controller.get_input(delta_t, self._id)[0]
+        t = self.get_current_time()
+        if self.opt_controller.is_active(t):
+            phi = self.opt_controller.get_input(t, self._id)[0]
         else:
             phi = self.lk_controller.compute_steering_wheel_angle()
         self._inputs[self._input_idx['phi']] = phi
@@ -314,11 +314,6 @@ class OptimalCoopNoLCVehicle(OptimalControlVehicle):
         self._ocp_controllable_interface = OpenLoopNoLCVehicleInterface
         self._ocp_non_controllable_interface = SafeLongitudinalVehicleInterface
         # self.set_mode(modes.CLLaneKeepingMode())  # TODO
-        raise NotImplementedError(
-            'Code is not ready for OpenLoopNoLCVehicle class. We first need to'
-            'address the To Dos in the BaseVehicle class methods '
-            'compute_derivatives and make_open_loop_copy and in the '
-            'VehicleGroup class method populate_with_vehicles')
 
     def update_mode(self, vehicles: Dict[int, base.BaseVehicle]):
         pass  # TODO: modes could be cooperating or not
@@ -339,11 +334,9 @@ class OptimalCoopNoLCVehicle(OptimalControlVehicle):
         :param vehicles: Surrounding vehicles
         :return: Nothing. The vehicle stores the computed input values
         """
-
-        if self.is_lane_changing():
-            delta_t = self.get_current_time() - self._ocp_initial_time
-            optimal_inputs = self.opt_controller.get_input(delta_t,
-                                                           self.get_id())
+        t = self.get_current_time()
+        if self.opt_controller.is_active(t):
+            optimal_inputs = self.opt_controller.get_input(t, self.get_id())
             accel = optimal_inputs[self._input_idx['a']]
         else:
             accel = self.long_controller.compute_acceleration(vehicles)
@@ -542,12 +535,12 @@ class PlatoonVehicle(OptimalControlVehicle):
             # The optimization can be called by another vehicle in the case
             # of platoons or centralized control, so we need to update the
             # ocp initial time here
-            if self._ocp_initial_time == -np.inf:
-                self._ocp_initial_time = self.get_current_time()
+            # if self._ocp_initial_time == -np.inf:
+            #     self._ocp_initial_time = self.get_current_time()
             return True
 
         t = self.get_current_time()
-        self._ocp_initial_time = t
+        # self._ocp_initial_time = t
         # if self.is_in_a_platoon():
         #     dest_lane_ids = [veh.get_id() for veh in vehicles.values()
         #                      if veh.get_current_lane() == self.target_lane]
@@ -569,17 +562,15 @@ class PlatoonVehicle(OptimalControlVehicle):
         :param vehicles: Surrounding vehicles
         :return: Nothing. The vehicle stores the computed input values
         """
-
-        if self.is_lane_changing():
+        t = self.get_current_time()
+        if self.opt_controller.is_active(t):
             if self._is_acceleration_optimal:
-                delta_t = self.get_current_time() - self._ocp_initial_time
-                optimal_inputs = self.opt_controller.get_input(delta_t,
-                                                               self.get_id())
+                optimal_inputs = self.opt_controller.get_input(t, self.get_id())
                 accel = optimal_inputs[self._input_idx['a']]
                 phi = optimal_inputs[self._input_idx['phi']]
             else:
                 accel = self.long_controller.compute_acceleration(vehicles)
-                phi = self._platoon.get_input_for_vehicle(self._id)[0]
+                phi = self.opt_controller.get_input(t, self._id)
         else:
             accel = self.long_controller.compute_acceleration(vehicles)
             phi = self.lk_controller.compute_steering_wheel_angle()
@@ -677,15 +668,16 @@ class FourStateVehicleInterface(base.BaseVehicleInterface, ABC):
 
     def __init__(self, vehicle: FourStateVehicle):
         super().__init__(vehicle)
-        self._set_model(self._state_names, self._input_names)
+        self._set_model()
         self.brake_max = vehicle.brake_max
         self.accel_max = vehicle.accel_max
 
     def get_desired_input(self) -> np.ndarray:
         return np.array([0] * self.n_inputs)
 
-    def _set_speed(self, v0, state):
-        state[self.state_idx['v']] = v0
+    @classmethod
+    def _set_speed(cls, v0, state):
+        state[cls.state_idx['v']] = v0
 
     def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
         self._position_derivative_cg(vel, theta, phi, derivatives)
@@ -694,12 +686,11 @@ class FourStateVehicleInterface(base.BaseVehicleInterface, ABC):
 
 class OpenLoopVehicleInterface(FourStateVehicleInterface):
     """ States: [x, y, theta, v], inputs: [a, phi], centered at the C.G. """
-    _input_names = ['a', 'phi']
 
     def __init__(self, vehicle: OpenLoopVehicle):
         super().__init__(vehicle)
 
-    def compute_acceleration(self, ego_states, inputs, leader_states):
+    def get_accel(self, ego_states, inputs, leader_states):
         return self.select_input_from_vector(inputs, 'a')
 
     def get_input_limits(self) -> (List[float], List[float]):
@@ -715,10 +706,10 @@ class OpenLoopNoLCVehicleInterface(FourStateVehicleInterface):
     def __init__(self, vehicle: OptimalCoopNoLCVehicle):
         super().__init__(vehicle)
 
-    def get_phi(self, optimal_inputs):
+    def get_phi(cls, optimal_inputs):
         return 0.0
 
-    def compute_acceleration(self, ego_states, inputs, leader_states):
+    def get_accel(self, ego_states, inputs, leader_states):
         return self.select_input_from_vector(inputs, 'a')
 
     def get_input_limits(self) -> (List[float], List[float]):
@@ -742,25 +733,27 @@ class SafeAccelVehicleInterface(FourStateVehicleInterface):
     def get_input_limits(self) -> (List[float], List[float]):
         return [-self.get_phi_max()], [self.get_phi_max()]
 
-    # TODO: concentrate all accel computation functions in the control class
-    def compute_acceleration(self, ego_states, inputs, leader_states) -> float:
+    def get_accel(self, ego_states, inputs, leader_states) -> float:
         """
         Computes acceleration for the ego vehicle following a leader
         """
-        v_ego = self.select_state_from_vector(ego_states, 'v')
-        v_ff = self.get_free_flow_speed()
-        if leader_states is None or len(leader_states) == 0:
-            return self.long_controller.compute_velocity_control(v_ff, v_ego)
-        else:
-            gap = (self.select_state_from_vector(leader_states, 'x')
-                   - self.select_state_from_vector(ego_states, 'x'))
-            v_leader = self.select_state_from_vector(leader_states, 'v')
-            accel = self.long_controller.compute_gap_control(gap, v_ego,
-                                                             v_leader)
-            if v_ego >= v_ff and accel > 0:
-                return self.long_controller.compute_velocity_control(
-                    v_ff, v_ego)
-            return accel
+        return self.long_controller.compute_acceleration_from_interface(
+            type(self), ego_states, self.get_free_flow_speed(), leader_states
+        )
+        # v_ego = self.select_state_from_vector(ego_states, 'v')
+        # v_ff = self.get_free_flow_speed()
+        # if leader_states is None or len(leader_states) == 0:
+        #     return self.long_controller.compute_velocity_control(v_ff, v_ego)
+        # else:
+        #     gap = (self.select_state_from_vector(leader_states, 'x')
+        #            - self.select_state_from_vector(ego_states, 'x'))
+        #     v_leader = self.select_state_from_vector(leader_states, 'v')
+        #     accel = self.long_controller.compute_gap_control(gap, v_ego,
+        #                                                      v_leader)
+        #     if v_ego >= v_ff and accel > 0:
+        #         return self.long_controller.compute_velocity_control(
+        #             v_ff, v_ego)
+        #     return accel
 
 
 class ClosedLoopVehicleInterface(SafeAccelVehicleInterface):
@@ -771,9 +764,8 @@ class ClosedLoopVehicleInterface(SafeAccelVehicleInterface):
 
     def __init__(self, vehicle: ClosedLoopVehicle):
         super().__init__(vehicle)
-        # self._set_model(self._state_names, self._input_names)
 
-    def select_input_from_vector(self, optimal_inputs: List, input_name: str
+    def select_input_from_vector(cls, optimal_inputs: List, input_name: str
                                  ) -> float:
         return 0.0  # all inputs are computed internally
 
@@ -785,7 +777,7 @@ class SafeLongitudinalVehicleInterface(ClosedLoopVehicleInterface):
     def __init__(self, vehicle: SafeLongitudinalVehicle):
         super().__init__(vehicle)
 
-    def get_phi(self, optimal_inputs):
+    def get_phi(cls, optimal_inputs):
         return 0.0
 
     def _compute_derivatives(self, vel, theta, phi, accel, derivatives):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import Callable, Dict, List, Tuple, Union
+from typing import Callable, Dict, List, Tuple, Union, Set
 import warnings
 
 import numpy as np
@@ -36,7 +36,7 @@ class VehicleGroupInterface:
     """ Class to help manage groups of vehicles """
 
     def __init__(self, vehicles: Dict[int, base.BaseVehicle],
-                 controlled_veh_ids: List[int], ego_id: int = None):
+                 controlled_veh_ids: Set[int], ego_id: int = None):
         """
 
         :param vehicles: All simulation vehicles
@@ -58,7 +58,7 @@ class VehicleGroupInterface:
         # vector
         self.input_idx_map: Dict[int, int] = {}
 
-        self.create_vehicle_interfaces(vehicles, set(controlled_veh_ids),
+        self.create_vehicle_interfaces(vehicles, controlled_veh_ids,
                                        ego_id)
 
     def get_input_limits(self):
@@ -182,7 +182,7 @@ class VehicleGroupInterface:
             vehicle = self.vehicles[veh_id]
             str_id = str(veh_id)
             input_names.extend([name + str_id for name
-                                in vehicle.input_names])
+                                in vehicle.get_input_names()])
         return input_names
 
     def create_vehicle_interfaces(
@@ -225,7 +225,7 @@ class VehicleGroupInterface:
             vehicle = self.vehicles[veh_id]
             str_id = str(veh_id)
             output_names.extend([name + str_id for name
-                                 in vehicle.state_names])
+                                 in vehicle.get_state_names()])
         return output_names + ['time']
 
     def create_desired_state(self, tf: float):

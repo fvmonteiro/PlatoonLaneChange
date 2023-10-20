@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-import copy
-from typing import Dict, Iterable, List, TypeVar, Type, Union
+from typing import Dict, Iterable, List, TypeVar, Type, Tuple, Union
 import warnings
 
 import numpy as np
 import pandas as pd
 
 import constants as const
+import dynamics
 import system_operating_mode as som
 import vehicle_operating_modes.base_operating_modes as modes
 
@@ -209,8 +209,6 @@ class BaseVehicle(ABC):
     def get_platoon(self):
         return None
 
-    # TODO: figure out more descriptive name. This is a copy used for iterative
-    #  simulations
     def make_reset_copy(self, initial_state=None,
                         new_vehicle_type: Type[BaseVehicle] = None) -> V:
         """
@@ -225,8 +223,6 @@ class BaseVehicle(ABC):
         as this instance
         :return:
         """
-        # new_vehicle = copy.deepcopy(self)
-        # self._reset_copied_vehicle(new_vehicle, initial_state)
         if new_vehicle_type is None:
             new_vehicle_type = type(self)
         new_vehicle = new_vehicle_type()
@@ -247,9 +243,6 @@ class BaseVehicle(ABC):
         open loop type vehicle.
         :return:
         """
-        # TODO if we really want to be able to simulate independent optimally
-        #  controlled vehicles, we need to provide a vehicle copy based on
-        #  whether the vehicle is controlled by the controller calling this
         return self.make_reset_copy(initial_state, type(self))
 
     def _reset_copied_vehicle(self, new_vehicle: BaseVehicle,
@@ -531,29 +524,37 @@ class BaseVehicle(ABC):
         # only vehicles with controllers update their discrete states (modes)
         pass
 
-    # TODO: duplicated at interface
     def _position_derivative_longitudinal_only(self, vel):
-        self._derivatives[self._state_idx['x']] = vel
-        self._derivatives[self._state_idx['y']] = 0.
-        self._derivatives[self._state_idx['theta']] = 0.
+        dx, dy, dtheta = dynamics.position_derivative_longitudinal_only(vel)
+        self._derivatives[self._state_idx['x']] = dx
+        self._derivatives[self._state_idx['y']] = dy
+        self._derivatives[self._state_idx['theta']] = dtheta
 
-    # TODO: duplicated at interface
     def _position_derivative_cg(self, vel: float, theta: float, phi: float
                                 ) -> None:
+        dx, dy, dtheta = dynamics.position_derivative_cg(vel, theta, phi,
+                                                         self.lf, self.lr)
+        self._derivatives[self._state_idx['x']] = dx
+        self._derivatives[self._state_idx['y']] = dy
+        self._derivatives[self._state_idx['theta']] = dtheta
+        # beta = np.arctan(self.lr * np.tan(phi) / (self.lf + self.lr))
+        # self._derivatives[self._state_idx['x']] = vel * np.cos(theta + beta)
+        # self._derivatives[self._state_idx['y']] = vel * np.sin(theta + beta)
+        # self._derivatives[self._state_idx['theta']] = (vel * np.sin(beta)
+        #                                                / self.lr)
 
-        beta = np.arctan(self.lr * np.tan(phi) / (self.lf + self.lr))
-        self._derivatives[self._state_idx['x']] = vel * np.cos(theta + beta)
-        self._derivatives[self._state_idx['y']] = vel * np.sin(theta + beta)
-        self._derivatives[self._state_idx['theta']] = (vel * np.sin(beta)
-                                                       / self.lr)
-
-    # TODO: duplicated at interface
     def _position_derivative_rear_wheels(self, vel: float, theta: float,
                                          phi: float):
-        self._derivatives[self._state_idx['x']] = vel * np.cos(theta)
-        self._derivatives[self._state_idx['y']] = vel * np.sin(theta)
-        self._derivatives[self._state_idx['theta']] = (vel * np.tan(phi)
-                                                       / self.wheelbase)
+        dx, dy, dtheta = dynamics.position_derivative_rear_wheels(
+            vel, theta, phi, self.wheelbase
+        )
+        self._derivatives[self._state_idx['x']] = dx
+        self._derivatives[self._state_idx['y']] = dy
+        self._derivatives[self._state_idx['theta']] = dtheta
+        # self._derivatives[self._state_idx['x']] = vel * np.cos(theta)
+        # self._derivatives[self._state_idx['y']] = vel * np.sin(theta)
+        # self._derivatives[self._state_idx['theta']] = (vel * np.tan(phi)
+        #                                                / self.wheelbase)
 
     # TODO: duplicated at interface
     def create_state_vector(self, x: float, y: float, theta: float,
@@ -681,9 +682,9 @@ class BaseVehicle(ABC):
 #  vehicles and their interfaces with the opc solver
 class BaseVehicleInterface(ABC):
 
-    state_names: List[str]
+    _state_names: List[str]
     n_states: int
-    input_names: List[str]
+    _input_names: List[str]
     n_inputs: int
     state_idx: Dict[str, int]
     optimal_input_idx: Dict[str, int]
@@ -695,16 +696,6 @@ class BaseVehicleInterface(ABC):
         self.base_vehicle = vehicle
         self._time: float = 0.
 
-        # Copy values from the vehicle
-        # These commented out values are accessed often. Would it be faster to
-        # copy them instead of always going back to the base_vehicle instance?
-        # self.lr: float = vehicle.lr  # dist from C.G. to rear wheel
-        # self.lf: float = vehicle.lf  # dist from C.G. to front wheel
-        # self._wheelbase: float = self.base_vehicle.lr + self.base_vehicle.lf
-        # self.h_safe_lk: float = vehicle.h_safe_lk
-        # self.h_safe_lc: float = vehicle.h_safe_lc
-        # self.c: float = vehicle.c  # standstill distance [m]
-        # self.free_flow_speed: float = vehicle.free_flow_speed
         self._origin_leader_id: int = vehicle.get_orig_lane_leader_id()
         self._destination_leader_id: int = vehicle.get_dest_lane_leader_id()
         self._destination_follower_id: int = vehicle.get_dest_lane_follower_id()
@@ -728,6 +719,49 @@ class BaseVehicleInterface(ABC):
     def __str__(self):
         return (self.__class__.__name__ + ": id=" + str(self.get_id())
                 + "V_f=" + str(self.get_free_flow_speed()))
+
+    @classmethod
+    def _set_model(cls):
+        """
+        Must be called in the constructor of every derived class to set the
+        variables that define which vehicle model is implemented.
+        :return:
+        """
+        cls.n_states = len(cls._state_names)
+        cls.n_inputs = len(cls._input_names)
+        cls.state_idx = {cls._state_names[i]: i for i in range(cls.n_states)}
+        cls.optimal_input_idx = {cls._input_names[i]: i for i in
+                                 range(cls.n_inputs)}
+
+    @classmethod
+    def get_state_names(cls):
+        return cls._state_names
+
+    @classmethod
+    def get_input_names(cls):
+        return cls._input_names
+
+    @classmethod
+    def select_state_from_vector(cls, states: Union[np.ndarray, List],
+                                 state_name: str) -> float:
+        return states[cls.state_idx[state_name]]
+
+    @classmethod
+    def select_input_from_vector(cls, optimal_inputs: Union[np.ndarray, List],
+                                 input_name: str) -> float:
+        return optimal_inputs[cls.optimal_input_idx[input_name]]
+
+    @classmethod
+    def select_vel_from_vector(cls, states: Union[np.ndarray, List],
+                               inputs: Union[np.ndarray, List]):
+        try:
+            return states[cls.state_idx['v']]
+        except KeyError:
+            return inputs[cls.optimal_input_idx['v']]
+
+    @classmethod
+    def get_phi(cls, optimal_inputs):
+        return cls.select_input_from_vector(optimal_inputs, 'phi')
 
     def get_id(self) -> int:
         return self.base_vehicle.get_id()
@@ -755,9 +789,6 @@ class BaseVehicleInterface(ABC):
 
     def get_y0(self):
         return self.select_state_from_vector(self._initial_state, 'y')
-
-    def get_phi(self, optimal_inputs):
-        return self.select_input_from_vector(optimal_inputs, 'phi')
 
     def get_orig_lane_leader_id(self, time: float):
         if len(self.ocp_origin_leader_sequence) == 0:
@@ -804,7 +835,10 @@ class BaseVehicleInterface(ABC):
         return self.target_lane * const.LANE_WIDTH
 
     def is_long_control_optimal(self) -> bool:
-        return 'a' in self.input_names or 'v' in self.input_names
+        return 'a' in self._input_names or 'v' in self._input_names
+
+    def has_lane_change_intention(self) -> bool:
+        return self.base_vehicle.has_lane_change_intention()
 
     def set_leader_sequence(self, leader_sequence: som.SVSequence
                             ) -> None:
@@ -820,23 +854,6 @@ class BaseVehicleInterface(ABC):
             self.ocp_destination_leader_sequence.append(l_id['ld'])
             self.ocp_destination_follower_sequence.append(l_id['fd'])
             self.ocp_target_leader_sequence.append(l_id['leader'])
-
-    # TODO: maybe most of these methods could be class methods since they don't
-    #  depend on any 'internal' value of the instance
-    def select_state_from_vector(self, states: Union[np.ndarray, List],
-                                 state_name: str) -> float:
-        return states[self.state_idx[state_name]]
-
-    def select_input_from_vector(self, optimal_inputs: Union[np.ndarray, List],
-                                 input_name: str) -> float:
-        return optimal_inputs[self.optimal_input_idx[input_name]]
-
-    def select_vel_from_vector(self, states: Union[np.ndarray, List],
-                               inputs: Union[np.ndarray, List]):
-        try:
-            return states[self.state_idx['v']]
-        except KeyError:
-            return inputs[self.optimal_input_idx['v']]
 
     def set_time_interval(self, time: float) -> None:
         # TODO: figure out what's wrong with the new approach
@@ -906,47 +923,48 @@ class BaseVehicleInterface(ABC):
     def compute_derivatives(self, ego_states, inputs, leader_states):
         dxdt = np.zeros(self.n_states)
         theta = self.select_state_from_vector(ego_states, 'theta')
-        phi = self.get_phi(inputs)
         vel = self.select_vel_from_vector(ego_states, inputs)
-        accel = self.compute_acceleration(ego_states, inputs, leader_states)
+        accel = self.get_accel(ego_states, inputs, leader_states)
+        phi = self.get_phi(inputs)
         self._compute_derivatives(vel, theta, phi, accel, dxdt)
         return dxdt
 
-    # @abstractmethod
-    # def determine_inputs(self, ego_states, optimal_inputs, leader_states
-    #                      ) -> Tuple[float, float]:
-    #     """
-    #     Returns accel and phi, which are computed internally by a feedback
-    #     law or read from the optimal inputs vector depending on the vehicle
-    #     type
-    #     """
-    #     pass
-
     def _position_derivative_longitudinal_only(self, vel, derivatives):
-        derivatives[self.state_idx['x']] = vel
-        derivatives[self.state_idx['y']] = 0.
-        derivatives[self.state_idx['theta']] = 0.
+        dx, dy, dtheta = dynamics.position_derivative_longitudinal_only(vel)
+        derivatives[self.state_idx['x']] = dx
+        derivatives[self.state_idx['y']] = dy
+        derivatives[self.state_idx['theta']] = dtheta
 
     def _position_derivative_cg(self, vel: float, theta: float, phi: float,
                                 derivatives) -> None:
-        beta = np.arctan(self.base_vehicle.lr * np.tan(phi)
-                         / self.base_vehicle.wheelbase)
-        derivatives[self.state_idx['x']] = vel * np.cos(theta + beta)
-        derivatives[self.state_idx['y']] = vel * np.sin(theta + beta)
-        derivatives[self.state_idx['theta']] = (vel * np.sin(beta)
-                                                / self.base_vehicle.lr)
+        dx, dy, dtheta = dynamics.position_derivative_cg(
+            vel, theta, phi, self.base_vehicle.lf, self.base_vehicle.lr)
+        derivatives[self.state_idx['x']] = dx
+        derivatives[self.state_idx['y']] = dy
+        derivatives[self.state_idx['theta']] = dtheta
+        # beta = np.arctan(self.base_vehicle.lr * np.tan(phi)
+        #                  / self.base_vehicle.wheelbase)
+        # derivatives[self.state_idx['x']] = vel * np.cos(theta + beta)
+        # derivatives[self.state_idx['y']] = vel * np.sin(theta + beta)
+        # derivatives[self.state_idx['theta']] = (vel * np.sin(beta)
+        #                                         / self.base_vehicle.lr)
 
     def _position_derivative_rear_wheels(self, vel: float, theta: float,
                                          phi: float, derivatives):
-        derivatives[self.state_idx['x']] = vel * np.cos(theta)
-        derivatives[self.state_idx['y']] = vel * np.sin(theta)
-        derivatives[self.state_idx['theta']] = (vel * np.tan(phi)
-                                                / self.base_vehicle.wheelbase)
+        dx, dy, dtheta = dynamics.position_derivative_rear_wheels(
+            vel, theta, phi, self.base_vehicle.wheelbase)
+        derivatives[self.state_idx['x']] = dx
+        derivatives[self.state_idx['y']] = dy
+        derivatives[self.state_idx['theta']] = dtheta
+        # derivatives[self.state_idx['x']] = vel * np.cos(theta)
+        # derivatives[self.state_idx['y']] = vel * np.sin(theta)
+        # derivatives[self.state_idx['theta']] = (vel * np.tan(phi)
+        #                                         / self.base_vehicle.wheelbase)
 
     def to_dataframe(self, time, states, inputs):
         data = np.concatenate([time.reshape(1, -1), states, inputs])
-        columns = (['t'] + [s for s in self.state_names]
-                   + [i for i in self.input_names])
+        columns = (['t'] + [s for s in self._state_names]
+                   + [i for i in self._input_names])
         df = pd.DataFrame(data=np.transpose(data), columns=columns)
         df['id'] = self.get_id()
         df['name'] = self.get_name()
@@ -955,8 +973,9 @@ class BaseVehicleInterface(ABC):
         df['dest_lane_follower_id'] = self._destination_follower_id
         return df
 
+    @classmethod
     @abstractmethod
-    def _set_speed(self, v0, state):
+    def _set_speed(cls, v0, state):
         """
         Sets the proper element in array state equal to v0
         :param v0: speed to write
@@ -984,26 +1003,22 @@ class BaseVehicleInterface(ABC):
         pass
 
     @abstractmethod
-    def compute_acceleration(self, ego_states, inputs, leader_states):
+    def get_accel(self, ego_states, inputs, leader_states):
         pass
 
-    def _set_model(self, state_names: List[str], input_names: List[str]):
+    def _set_model_old(self):
         """
         Must be called in the constructor of every derived class to set the
         variables that define which vehicle model is implemented.
-        :param state_names: Names of the state variables
-        :param input_names: Names of the input variables
         :return:
         """
-        self.n_states = len(state_names)
-        self.state_names = state_names
-        self.n_inputs = len(input_names)
-        self.input_names = input_names
-        self.state_idx = {state_names[i]: i for i in range(self.n_states)}
-        self.optimal_input_idx = {input_names[i]: i for i in
+        self.n_states = len(self._state_names)
+        # self.state_names = state_names
+        self.n_inputs = len(self._input_names)
+        # self.input_names = input_names
+        self.state_idx = {self._state_names[i]: i for i in range(self.n_states)}
+        self.optimal_input_idx = {self._input_names[i]: i for i in
                                   range(self.n_inputs)}
-        self._states = np.zeros(self.n_states)
-        self._derivatives = np.zeros(self.n_states)
 
 
 V = TypeVar('V', bound=BaseVehicle)

@@ -23,23 +23,39 @@ class SystemMode:
     """
 
     def __init__(self, vehicles: Dict[int, base.BaseVehicle]):
+        # TODO: wouldn't it be easier to work only with vehicle names (str)
+        #  instead of moving back and forth between ids and names?
         self.mode: Dict[int, Dict[str, int]] = {}
         self.id_to_name_map: Dict[int, str] = {-1: 'x'}  # for easier debugging
+        self.name_to_id: Dict[str, int] = {}  # makes editing/getting easier
         for veh_id, vehicle in vehicles.items():
-            # leader_id = vehicle.get_current_leader_id()
             surrounding_veh_ids = vehicle.get_relevant_surrounding_vehicle_ids()
             self.mode[veh_id] = surrounding_veh_ids
-            self.id_to_name_map[veh_id] = vehicle.get_name()
+            veh_name = vehicle.get_name()
+            self.id_to_name_map[veh_id] = veh_name
+            self.name_to_id[veh_name] = veh_id
 
     def __eq__(self, other: SystemMode):
         return self.mode == other.mode
 
     def __str__(self):
+        return self.to_string(show_all=False)
+
+    def to_string(self, show_all: bool = False):
+        """
+        For nice printing out with option to hide non-existing surrounding
+        vehicles
+        :param show_all: If true, prints out all possible surrounding vehicles
+         position with 'x' if there's no vehicle at some position. If false,
+         only prints existing vehicles
+        :return:
+        """
         pairs = []
         for ego_id, surrounding_ids in self.mode.items():
+
             surrounding_names = {name: self.id_to_name_map[veh_id]
                                  for name, veh_id in surrounding_ids.items()
-                                 # if veh_id > -1
+                                 if (veh_id > -1 or show_all)
                                  }
             pairs.append(
                 self.id_to_name_map[ego_id] + ': '
@@ -47,8 +63,19 @@ class SystemMode:
         res = ', '.join(pairs)
         return '{' + res + '}'
 
+    def get_surrounding_vehicle_id(self, ego_identifier: Union[str, int],
+                                   surrounding_position: str) -> int:
+
+        return self.mode[self._get_id(ego_identifier)][surrounding_position]
+
+    def get_surrounding_vehicle_name(self, ego_identifier: Union[str, int],
+                                     surrounding_position: str) -> str:
+        return self.id_to_name_map[self.get_surrounding_vehicle_id(
+            ego_identifier, surrounding_position)]
+
     def create_altered_mode(
-            self, ego_surrounding_map: Dict[str, Dict[str, str]]
+            self, ego_surrounding_map: Dict[Union[str, int],
+                                            Dict[str, Union[str, int]]]
     ) -> SystemMode:
         """
         Creates another SystemMode instance similar to the original one
@@ -57,17 +84,25 @@ class SystemMode:
         :return:
         """
         new_mode = copy.deepcopy(self)
-        # Get id per name
-        name_to_id: Dict[str, int] = {}
-        for veh_id, veh_name in self.id_to_name_map.items():
-            name_to_id[veh_name] = veh_id
         # Change only the requested pairs
         for ego, surrounding_veh_map in ego_surrounding_map.items():
-            ego_id = name_to_id[ego]
-            for surrounding_pos, veh_name in surrounding_veh_map.items():
-                surrounding_veh_id = name_to_id[veh_name]
+            ego_id = self._get_id(ego)
+            for surrounding_pos, other_veh in surrounding_veh_map.items():
+                surrounding_veh_id = self._get_id(other_veh)
                 new_mode.mode[ego_id][surrounding_pos] = surrounding_veh_id
         return new_mode
+
+    def _get_id(self, identifier: Union[str, int]) -> int:
+        """
+        Ensures that we get the vehicle id as an int whether the identifier
+        is a name or an id
+        :param identifier: Name (str) or id (int) of vehicle
+        :return:
+        """
+        if isinstance(identifier, str):
+            return self.name_to_id[identifier]
+        else:
+            return identifier
 
 
 # Surrounding Vehicle Sequence:
@@ -117,8 +152,10 @@ class ModeSequence:
     def add_mode(self, time: float, mode: SystemMode):
         self.sequence.append((time, mode))
 
-    def alter_and_add_mode(self, time: float,
-                           follower_leader_changes: Dict[str, Dict[str, str]]):
+    def alter_and_add_mode(
+            self, time: float,
+            follower_leader_changes: Dict[Union[str, int],
+                                          Dict[str, Union[str, int]]]):
         """
         Copies the latest mode, change it according to the given parameter,
         and adds it to the sequence
@@ -126,6 +163,8 @@ class ModeSequence:
         :param follower_leader_changes:
         :return:
         """
+        if len(follower_leader_changes) == 0:
+            return
         last_mode = self.get_latest_mode()
         new_mode = last_mode.create_altered_mode(follower_leader_changes)
         self.add_mode(time, new_mode)
@@ -143,14 +182,49 @@ class ModeSequence:
         return surrounding_vehicle_sequences
 
 
+# TODO: if we create the notion of leader for optimal control vehicles, must
+#  change the enumerated TODOs below
+
 def create_synchronous_lane_change_mode_sequence(mode_sequence: ModeSequence,
                                                  platoon_size: int):
     latest_mode = mode_sequence.get_latest_mode()
     time = mode_sequence.get_latest_switch_time()
     switch_time = time + 1.0  # TODO: no idea what value to add here
-    pN = 'p' + str(platoon_size)
-    changes = {
-        'p1': {'lo': 'ld1'},
-        'fd1': {'lo': pN, 'leader': pN}
-        }
+    lo = latest_mode.get_surrounding_vehicle_id('p1', 'lo')
+    ld = latest_mode.get_surrounding_vehicle_id('p1', 'ld')
+    fd = latest_mode.get_surrounding_vehicle_id('p1', 'fd')
+    changes = {}
+    if lo != ld:
+        changes['p1'] = {'lo': ld}  # TODO: change 1
+    if fd >= 0:
+        pN = 'p' + str(platoon_size)
+        changes[fd] = {'lo': pN, 'leader': pN}
+
     mode_sequence.alter_and_add_mode(switch_time, changes)
+
+
+def create_leader_first_lane_change_mode_sequence(mode_sequence: ModeSequence,
+                                                  platoon_size: int):
+    latest_mode = mode_sequence.get_latest_mode()
+    fd = latest_mode.get_surrounding_vehicle_id('p1', 'fd')
+    time = mode_sequence.get_latest_switch_time()
+    dt = 1.0  # [s]
+    switch_time = time
+    for i in range(1, platoon_size + 1):
+        switch_time += dt
+        pi = 'p' + str(i)
+        lo = latest_mode.get_surrounding_vehicle_id(pi, 'lo')
+        ld = latest_mode.get_surrounding_vehicle_id(pi, 'ld')
+        changes = {}
+        if lo != ld:
+            changes[pi] = {'lo': ld}  # TODO change 2
+        if fd >= 0:
+            changes[fd] = {'lo': pi, 'leader': pi}
+        if i - 1 >= 1:  # not sure if it is necessary to 'erase' fd and ld
+            pi_previous = 'p' + str(i - 1)
+            changes[pi_previous] = {'ld': -1, 'fd': -1}
+        if i + 1 <= platoon_size:
+            pi_next = 'p' + str(i + 1)
+            changes[pi_next] = {'lo': lo, 'ld': pi}
+        mode_sequence.alter_and_add_mode(switch_time, changes)
+

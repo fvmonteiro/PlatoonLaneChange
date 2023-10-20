@@ -22,3 +22,7 @@ def position_derivative_rear_wheels(vel: float, theta: float, phi: float,
     dy = vel * np.sin(theta)
     dtheta = vel * np.tan(phi) / wheelbase
     return dx, dy, dtheta
+
+
+def position_derivative_longitudinal_only(vel):
+    return vel, 0., 0.
