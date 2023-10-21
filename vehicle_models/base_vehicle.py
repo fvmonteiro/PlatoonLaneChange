@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, Iterable, List, TypeVar, Type, Tuple, Union
+from typing import Dict, Iterable, List, TypeVar, Type, Union
 import warnings
 
 import numpy as np
@@ -9,8 +9,9 @@ import pandas as pd
 
 import constants as const
 import dynamics
-import system_operating_mode as som
-import vehicle_operating_modes.base_operating_modes as modes
+# import platoon
+from operating_modes import system_operating_mode as som
+import operating_modes.base_operating_modes as modes
 
 
 class BaseVehicle(ABC):
@@ -171,7 +172,7 @@ class BaseVehicle(ABC):
     def get_incoming_vehicle_id(self) -> int:
         return self._incoming_vehicle_id[self._iter_counter]
 
-    def get_relevant_surrounding_vehicle_ids(self):
+    def get_relevant_surrounding_vehicle_ids(self) -> Dict[str, int]:
         """
         Returns the IDs relevant vehicles
         :return:
@@ -186,9 +187,22 @@ class BaseVehicle(ABC):
         Returns the IDs of all vehicles possibly used as target leaders
         :return:
         """
-        return [self.get_orig_lane_leader_id(),
-                self.get_dest_lane_leader_id(),
-                self.get_incoming_vehicle_id()]
+        candidates = [
+            # For safety, we always need to be aware of the vehicle physically
+            # ahead on the same lane
+            self.get_orig_lane_leader_id(),
+            # The vehicle behind which we want to merge. When in a platoon,
+            # this may be different from current destination lane leader
+            self.get_desired_dest_lane_leader_id(),
+            # A vehicle that needs our cooperation to merge in front of us. The
+            # value can be determined by a cooperation request or by a platoon
+            # lane changing strategy
+            self.get_incoming_vehicle_id()
+        ]
+        return candidates
+
+    def get_desired_dest_lane_leader_id(self) -> int:
+        return self.get_dest_lane_leader_id()
 
     def get_desired_future_follower_id(self) -> int:
         return self._desired_future_follower_id
@@ -246,36 +260,29 @@ class BaseVehicle(ABC):
         return self.make_reset_copy(initial_state, type(self))
 
     def _reset_copied_vehicle(self, new_vehicle: BaseVehicle,
-                              initial_state=None):
+                              initial_state=None) -> None:
         if initial_state is None:
             initial_state = self.get_states()
-        # x = initial_state[self._state_idx['x']]
-        # y = initial_state[self._state_idx['y']]
-        # theta = initial_state[self._state_idx['theta']]
-        # try:
-        #     v = initial_state[self._state_idx['v']]
-        # except KeyError:
-        #     v = None
         new_vehicle.copy_initial_state(initial_state)
         new_vehicle.target_lane = self.target_lane
         new_vehicle.reset_simulation_logs()
 
-    def set_free_flow_speed(self, v_ff: float):
+    def set_free_flow_speed(self, v_ff: float) -> None:
         self.free_flow_speed = v_ff
 
-    def set_name(self, value: str):
+    def set_name(self, value: str) -> None:
         self._name = value
 
-    def set_verbose(self, value: bool):
+    def set_verbose(self, value: bool) -> None:
         self._is_verbose = value
 
     def set_initial_state(self, x: float, y: float, theta: float,
-                          v: float = None):
+                          v: float = None) -> None:
         self.initial_state = self.create_state_vector(x, y, theta, v)
         self._states = self.initial_state
         self.target_lane = self.get_current_lane()
 
-    def copy_initial_state(self, initial_state: np.ndarray):
+    def copy_initial_state(self, initial_state: np.ndarray) -> None:
         if len(initial_state) != self._n_states:
             raise ValueError('Wrong size of initial state vector ({} instead'
                              'of {})'.format(len(initial_state),
@@ -283,7 +290,7 @@ class BaseVehicle(ABC):
         self.initial_state = initial_state
         self._states = self.initial_state
 
-    def set_mode(self, mode: modes.VehicleMode):
+    def set_mode(self, mode: modes.VehicleMode) -> None:
         if self._is_verbose:
             try:
                 print("t={:.2f}, veh {}. From: {} to {}".format(
@@ -295,11 +302,11 @@ class BaseVehicle(ABC):
         self._mode = mode
         self._mode.set_ego_vehicle(self)
 
-    def set_lane_change_direction(self, lc_direction):
+    def set_lane_change_direction(self, lc_direction) -> None:
         self.target_lane = self.get_current_lane() + lc_direction
 
     def write_state_and_input(self, time: float, states: np.ndarray,
-                              optimal_inputs: np.ndarray):
+                              optimal_inputs: np.ndarray) -> None:
         """
         Used when vehicle states were computed externally. Do not mix use of
         this method and update_states.
@@ -317,7 +324,7 @@ class BaseVehicle(ABC):
             self._write_optimal_inputs(optimal_inputs)
         self._inputs_history[:, self._iter_counter] = self._inputs
 
-    def prepare_to_start_simulation(self, n_samples: int):
+    def prepare_to_start_simulation(self, n_samples: int) -> None:
         """
         Erases all simulation data and allows the vehicle trajectory to be
         simulated again
@@ -331,7 +338,7 @@ class BaseVehicle(ABC):
         self._time[self._iter_counter] = 0.0
         self._states_history[:, self._iter_counter] = self.initial_state
 
-    def initialize_simulation_logs(self, n_samples: int):
+    def initialize_simulation_logs(self, n_samples: int) -> None:
         self._iter_counter = 0
         self._time = np.zeros(n_samples)
         self._states_history = np.zeros([self._n_states, n_samples])
@@ -342,13 +349,13 @@ class BaseVehicle(ABC):
         self._incoming_vehicle_id = -np.ones(n_samples, dtype=int)
         self._leader_id = -np.ones(n_samples, dtype=int)
 
-    def reset_simulation_logs(self):
+    def reset_simulation_logs(self) -> None:
         self.initialize_simulation_logs(0)
 
-    def reset_lane_change_start_time(self):
+    def reset_lane_change_start_time(self) -> None:
         self._lc_start_time = -np.inf
 
-    def has_orig_lane_leader(self):
+    def has_orig_lane_leader(self) -> bool:
         try:
             return self.get_orig_lane_leader_id() >= 0
         except IndexError:
@@ -356,7 +363,7 @@ class BaseVehicle(ABC):
                           "(orig lane leader id) before simulation start")
             return False
 
-    def has_dest_lane_leader(self):
+    def has_dest_lane_leader(self) -> bool:
         try:
             return self.get_dest_lane_leader_id() >= 0
         except IndexError:
@@ -364,7 +371,7 @@ class BaseVehicle(ABC):
                           "(dest lane leader id) before simulation start")
             return False
 
-    def has_dest_lane_follower(self):
+    def has_dest_lane_follower(self) -> bool:
         try:
             return self.get_dest_lane_follower_id() >= 0
         except IndexError:
@@ -372,13 +379,13 @@ class BaseVehicle(ABC):
                           "(dest lane follower id) before simulation start")
             return False
 
-    def is_cooperating(self):
+    def is_cooperating(self) -> bool:
         return self.get_incoming_vehicle_id() >= 0
 
-    def has_leader(self):
+    def has_leader(self) -> bool:
         return self.get_current_leader_id() >= 0
 
-    def has_changed_leader(self):
+    def has_changed_leader(self) -> bool:
         try:
             return (self._leader_id[self._iter_counter - 1]
                     != self._leader_id[self._iter_counter])
@@ -387,19 +394,19 @@ class BaseVehicle(ABC):
                           "early (before two simulation steps")
             return False
 
-    def has_lane_change_intention(self):
+    def has_lane_change_intention(self) -> bool:
         return self.get_current_lane() != self.target_lane
 
-    def has_requested_cooperation(self):
+    def has_requested_cooperation(self) -> bool:
         return self.get_desired_future_follower_id() >= 0
 
-    def make_connected(self):
+    def make_connected(self) -> None:
         self._is_connected = True
 
     def is_in_a_platoon(self) -> bool:
         return not (self.get_platoon() is None)
 
-    def find_orig_lane_leader(self, vehicles: Iterable[BaseVehicle]):
+    def find_orig_lane_leader(self, vehicles: Iterable[BaseVehicle]) -> None:
         ego_x = self.get_x()
         ego_y = self.get_y()
         orig_lane_leader_x = np.inf
@@ -413,7 +420,7 @@ class BaseVehicle(ABC):
                 new_orig_leader_id = other_vehicle._id
         self._orig_leader_id[self._iter_counter] = new_orig_leader_id
 
-    def find_dest_lane_vehicles(self, vehicles: Iterable[BaseVehicle]):
+    def find_dest_lane_vehicles(self, vehicles: Iterable[BaseVehicle]) -> None:
         new_dest_leader_id = -1
         new_dest_follower_id = -1
         if self.has_lane_change_intention():
@@ -434,7 +441,8 @@ class BaseVehicle(ABC):
         self._destination_leader_id[self._iter_counter] = new_dest_leader_id
         self._destination_follower_id[self._iter_counter] = new_dest_follower_id
 
-    def find_cooperation_requests(self, vehicles: Iterable[BaseVehicle]):
+    def find_cooperation_requests(self, vehicles: Iterable[BaseVehicle]
+                                  ) -> None:
         new_incoming_vehicle_id = -1
         incoming_veh_x = np.inf
         if self._is_connected:
@@ -449,19 +457,15 @@ class BaseVehicle(ABC):
     def analyze_platoons(self, vehicles: Dict[int, BaseVehicle]):
         pass
 
-    # def join_centrally_controlled_platoon(self,
-    #                                       vehicles: Dict[int, BaseVehicle]):
-    #     pass
-
-    def request_cooperation(self):
+    def request_cooperation(self) -> None:
         if self._is_connected:
             self._desired_future_follower_id = self.get_dest_lane_follower_id()
 
-    def receive_cooperation_request(self, other_id):
+    def receive_cooperation_request(self, other_id) -> None:
         if self._is_connected:
             self._incoming_vehicle_id = other_id
 
-    def update_target_leader(self, vehicles: Dict[int, BaseVehicle]):
+    def update_target_leader(self, vehicles: Dict[int, BaseVehicle]) -> None:
         """
         Defines which surrounding vehicle should be used to determine this
         vehicle's own acceleration
@@ -471,29 +475,30 @@ class BaseVehicle(ABC):
 
     @staticmethod
     def compute_a_gap(leading_vehicle: BaseVehicle,
-                      following_vehicle: BaseVehicle):
+                      following_vehicle: BaseVehicle) -> float:
         return (leading_vehicle.get_x()
                 - following_vehicle.get_x())
 
-    def compute_safe_lane_change_gap(self, v_ego=None):
+    def compute_safe_lane_change_gap(self, v_ego=None) -> float:
         if v_ego is None:
             v_ego = self.get_vel()
         return self.h_safe_lc * v_ego + self.c
 
-    def compute_free_flow_desired_gap(self):
+    def compute_free_flow_desired_gap(self) -> float:
         return self.compute_desired_gap(self.free_flow_speed, self.h_ref_lk)
 
-    def compute_lane_keeping_desired_gap(self, vel: float = None):
+    def compute_lane_keeping_desired_gap(self, vel: float = None) -> float:
         return self.compute_desired_gap(vel, self.h_ref_lk)
 
-    def compute_desired_gap(self, vel: float = None, h_ref: float = None):
+    def compute_desired_gap(self, vel: float = None, h_ref: float = None
+                            ) -> float:
         if vel is None:
             vel = self.get_vel()
         if h_ref is None:
             h_ref = self.get_reference_time_headway()
         return h_ref * vel + self.c
 
-    def compute_derivatives(self):
+    def compute_derivatives(self) -> None:
         self._derivatives = np.zeros(self._n_states)
         theta = self.get_theta()
         phi = self.get_an_input_by_name('phi')
@@ -501,7 +506,7 @@ class BaseVehicle(ABC):
         self._compute_derivatives(vel, theta, phi)
 
     def determine_inputs(self, open_loop_controls: np.ndarray,
-                         vehicles: Dict[int, BaseVehicle]):
+                         vehicles: Dict[int, BaseVehicle]) -> None:
         """
         Sets the open loop controls and computes the closed loop controls.
         :param open_loop_controls: Dictionary whose keys are the input name.
@@ -512,7 +517,7 @@ class BaseVehicle(ABC):
         self._determine_inputs(open_loop_controls, vehicles)
         self._inputs_history[:, self._iter_counter] = self._inputs
 
-    def update_states(self, next_time):
+    def update_states(self, next_time) -> None:
         dt = next_time - self.get_current_time()
         self._states = self._states + self._derivatives * dt
         self._states_history[:, self._iter_counter + 1] = self._states
@@ -520,11 +525,11 @@ class BaseVehicle(ABC):
         self._time[self._iter_counter] = next_time
 
     @abstractmethod
-    def update_mode(self, vehicles: Dict[int, BaseVehicle]):
+    def update_mode(self, vehicles: Dict[int, BaseVehicle]) -> None:
         # only vehicles with controllers update their discrete states (modes)
         pass
 
-    def _position_derivative_longitudinal_only(self, vel):
+    def _position_derivative_longitudinal_only(self, vel) -> None:
         dx, dy, dtheta = dynamics.position_derivative_longitudinal_only(vel)
         self._derivatives[self._state_idx['x']] = dx
         self._derivatives[self._state_idx['y']] = dy
@@ -537,24 +542,15 @@ class BaseVehicle(ABC):
         self._derivatives[self._state_idx['x']] = dx
         self._derivatives[self._state_idx['y']] = dy
         self._derivatives[self._state_idx['theta']] = dtheta
-        # beta = np.arctan(self.lr * np.tan(phi) / (self.lf + self.lr))
-        # self._derivatives[self._state_idx['x']] = vel * np.cos(theta + beta)
-        # self._derivatives[self._state_idx['y']] = vel * np.sin(theta + beta)
-        # self._derivatives[self._state_idx['theta']] = (vel * np.sin(beta)
-        #                                                / self.lr)
 
     def _position_derivative_rear_wheels(self, vel: float, theta: float,
-                                         phi: float):
+                                         phi: float) -> None:
         dx, dy, dtheta = dynamics.position_derivative_rear_wheels(
             vel, theta, phi, self.wheelbase
         )
         self._derivatives[self._state_idx['x']] = dx
         self._derivatives[self._state_idx['y']] = dy
         self._derivatives[self._state_idx['theta']] = dtheta
-        # self._derivatives[self._state_idx['x']] = vel * np.cos(theta)
-        # self._derivatives[self._state_idx['y']] = vel * np.sin(theta)
-        # self._derivatives[self._state_idx['theta']] = (vel * np.tan(phi)
-        #                                                / self.wheelbase)
 
     # TODO: duplicated at interface
     def create_state_vector(self, x: float, y: float, theta: float,
@@ -942,12 +938,6 @@ class BaseVehicleInterface(ABC):
         derivatives[self.state_idx['x']] = dx
         derivatives[self.state_idx['y']] = dy
         derivatives[self.state_idx['theta']] = dtheta
-        # beta = np.arctan(self.base_vehicle.lr * np.tan(phi)
-        #                  / self.base_vehicle.wheelbase)
-        # derivatives[self.state_idx['x']] = vel * np.cos(theta + beta)
-        # derivatives[self.state_idx['y']] = vel * np.sin(theta + beta)
-        # derivatives[self.state_idx['theta']] = (vel * np.sin(beta)
-        #                                         / self.base_vehicle.lr)
 
     def _position_derivative_rear_wheels(self, vel: float, theta: float,
                                          phi: float, derivatives):
@@ -956,10 +946,6 @@ class BaseVehicleInterface(ABC):
         derivatives[self.state_idx['x']] = dx
         derivatives[self.state_idx['y']] = dy
         derivatives[self.state_idx['theta']] = dtheta
-        # derivatives[self.state_idx['x']] = vel * np.cos(theta)
-        # derivatives[self.state_idx['y']] = vel * np.sin(theta)
-        # derivatives[self.state_idx['theta']] = (vel * np.tan(phi)
-        #                                         / self.base_vehicle.wheelbase)
 
     def to_dataframe(self, time, states, inputs):
         data = np.concatenate([time.reshape(1, -1), states, inputs])

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from functools import partial
 import pickle
 from typing import Dict, List, Type, Union
 
@@ -11,10 +10,13 @@ import pandas as pd
 
 import analysis
 import controllers.optimal_controller as opt_ctrl
-from constants import LANE_WIDTH
+import constants
 from vehicle_group import VehicleGroup
 from vehicle_models.base_vehicle import BaseVehicle
 import vehicle_models.four_state_vehicles as fsv
+
+
+config = constants.Configuration
 
 
 class SimulationScenario(ABC):
@@ -85,7 +87,7 @@ class SimulationScenario(ABC):
         x0.extend([x_ego - ref_gaps['fo']] if has_fo else [])
         x0.extend([x_ego + ref_gaps['ego'] - delta_x['ld']] if has_ld else [])
         x0.extend([x_ego - ref_gaps['fd'] + delta_x['fd']] if has_fd else [])
-        y_orig, y_dest = 0, LANE_WIDTH
+        y_orig, y_dest = 0, constants.LANE_WIDTH
         y0 = [y_orig] * n_orig + [y_dest] * n_dest
         theta0 = [0.] * (n_orig + n_dest)
         self.vehicle_group.set_vehicles_initial_states(x0, y0, theta0, v0)
@@ -120,7 +122,7 @@ class SimulationScenario(ABC):
             gap = self.vehicle_group.vehicles[0].free_flow_speed + 1
         x0, y0, theta0, v0 = [], [], [], []
         for lane in range(len(self.n_per_lane)):
-            lane_center = lane * LANE_WIDTH
+            lane_center = lane * constants.LANE_WIDTH
             n = self.n_per_lane[lane]
             for i in range(n):
                 x0.append(gap * (n - i - 1))
@@ -360,17 +362,17 @@ class LaneChangeScenario(SimulationScenario):
         :return:
         """
         print("======= RUNNING AN EXPLORATORY TEST SCENARIO =======")
-        v_orig_leader = 10.
-        v_dest_leader = 10.
-        v_others = 10.
-        v_orig_foll = 10.
+        v_orig_leader = config.v_ref['lo']
+        v_dest_leader = config.v_ref['ld']
+        v_others = config.v_ref['p']
+        v_orig_foll = config.v_ref['fo']
         v_ff_array = ([v_orig_leader] * self._n_orig_ahead
                       + [v_others] * self._n_platoon
                       + [v_orig_foll] * self._n_orig_behind
                       + [v_dest_leader] + [v_others] * (self.n_per_lane[1] - 1))
         self.vehicle_group.set_free_flow_speeds(v_ff_array)
         # Deviation from equilibrium position:
-        delta_x = {'lo': 0.0, 'ld': 0.0, 'fd': 2.0}
+        delta_x = config.delta_x
         self.create_initial_state(v_orig_leader, v_dest_leader, delta_x)
 
     def create_initial_state(self, v_orig: float, v_dest: float,
@@ -413,7 +415,7 @@ class LaneChangeScenario(SimulationScenario):
             x0_array[i] = follower_x0
 
         y_orig = 0
-        y_dest = LANE_WIDTH
+        y_dest = constants.LANE_WIDTH
         y0_array = ([y_orig] * self.n_per_lane[0]
                     + [y_dest] * self.n_per_lane[1])
         theta0_array = [0.] * sum(self.n_per_lane)

@@ -8,7 +8,6 @@ import pandas as pd
 
 import analysis
 import constants
-import controllers.optimal_controller as opt_ctrl
 import vehicle_models
 import scenarios
 
@@ -99,7 +98,7 @@ def run_internal_optimal_controller(n_orig_ahead: int, n_orig_behind: int,
 def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
                      n_dest_ahead: int, n_dest_behind: int,
                      is_acceleration_optimal: bool):
-    tf = 7.0
+    tf = constants.Configuration.time_horizon + 2
     scenario = scenarios.LaneChangeScenario.platoon_lane_change(
         n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
         is_acceleration_optimal
@@ -141,12 +140,14 @@ def run_save_and_plot(scenario: scenarios.LaneChangeScenario, tf: float = 10.):
 
 
 def mode_convergence_base_tests():
-    opt_ctrl.set_solver_parameters(max_iter=1000, discretization_step=0.1,
-                                   ftol=1.0e-2, estimate_gradient=True)
-    opt_ctrl.set_controller_parameters(max_iter=5, time_horizon=5.0,
-                                       has_terminal_lateral_constraints=False,
-                                       jumpstart_next_solver_call=False,
-                                       has_lateral_safety_constraint=False)
+    constants.Configuration.set_solver_parameters(
+        max_iter=1000, discretization_step=0.1,
+        ftol=1.0e-2, estimate_gradient=True
+    )
+    constants.Configuration.set_controller_parameters(
+        max_iter=5, time_horizon=5.0, has_terminal_lateral_constraints=False,
+        jumpstart_next_solver_call=False, has_lateral_safety_constraint=False
+    )
 
     # Eventually we'll move to descriptive names, but for now let's just avoid
     # overwriting data
@@ -187,19 +188,27 @@ def mode_convergence_base_tests():
 
 
 def main():
-    n_platoon = 1
+    n_platoon = 2
     n_orig_ahead, n_orig_behind = 0, 0
-    n_dest_ahead, n_dest_behind = 1, 1
+    n_dest_ahead, n_dest_behind = 1, 0
 
     constants.INCREASE_LC_TIME_HEADWAY = False
-    opt_ctrl.set_solver_parameters(max_iter=100, discretization_step=0.2,
-                                   ftol=1.0e-2, estimate_gradient=True)
-    opt_ctrl.set_controller_parameters(max_iter=3, time_horizon=5.0,
-                                       has_terminal_lateral_constraints=False,
-                                       has_lateral_safety_constraint=False,
-                                       provide_initial_guess=True,
-                                       initial_acceleration_guess='zero',
-                                       jumpstart_next_solver_call=True)
+    constants.Configuration.set_solver_parameters(
+        max_iter=100, discretization_step=0.2,
+        ftol=1.0e-2, estimate_gradient=True
+    )
+    constants.Configuration.set_controller_parameters(
+        max_iter=3, time_horizon=5.0,
+        has_terminal_lateral_constraints=False,
+        has_lateral_safety_constraint=False,
+        provide_initial_guess=True, initial_acceleration_guess='zero',
+        jumpstart_next_solver_call=True
+    )
+    constants.Configuration.set_scenario_parameters(
+        v_ref={'lo': 10., 'ld': 10., 'p': 10., 'fo': 10., 'fd': 10.},
+        delta_x={'lo': 0., 'ld': 3., 'p': 0., 'fd': 0.},
+        platoon_strategy=1
+    )
 
     start_time = time.time()
 
@@ -211,7 +220,7 @@ def main():
     #                                 n_dest_behind)
     run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
                      n_dest_ahead, n_dest_behind,
-                     is_acceleration_optimal=True)
+                     is_acceleration_optimal=False)
     # load_and_plot_latest_scenario()
     # mode_convergence_base_tests()
 

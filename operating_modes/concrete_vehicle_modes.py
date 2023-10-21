@@ -4,7 +4,7 @@ from abc import ABC
 from typing import Dict
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
-import vehicle_operating_modes.base_operating_modes as vom
+import operating_modes.base_operating_modes as vom
 
 
 class CLVehicleMode(vom.VehicleMode, ABC):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC
 import copy
-from typing import Dict, List, TypeVar, Union
+from typing import Dict, List, TypeVar, Union, Iterable
 
 import numpy as np
 
@@ -11,7 +11,7 @@ import controllers.lateral_controller as lat_ctrl
 import controllers.optimal_controller as opt_ctrl
 import platoon
 import vehicle_models.base_vehicle as base
-import vehicle_operating_modes.concrete_vehicle_modes as modes
+import operating_modes.concrete_vehicle_modes as modes
 
 
 class FourStateVehicle(base.BaseVehicle, ABC):
@@ -20,6 +20,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
 
     _state_names = ['x', 'y', 'theta', 'v']
     _input_names = ['a', 'phi']
+    _platoon: platoon.Platoon
 
     static_attribute_names = base.BaseVehicle.static_attribute_names.union(
         {'brake_max', 'accel_max'}
@@ -39,6 +40,27 @@ class FourStateVehicle(base.BaseVehicle, ABC):
 
     def get_vel(self):
         return self.get_a_state_by_name('v')
+
+    def get_platoon(self) -> Union[None, platoon.Platoon]:
+        try:
+            return self._platoon
+        except AttributeError:
+            return None
+
+    def get_desired_dest_lane_leader_id(self) -> int:
+        if not self.is_in_a_platoon():
+            return self.get_dest_lane_leader_id()
+        return self.get_platoon().get_dest_lane_leader_id(self.get_id())
+
+    def find_cooperation_requests(self, vehicles: Iterable[base.BaseVehicle]
+                                  ) -> None:
+        # We assume platoon vehicles do not cooperate with other vehicles
+        if not self.is_in_a_platoon():
+            super().find_cooperation_requests(vehicles)
+        else:
+            incoming_vehicle_id = self.get_platoon().get_incoming_vehicle_id(
+                self.get_id())
+            self._incoming_vehicle_id[self._iter_counter] = incoming_vehicle_id
 
     def compute_gap_to_a_leader(self, a_leader: base.BaseVehicle):
         return base.BaseVehicle.compute_a_gap(a_leader, self)
@@ -472,7 +494,6 @@ class PlatoonVehicle(OptimalControlVehicle):
     """
 
     _is_acceleration_optimal: bool
-    _platoon: platoon.Platoon
 
     static_attribute_names = FourStateVehicle.static_attribute_names.union(
         {'_is_acceleration_optimal'}
@@ -482,12 +503,14 @@ class PlatoonVehicle(OptimalControlVehicle):
         super().__init__()
         self.set_mode(modes.PlatoonVehicleLaneKeepingMode())
 
-    def make_open_loop_copy(self, initial_state=None):
+    def make_open_loop_copy(self, initial_state=None) -> base.V:
         if self._is_acceleration_optimal:
             return self.make_reset_copy(initial_state, OpenLoopVehicle)
         else:
-            return self.make_reset_copy(initial_state,
-                                        SafeAccelOpenLoopLCVehicle)
+            new_vehicle = self.make_reset_copy(initial_state,
+                                               SafeAccelOpenLoopLCVehicle)
+            new_vehicle._platoon = self.get_platoon()
+            return new_vehicle
 
     # def get_possible_target_leader_ids(self) -> List[int]:
     #     ids = super().get_possible_target_leader_ids()
@@ -495,11 +518,11 @@ class PlatoonVehicle(OptimalControlVehicle):
     #         ids.append(self._platoon.get_preceding_vehicle_id(self.get_id()))
     #     return ids
 
-    def get_platoon(self):
-        try:
-            return self._platoon
-        except AttributeError:
-            return None
+    # def get_platoon(self) -> Union[None, platoon.Platoon]:
+    #     try:
+    #         return self._platoon
+    #     except AttributeError:
+    #         return None
 
     def set_acceleration_controller_type(
             self, is_acceleration_optimal: bool = False) -> None:
@@ -532,22 +555,10 @@ class PlatoonVehicle(OptimalControlVehicle):
     def can_start_lane_change(self, vehicles: Dict[int, base.BaseVehicle]
                               ) -> bool:
         if self.opt_controller.has_solution():
-            # The optimization can be called by another vehicle in the case
-            # of platoons or centralized control, so we need to update the
-            # ocp initial time here
-            # if self._ocp_initial_time == -np.inf:
-            #     self._ocp_initial_time = self.get_current_time()
             return True
 
-        t = self.get_current_time()
-        # self._ocp_initial_time = t
-        # if self.is_in_a_platoon():
-        #     dest_lane_ids = [veh.get_id() for veh in vehicles.values()
-        #                      if veh.get_current_lane() == self.target_lane]
-        #     self.opt_controller.set_platoon_formation_constraint_parameters(
-        #         self._platoon.get_vehicle_ids(), dest_lane_ids
-        #     )
         if self._is_verbose:
+            t = self.get_current_time()
             print("t={:.2f}, veh:{}. Calling ocp solver...".format(
                 t, self._id))
         self.opt_controller.find_trajectory(vehicles)
@@ -581,21 +592,13 @@ class PlatoonVehicle(OptimalControlVehicle):
     def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]
                               ) -> None:
         if (self._is_acceleration_optimal
-                and self.is_performing_long_adjustment()):
+                and self.opt_controller.is_active(self.get_current_time())):
             # During the lane change, there is no target leader for the
             # longitudinal controller since the optimal controller takes over
             self._leader_id[self._iter_counter] = -1
         else:
             self._leader_id[self._iter_counter] = (
                 self.long_controller.get_more_critical_leader(vehicles))
-
-    def is_performing_long_adjustment(self) -> bool:
-        delta_t = self.get_current_time() - self._long_adjust_start_time
-        return delta_t <= self.opt_controller.get_time_horizon()
-
-    # def _set_up_longitudinal_adjustments_control(
-    #         self, vehicles: Dict[int, base.BaseVehicle]) -> None:
-    #     pass
 
     def analyze_platoons(self, vehicles: Dict[int, base.BaseVehicle]
                          ) -> None:
@@ -676,10 +679,10 @@ class FourStateVehicleInterface(base.BaseVehicleInterface, ABC):
         return np.array([0] * self.n_inputs)
 
     @classmethod
-    def _set_speed(cls, v0, state):
+    def _set_speed(cls, v0, state) -> None:
         state[cls.state_idx['v']] = v0
 
-    def _compute_derivatives(self, vel, theta, phi, accel, derivatives):
+    def _compute_derivatives(self, vel, theta, phi, accel, derivatives) -> None:
         self._position_derivative_cg(vel, theta, phi, derivatives)
         derivatives[self.state_idx['v']] = accel
 

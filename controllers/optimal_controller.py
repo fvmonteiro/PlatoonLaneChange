@@ -11,84 +11,15 @@ import numpy as np
 from scipy.optimize import LinearConstraint, NonlinearConstraint
 
 import analysis  # only during tests
+import constants
 import controllers.optimal_control_costs as occ
-import system_operating_mode as som
+import operating_modes.system_operating_mode as som
 import vehicle_models.base_vehicle as base
 import vehicle_group as vg
 import vehicle_group_ocp_interface as vgi
 
 
-def set_solver_parameters(
-        max_iter: int = None, discretization_step: float = None,
-        ftol: float = None, estimate_gradient: bool = True
-) -> None:
-    """
-    Sets the configurations of the underlying optimization tool.
-    :param max_iter: Maximum number of iterations by the solver
-    :param discretization_step: Fixed discretization step of the opc solver
-    :param ftol: Scipy minimize parameter: "Precision goal for the value of f
-     in the stopping criterion."
-    :param estimate_gradient: Allow the optimizer to estimate the gradient
-     or provide analytical cost gradient
-    :return:
-    """
-    if max_iter:
-        VehicleOptimalController.solver_max_iter = max_iter
-    if discretization_step:
-        VehicleOptimalController.discretization_step = discretization_step
-    if ftol:
-        VehicleOptimalController.ftol = ftol
-    VehicleOptimalController.estimate_gradient = estimate_gradient
-
-
-def set_controller_parameters(
-        max_iter: int = None, time_horizon: float = None,
-        has_terminal_lateral_constraints: bool = False,
-        has_lateral_safety_constraint: bool = False,
-        provide_initial_guess: bool = False,
-        initial_acceleration_guess: Union[str, float] = 0.0,
-        jumpstart_next_solver_call: bool = False
-) -> None:
-    """
-    Sets the configurations of the optimal controller which iteratively
-    calls the optimization tool.
-    :param max_iter: Maximum number of times the ocp will be solved until
-     mode sequence convergence (different from max iteration of the solver).
-    :param time_horizon: Final time of the optimal control problem.
-    :param has_terminal_lateral_constraints: Whether to include terminal
-     lateral constraints, i.e., lane changing vehicles must finish with
-     y_d - e <= y(tf) <= y_d + e. If true, then there are no terminal costs.
-    :param has_lateral_safety_constraint: Whether to include a constraint to
-     keep the lane changing vehicles between y(t0)-1 and y(tf)+1. This can
-     sometimes speed up simulations or prevent erratic behavior.
-    :param provide_initial_guess: If true, simulates the system given the
-     initial input guess and passes an (inputs, states) tuple as initial guess
-     to the solver. It only affects the first call to the solver if
-     jumpstart_next_solver_call is True.
-    :param initial_acceleration_guess: Initial guess of the optimal
-     acceleration. We can provide the exact value or one of the strings 'zero',
-     'max' (max acceleration), 'min' (max brake). The same value is used for
-     the entire time horizon. It only affects the first call to the solver if
-     jumpstart_next_solver_call is True.
-    :param jumpstart_next_solver_call: Whether to use the solution of the
-     previous call to the solver as starting point for the next call.
-    :return:
-    """
-    if max_iter:
-        VehicleOptimalController.max_iter = max_iter
-    if time_horizon:
-        VehicleOptimalController.time_horizon = time_horizon
-
-    VehicleOptimalController.has_terminal_lateral_constraints = (
-        has_terminal_lateral_constraints)
-    VehicleOptimalController.has_safety_lateral_constraint = (
-        has_lateral_safety_constraint)
-    VehicleOptimalController.provide_initial_guess = (
-        provide_initial_guess)
-    VehicleOptimalController.initial_acceleration_guess = (
-        initial_acceleration_guess)
-    VehicleOptimalController.jumpstart_next_solver_call = (
-        jumpstart_next_solver_call)
+config = constants.Configuration
 
 
 class VehicleOptimalController:
@@ -110,19 +41,21 @@ class VehicleOptimalController:
     _cost_with_tracker: occ.OCPCostTracker
 
     # Solver params
-    solver_max_iter: int = 300
-    discretization_step: float = 1.0  # [s]
-    ftol: float = 1.0e-6  # [s]
-    estimate_gradient: bool = True
+    solver_max_iter: int = config.solver_max_iter
+    discretization_step: float = config.discretization_step
+    ftol: float = config.ftol
+    estimate_gradient: bool = config.estimate_gradient
 
     # Our controller's params
-    max_iter: int = 3
-    time_horizon: float = 10.0  # [s]
-    has_terminal_lateral_constraints: bool = False
-    has_safety_lateral_constraint: bool = False
-    provide_initial_guess: bool = False,
-    initial_acceleration_guess: Union[str, float] = 0.0
-    jumpstart_next_solver_call: bool = False
+    max_iter: int = config.max_iter
+    time_horizon: float = config.time_horizon
+    has_terminal_lateral_constraints: bool = (
+        config.has_terminal_lateral_constraints)
+    has_safety_lateral_constraint: bool = config.has_safety_lateral_constraint
+    provide_initial_guess: bool = config.provide_initial_guess
+    initial_acceleration_guess: Union[str, float] = (
+        config.initial_acceleration_guess)
+    jumpstart_next_solver_call: bool = config.jumpstart_next_solver_call
 
     def __init__(self):
         self._terminal_cost = None
@@ -272,8 +205,8 @@ class VehicleOptimalController:
         # Strategy testing =============== #
         n_platoon = np.sum([1 for veh_id in self._controlled_veh_ids
                             if vehicles[veh_id].get_name().startswith('p')])
-        som.create_synchronous_lane_change_mode_sequence(input_sequence,
-                                                         int(n_platoon))
+        # som.create_synchronous_lane_change_mode_sequence(input_sequence,
+        #                                                  int(n_platoon))
         # som.create_leader_first_lane_change_mode_sequence(input_sequence,
         #                                                   int(n_platoon))
         # ================================ #
@@ -294,7 +227,8 @@ class VehicleOptimalController:
             counter += 1
 
             # input_seq_str = som.mode_sequence_to_str(input_sequence)
-            print("Setting mode sequence to:  {}".format(input_sequence))
+            print("Setting mode sequence to:\n"
+                  f"{input_sequence.to_string(skip_lines=True)}")
             self._ocp_interface.set_mode_sequence(input_sequence)
             self._set_constraints()
             self._cost_with_tracker.start_recording()

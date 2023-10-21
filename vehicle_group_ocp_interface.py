@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from functools import partial
 from typing import Callable, Dict, List, Tuple, Union, Set
 import warnings
 
 import numpy as np
 import pandas as pd
 
-import system_operating_mode as som
+from operating_modes import system_operating_mode as som
 import vehicle_models.base_vehicle as base
 
 
@@ -267,10 +266,10 @@ class VehicleGroupInterface:
             if veh.n_inputs == 0:
                 veh_costs.extend([0.0] * veh.n_states)
             elif not veh.is_long_control_optimal():
-                if x_cost > 0 or v_cost > 0:
-                    warnings.warn('Trying to pass non-zero position or '
-                                  'velocity cost to a vehicle with feedback '
-                                  'acceleration. Setting both to zero')
+                # if x_cost > 0 or v_cost > 0:
+                #     warnings.warn('Trying to pass non-zero position or '
+                #                   'velocity cost to a vehicle with feedback '
+                #                   'acceleration. Setting both to zero')
                 veh_costs.extend(self.vehicles[veh_id].create_state_vector(
                     0., y_cost, theta_cost, 0.))
             else:  # steering wheel and accel optimal control
@@ -293,14 +292,14 @@ class VehicleGroupInterface:
             veh = self.vehicles[veh_id]
             if veh.n_inputs == 0:
                 continue
-            elif veh.n_inputs == 1:  # only steering wheel optimal control
-                if accel_cost > 0:
-                    warnings.warn('Trying to pass non-zero accel cost to a '
-                                  'vehicle with feedback acceleration. '
-                                  'Accel cost being ignored')
-                veh_costs.append(phi_cost)
-            else:  # steering wheel and accel optimal control
+            elif veh.is_long_control_optimal():
                 veh_costs.extend([accel_cost, phi_cost])
+            else:
+                # if accel_cost > 0:
+                #     warnings.warn('Trying to pass non-zero accel cost to a '
+                #                   'vehicle with feedback acceleration. '
+                #                   'Accel cost being ignored')
+                veh_costs.append(phi_cost)
 
         return np.diag(veh_costs)
 

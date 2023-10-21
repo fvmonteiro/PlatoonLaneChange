@@ -116,10 +116,14 @@ class ModeSequence:
         self.sequence: List[Tuple[float, SystemMode]] = []
 
     def __str__(self):
+        return self.to_string(skip_lines=False)
+
+    def to_string(self, skip_lines: bool):
         ret = []
         for t, m in self.sequence:
             ret.append("(" + str(t) + ": " + str(m) + ")")
-        return " ".join(ret)
+        sep = "\n" if skip_lines else " "
+        return sep.join(ret)
 
     def is_equal_to(self, other: ModeSequence, dt: float) -> bool:
         """
