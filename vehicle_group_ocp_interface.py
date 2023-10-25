@@ -362,31 +362,61 @@ class VehicleGroupInterface:
 
         return support
 
-    def lane_changing_safety_constraint(self, ego_id: int) -> Callable:
-        ego_veh = self.vehicles[ego_id]
+    # def lane_changing_safety_constraint(self, ego_id: int) -> Callable:
+    #     ego_veh = self.vehicles[ego_id]
+    #
+    #     def support(states, inputs) -> float:
+    #         t = self.get_time(states)
+    #         gap_errors = [
+    #             self.compute_gap_error(
+    #                 states, ego_id, ego_veh.get_orig_lane_leader_id(t),
+    #                 False, is_follower_lane_changing=True),
+    #             self.compute_gap_error(
+    #                 states, ego_id, ego_veh.get_dest_lane_leader_id(t),
+    #                 False, is_follower_lane_changing=True),
+    #             self.compute_gap_error(
+    #                 states, ego_id, ego_veh.get_dest_lane_follower_id(t),
+    #                 True, is_follower_lane_changing=False)
+    #         ]
+    #         phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
+    #         margin = 1e-3
+    #         min_sum = np.sum([min(ge + margin, 0) ** 2
+    #                           # self._smooth_min_0(ge + margin)
+    #                           for ge in gap_errors])
+    #         # theta = self.get_a_vehicle_state_by_id(ego_id, states, 'theta')
+    #         return min_sum * phi
+    #
+    #     return support
 
-        def support(states, inputs) -> float:
+    def lane_changing_safety_constraints(self, ego_id: int) -> List[Callable]:
+        ego_veh = self.vehicles[ego_id]
+        margin = 1e-3
+
+        def support1(states, inputs) -> float:
             t = self.get_time(states)
-            gap_errors = [
-                self.compute_gap_error(
+            gap_error = self.compute_gap_error(
                     states, ego_id, ego_veh.get_orig_lane_leader_id(t),
-                    False, is_follower_lane_changing=True),
-                self.compute_gap_error(
+                    False, is_follower_lane_changing=True)
+            phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
+            return min(gap_error + margin, 0) ** 2 * phi
+
+        def support2(states, inputs) -> float:
+            t = self.get_time(states)
+            gap_error = self.compute_gap_error(
                     states, ego_id, ego_veh.get_dest_lane_leader_id(t),
-                    False, is_follower_lane_changing=True),
-                self.compute_gap_error(
+                    False, is_follower_lane_changing=True)
+            phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
+            return min(gap_error + margin, 0) ** 2 * phi
+
+        def support3(states, inputs) -> float:
+            t = self.get_time(states)
+            gap_error = self.compute_gap_error(
                     states, ego_id, ego_veh.get_dest_lane_follower_id(t),
                     True, is_follower_lane_changing=False)
-            ]
             phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
-            margin = 1e-3
-            min_sum = np.sum([min(ge + margin, 0) ** 2
-                              # self._smooth_min_0(ge + margin)
-                              for ge in gap_errors])
-            # theta = self.get_a_vehicle_state_by_id(ego_id, states, 'theta')
-            return min_sum * phi
+            return min(gap_error + margin, 0) ** 2 * phi
 
-        return support
+        return [support1, support2, support3]
 
     def vehicle_following_safety_constraint(self, ego_id: int) -> Callable:
         ego_veh = self.vehicles[ego_id]

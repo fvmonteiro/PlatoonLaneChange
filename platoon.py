@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 # import bisect
-from enum import Enum
 from typing import Dict, List
 
 import numpy as np
 
 import constants
 import controllers.optimal_controller as opt_ctrl
+import operating_modes.system_operating_mode as som
 import vehicle_models.four_state_vehicles as fsv
 
 
@@ -26,9 +26,8 @@ class Platoon:
         self._id_to_position_map: Dict[int, int] = {}
         self.add_vehicle(first_vehicle)
 
-        self.strategy = _strategy_map[constants.Configuration.platoon_strategy](
-            self.vehicles
-        )
+        strategy_number = constants.Configuration.platoon_strategy
+        self.strategy = _strategy_map[strategy_number](self.vehicles)
 
     def get_platoon_leader(self):
         return self.vehicles[0]
@@ -97,8 +96,14 @@ class Platoon:
         ego_position = self._id_to_position_map[ego_id]
         return self.strategy.get_incoming_vehicle_id(ego_position)
 
+    def guess_mode_sequence(self, initial_mode_sequence: som.ModeSequence):
+        return self.strategy.create_mode_sequence(initial_mode_sequence)
+
 
 class LaneChangeStrategy(ABC):
+
+    # When guessing modes, the time between each mode change
+    switch_dt = 1.0  # TODO: might have to play with this value
 
     def __init__(self, platoon_vehicles: List[fsv.PlatoonVehicle]):
         self.vehicles = platoon_vehicles
@@ -131,23 +136,55 @@ class LaneChangeStrategy(ABC):
         return self._get_incoming_vehicle_id(ego_position)
 
     @abstractmethod
+    def _get_dest_lane_leader_id(self, ego_position: int):
+        pass
+
+    @abstractmethod
     def _get_incoming_vehicle_id(self, ego_position) -> int:
         pass
 
     @abstractmethod
-    def _get_dest_lane_leader_id(self, ego_position: int):
+    def create_mode_sequence(self, mode_sequence: som.ModeSequence):
+        """
+        Modifies the given mode sequence in place. The new mode sequence is
+        a guess of how modes will change during the maneuver. It is not a
+        prediction of the mode sequence.
+        :param mode_sequence:
+        :return:
+        """
+        # TODO: if we create the notion of leader for optimal control vehicles,
+        #  we must change everywhere in the virtual methods where 'lo' is set
         pass
 
 
-class SynchronousStrategy(LaneChangeStrategy):
+class IndividualStrategy(LaneChangeStrategy):
+    """"Vehicles behave without platoon coordination"""
+
     def _get_dest_lane_leader_id(self, ego_position) -> int:
-        """
-        Defines sequence of leaders during a coordinated lane change maneuver.
-        Only effective if platoon vehicles have a closed loop acceleration
-        policy, i.e., not optimal control
-        :param ego_position:
-        :return:
-        """
+        ego_veh = self.vehicles[ego_position]
+        return ego_veh.get_dest_lane_leader_id()
+
+    def _get_incoming_vehicle_id(self, ego_position) -> int:
+        return -1
+
+    def create_mode_sequence(self, mode_sequence: som.ModeSequence):
+        # We create a mode where each platoon vehicle is between its
+        # respective follower and leader in the destination lane
+        changes = {}
+        for veh in self.vehicles:
+            changes.update(
+                veh.get_surrounding_vehicle_changes_after_lane_change())
+        time = mode_sequence.get_latest_switch_time()
+        switch_time = time + self.switch_dt
+        mode_sequence.alter_and_add_mode(switch_time, changes)
+
+
+class SynchronousStrategy(LaneChangeStrategy):
+    """
+    All platoon vehicles change lanes at the same time
+    """
+
+    def _get_dest_lane_leader_id(self, ego_position) -> int:
         ego_veh = self.vehicles[ego_position]
         if ego_position == 0:
             return ego_veh.get_dest_lane_leader_id()
@@ -158,38 +195,37 @@ class SynchronousStrategy(LaneChangeStrategy):
         return -1  # self.get_preceding_vehicle_id(ego_id)
 
     def _get_incoming_vehicle_id(self, ego_position) -> int:
-        ego_veh = self.vehicles[ego_position]
-        if ego_veh.has_lane_change_intention():
-            return -1
+        # ego_veh = self.vehicles[ego_position]
         if ego_position == 0:
             return -1
         # Strictly speaking, platoon vehicles in this strategy don't
         # need to cooperate with anyone, but the setting here prevents them
         # from accelerating in case they change lanes before their leaders
         return -1  # self.get_preceding_vehicle_id(ego_id)
+
+    def create_mode_sequence(self, mode_sequence: som.ModeSequence):
+        p1 = self.vehicles[0]
+        sv_ids = p1.get_relevant_surrounding_vehicle_ids()
+        changes = {}
+        if sv_ids['lo'] >= 0 or sv_ids['ld'] >= 0:
+            changes[p1.get_id()] = {'lo': sv_ids['ld']}
+        if sv_ids['fd'] >= 0:
+            last_id = self.vehicles[-1].get_id()
+            changes[sv_ids['fd']] = {'lo': last_id, 'leader': last_id}
+        time = mode_sequence.get_latest_switch_time()
+        switch_time = time + self.switch_dt
+        mode_sequence.alter_and_add_mode(switch_time, changes)
 
 
 class LeaderFirstStrategy(LaneChangeStrategy):
 
     def _get_dest_lane_leader_id(self, ego_position) -> int:
-        """
-        Defines sequence of leaders during a coordinated lane change maneuver.
-        Only effective if platoon vehicles have a closed loop acceleration
-        policy, i.e., not optimal control
-        :param ego_position:
-        :return:
-        """
-        ego_veh = self.vehicles[ego_position]
-        if not ego_veh.has_lane_change_intention():
-            return -1
         if ego_position == 0:
+            ego_veh = self.vehicles[ego_position]
             return ego_veh.get_dest_lane_leader_id()
         return self.vehicles[ego_position - 1].get_id()
 
     def _get_incoming_vehicle_id(self, ego_position) -> int:
-        ego_veh = self.vehicles[ego_position]
-        if ego_veh.has_lane_change_intention():
-            return -1
         if ego_position == 0:
             return -1
         # Strictly speaking, platoon vehicles in this strategy don't
@@ -197,25 +233,41 @@ class LeaderFirstStrategy(LaneChangeStrategy):
         # from accelerating in case they change lanes before their leaders
         return -1  # self.get_preceding_vehicle_id(ego_id)
 
+    def create_mode_sequence(self, mode_sequence: som.ModeSequence):
+        time = mode_sequence.get_latest_switch_time()
+        switch_time = time
+        # Vehicles in front of the platoon in the origin lane and at
+        # the dest lane, and vehicle behind at the dest lane
+        platoon_leader_sv_ids = (
+            self.vehicles[0].get_relevant_surrounding_vehicle_ids())
+        ld = platoon_leader_sv_ids['ld']
+        for i in range(len(self.vehicles)):
+            changes = {}
+            veh = self.vehicles[i]
+            veh_id = veh.get_id()
+            switch_time += self.switch_dt
+            # Veh i will be behind its dest lane leader and in front of
+            # the platoon's dest lane follower
+            changes[veh_id] = {'lo': ld}
+            if platoon_leader_sv_ids['fd'] >= 0:
+                changes[platoon_leader_sv_ids['fd']] = {'lo': veh_id,
+                                                        'leader': veh_id}
+            # When veh i is at the dest lane, veh i+1 sees the vehicle in front
+            # of the platoon at the origin lane as its origin lane leader.
+            # Moreover, vehicle i becomes the dest lane leader of i+1
+            if i + 1 < len(self.vehicles):
+                ld = veh_id
+                following_veh_id = self.vehicles[i + 1].get_id()
+                changes[following_veh_id] = {'lo': platoon_leader_sv_ids['lo'],
+                                             'ld': ld,
+                                             'fd': platoon_leader_sv_ids['fd']}
+            mode_sequence.alter_and_add_mode(switch_time, changes)
+
 
 class LastFirstStrategy(LaneChangeStrategy):
     def _get_dest_lane_leader_id(self, ego_position) -> int:
-        """
-        Defines sequence of leaders during a coordinated lane change maneuver.
-        Only effective if platoon vehicles have a closed loop acceleration
-        policy, i.e., not optimal control
-        :param ego_position:
-        :return:
-        """
-        """
-        Coding the strategies becomes complicated when we want to control
-        when each vehicle increases the desired time headway to its leader.
-        """
-        ego_veh = self.vehicles[ego_position]
-        if not ego_veh.has_lane_change_intention():
-            return -1
-
         if ego_position == len(self.vehicles) - 1:
+            ego_veh = self.vehicles[ego_position]
             return ego_veh.get_dest_lane_leader_id()
         # If the follower has completed the lane change, then we want to
         # merge between the follower and the vehicle ahead of it (which
@@ -228,9 +280,6 @@ class LastFirstStrategy(LaneChangeStrategy):
         return follower_lo
 
     def _get_incoming_vehicle_id(self, ego_position) -> int:
-        ego_veh = self.vehicles[ego_position]
-        if ego_veh.has_lane_change_intention():
-            return -1
         if ego_position == 0:
             return -1
         # In theory, we only need to cooperate with the preceding vehicle
@@ -238,20 +287,30 @@ class LastFirstStrategy(LaneChangeStrategy):
         # no difference returning the id here independent of that
         return self.vehicles[ego_position - 1].get_id()
 
+    def create_mode_sequence(self, mode_sequence: som.ModeSequence):
+        time = mode_sequence.get_latest_switch_time()
+        switch_time = time
+        last_veh_sv_ids = (
+            self.vehicles[-1].get_relevant_surrounding_vehicle_ids())
+        # We assume no platoon vehicle changes 'lo'. This promotes cooperation
+        # The last platoon veh moves in front of its dest lane follower
+        changes = {}
+        switch_time += self.switch_dt
+        if last_veh_sv_ids['fd'] >= 0:
+            veh_id = self.vehicles[-1].get_id()
+            changes[last_veh_sv_ids['fd']] = {'lo': veh_id, 'leader': veh_id}
+            mode_sequence.alter_and_add_mode(switch_time, changes)
+        for i in range(len(self.vehicles) - 2, -1, -1):
+            changes = {self.vehicles[i].get_id(): {
+                'fd': self.vehicles[i + 1].get_id(),
+                'ld': last_veh_sv_ids['ld']
+            }}
+            switch_time += self.switch_dt
+            mode_sequence.alter_and_add_mode(switch_time, changes)
+
 
 class LeaderFirstReverseStrategy(LaneChangeStrategy):
     def _get_dest_lane_leader_id(self, ego_position) -> int:
-        """
-        Defines sequence of leaders during a coordinated lane change maneuver.
-        Only effective if platoon vehicles have a closed loop acceleration
-        policy, i.e., not optimal control
-        :param ego_position:
-        :return:
-        """
-        """
-        Coding the strategies becomes complicated when we want to control
-        when each vehicle increases the desired time headway to its leader.
-        """
         ego_veh = self.vehicles[ego_position]
         if not ego_veh.has_lane_change_intention():
             return -1
@@ -281,6 +340,11 @@ class LeaderFirstReverseStrategy(LaneChangeStrategy):
         # the (former) follower has completed the lane change
         return self.vehicles[ego_position + 1].get_id()
 
+    def create_mode_sequence(self, mode_sequence: som.ModeSequence):
+        pass
 
-_strategy_map = {1: SynchronousStrategy, 2: LeaderFirstStrategy,
-                 3: LastFirstStrategy, 4: LeaderFirstReverseStrategy}
+
+_strategy_map = {
+    0: IndividualStrategy, 1: SynchronousStrategy, 2: LeaderFirstStrategy,
+    3: LastFirstStrategy, 4: LeaderFirstReverseStrategy
+}

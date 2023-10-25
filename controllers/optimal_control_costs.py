@@ -194,10 +194,8 @@ class OCPCostTracker:
             iterations = len(self._running_cost_per_iteration[-1])
             percentage = iterations * 100 / self._max_iterations
             if percentage % 5 == 0:
-                print('{}/{} iterations. Last cost: {:.5g}. '
-                      'Best cost so far {:.5g}'.format(
-                        iterations, self._max_iterations, iteration_cost,
-                        self._best_cost))
+                print(f'{iterations}/{self._max_iterations} iterations. '
+                      f'Last cost: {iteration_cost:.5g}.')
 
         # Compare iterations:
         # delta_cost = (np.diff(self._running_cost_per_iteration[-1][-2:])

@@ -29,7 +29,7 @@ class Configuration:
     time_horizon: float = 10.0  # [s]
     has_terminal_lateral_constraints: bool = False
     has_safety_lateral_constraint: bool = False
-    provide_initial_guess: bool = False,
+    provide_initial_guess: bool = False
     initial_acceleration_guess: Union[str, float] = 0.0
     jumpstart_next_solver_call: bool = False
 
@@ -125,8 +125,8 @@ class Configuration:
         :param delta_x: Deviation from equilibrium position. The accepted keys
          are: lo (origin leader), ld (destination leader), p (intra platoon),
          fo (origin follower), fd (destination follower)
-        :param platoon_strategy: 1: synch, 2: leader first, 3: last first,
-         4: leader first reverse
+        :param platoon_strategy: 0: no platoon strategy, 1: synch,
+         2: leader first, 3: last first, 4: leader first reverse
         :return:
         """
         if v_ref:

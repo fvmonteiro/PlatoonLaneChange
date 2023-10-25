@@ -206,8 +206,8 @@ def main():
     )
     constants.Configuration.set_scenario_parameters(
         v_ref={'lo': 10., 'ld': 10., 'p': 10., 'fo': 10., 'fd': 10.},
-        delta_x={'lo': 0., 'ld': 3., 'p': 0., 'fd': 0.},
-        platoon_strategy=1
+        delta_x={'lo': 0., 'ld': 18., 'p': 0., 'fd': 0.},
+        platoon_strategy=2
     )
 
     start_time = time.time()
@@ -220,7 +220,7 @@ def main():
     #                                 n_dest_behind)
     run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
                      n_dest_ahead, n_dest_behind,
-                     is_acceleration_optimal=False)
+                     is_acceleration_optimal=True)
     # load_and_plot_latest_scenario()
     # mode_convergence_base_tests()
 

@@ -9,9 +9,10 @@ import numpy as np
 import controllers.longitudinal_controller as long_ctrl
 import controllers.lateral_controller as lat_ctrl
 import controllers.optimal_controller as opt_ctrl
+import operating_modes.system_operating_mode as som
+import operating_modes.concrete_vehicle_modes as modes
 import platoon
 import vehicle_models.base_vehicle as base
-import operating_modes.concrete_vehicle_modes as modes
 
 
 class FourStateVehicle(base.BaseVehicle, ABC):
@@ -48,12 +49,16 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             return None
 
     def get_desired_dest_lane_leader_id(self) -> int:
+        # Note that any optimal vehicle might be in a platoon, even if it
+        # is not a PlatoonVehicle. Possible code smell, but it works so far
         if not self.is_in_a_platoon():
             return self.get_dest_lane_leader_id()
         return self.get_platoon().get_dest_lane_leader_id(self.get_id())
 
     def find_cooperation_requests(self, vehicles: Iterable[base.BaseVehicle]
                                   ) -> None:
+        # Note that any optimal vehicle might be in a platoon, even if it
+        # is not a PlatoonVehicle. Possible code smell, but it works so far
         # We assume platoon vehicles do not cooperate with other vehicles
         if not self.is_in_a_platoon():
             super().find_cooperation_requests(vehicles)
@@ -154,10 +159,14 @@ class OpenLoopNoLCVehicle(OpenLoopVehicle):
         super().__init__()
         # self._ocp_controllable_interface = OpenLoopNoLCVehicleInterface
 
+    def _compute_derivatives(self, vel, theta, phi):
+        self._position_derivative_longitudinal_only(vel)
+        self._derivatives[self._state_idx['v']] = self.get_an_input_by_name('a')
+
     def _determine_inputs(self, open_loop_controls: np.ndarray,
                           vehicles: Dict[int, base.BaseVehicle]):
         self._inputs[self._input_idx['a']] = open_loop_controls[0]
-        self._inputs[self._input_idx['phi']] = 0.
+        # self._inputs[self._input_idx['phi']] = 0.
 
     def _write_optimal_inputs(self, optimal_accel):
         self._inputs[self._input_idx['a']] = optimal_accel[0]
@@ -178,10 +187,6 @@ class OptimalControlVehicle(FourStateVehicle):
         self._ocp_non_controllable_interface = ClosedLoopVehicleInterface
         self.set_mode(modes.OCPLaneKeepingMode())
 
-        # self._n_feedback_inputs = self._n_inputs - self._n_optimal_inputs
-        # self._ocp_has_solution = False
-        # self._ocp_initial_time = -np.inf
-
         self.opt_controller: opt_ctrl.VehicleOptimalController = (
             opt_ctrl.VehicleOptimalController()
         )
@@ -191,9 +196,6 @@ class OptimalControlVehicle(FourStateVehicle):
             self, centralized_controller: opt_ctrl.VehicleOptimalController):
         centralized_controller.add_controlled_vehicle_id(self.get_id())
         self.opt_controller = centralized_controller
-
-    # def reset_ocp_initial_time(self):
-    #     self._ocp_initial_time = 0.0
 
     def make_open_loop_copy(self, initial_state=None):
         return self.make_reset_copy(initial_state, OpenLoopVehicle)
@@ -269,10 +271,6 @@ class OptimalControlVehicle(FourStateVehicle):
         """
         pass
 
-    # def _set_up_longitudinal_adjustments_control(
-    #         self, vehicles: Dict[int, base.BaseVehicle]) -> None:
-    #     pass
-
     def _set_up_lane_change_control(self):
         pass
 
@@ -322,7 +320,7 @@ class SafeAccelOptimalLCVehicle(OptimalControlVehicle):
         self._inputs[self._input_idx['phi']] = optimal_phi[0]
 
 
-class OptimalCoopNoLCVehicle(OptimalControlVehicle):
+class OptimalNoLCVehicle(OptimalControlVehicle):
     """
     In scenarios with a centralized controller, this vehicle type can be used
     to represent surrounding cooperating vehicles.
@@ -512,18 +510,6 @@ class PlatoonVehicle(OptimalControlVehicle):
             new_vehicle._platoon = self.get_platoon()
             return new_vehicle
 
-    # def get_possible_target_leader_ids(self) -> List[int]:
-    #     ids = super().get_possible_target_leader_ids()
-    #     if self.is_in_a_platoon():
-    #         ids.append(self._platoon.get_preceding_vehicle_id(self.get_id()))
-    #     return ids
-
-    # def get_platoon(self) -> Union[None, platoon.Platoon]:
-    #     try:
-    #         return self._platoon
-    #     except AttributeError:
-    #         return None
-
     def set_acceleration_controller_type(
             self, is_acceleration_optimal: bool = False) -> None:
         """
@@ -543,14 +529,8 @@ class PlatoonVehicle(OptimalControlVehicle):
     def set_platoon(self, new_platoon: platoon.Platoon) -> None:
         self._platoon = new_platoon
 
-    def update_mode(self, vehicles: Dict[int, base.BaseVehicle]) -> None:
-        if self.has_lane_change_intention():
-            self._mode.handle_lane_changing_intention(vehicles)
-        else:
-            self._mode.handle_lane_keeping_intention(vehicles)
-
     def is_platoon_leader(self) -> bool:
-        return self._id == self._platoon.get_platoon_leader_id()
+        return self.get_id() == self._platoon.get_platoon_leader_id()
 
     def can_start_lane_change(self, vehicles: Dict[int, base.BaseVehicle]
                               ) -> bool:
@@ -561,6 +541,12 @@ class PlatoonVehicle(OptimalControlVehicle):
             t = self.get_current_time()
             print("t={:.2f}, veh:{}. Calling ocp solver...".format(
                 t, self._id))
+        dest_lane_veh_ids = [veh.get_id() for veh in vehicles.values()
+                             if veh.get_current_lane() == self.target_lane]
+        self.opt_controller.set_platoon_formation_constraint_parameters(
+            self.get_platoon().get_vehicle_ids(),
+            dest_lane_veh_ids
+        )
         self.opt_controller.find_trajectory(vehicles)
         return self.opt_controller.has_solution()
 
@@ -591,14 +577,24 @@ class PlatoonVehicle(OptimalControlVehicle):
 
     def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]
                               ) -> None:
-        if (self._is_acceleration_optimal
-                and self.opt_controller.is_active(self.get_current_time())):
-            # During the lane change, there is no target leader for the
-            # longitudinal controller since the optimal controller takes over
-            self._leader_id[self._iter_counter] = -1
+        if self._is_acceleration_optimal:
+            if self.opt_controller.is_active(self.get_current_time()):
+                # During the lane change, there is no target leader for the
+                # long controller since the optimal controller takes over
+                self._leader_id[self._iter_counter] = -1
+            else:
+                # At all other times, we only look at the origin lane leader
+                self._leader_id[self._iter_counter] = (
+                    self.get_orig_lane_leader_id())
         else:
             self._leader_id[self._iter_counter] = (
                 self.long_controller.get_more_critical_leader(vehicles))
+
+    def guess_mode_sequence(self, mode_sequence: som.ModeSequence):
+        if self.is_in_a_platoon():
+            self.get_platoon().guess_mode_sequence(mode_sequence)
+        else:
+            super().guess_mode_sequence(mode_sequence)
 
     def analyze_platoons(self, vehicles: Dict[int, base.BaseVehicle]
                          ) -> None:
@@ -706,9 +702,10 @@ class OpenLoopNoLCVehicleInterface(FourStateVehicleInterface):
 
     _input_names = ['a']
 
-    def __init__(self, vehicle: OptimalCoopNoLCVehicle):
+    def __init__(self, vehicle: OptimalNoLCVehicle):
         super().__init__(vehicle)
 
+    @classmethod
     def get_phi(cls, optimal_inputs):
         return 0.0
 
@@ -768,6 +765,7 @@ class ClosedLoopVehicleInterface(SafeAccelVehicleInterface):
     def __init__(self, vehicle: ClosedLoopVehicle):
         super().__init__(vehicle)
 
+    @classmethod
     def select_input_from_vector(cls, optimal_inputs: List, input_name: str
                                  ) -> float:
         return 0.0  # all inputs are computed internally
@@ -780,6 +778,7 @@ class SafeLongitudinalVehicleInterface(ClosedLoopVehicleInterface):
     def __init__(self, vehicle: SafeLongitudinalVehicle):
         super().__init__(vehicle)
 
+    @classmethod
     def get_phi(cls, optimal_inputs):
         return 0.0
 

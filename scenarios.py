@@ -366,10 +366,12 @@ class LaneChangeScenario(SimulationScenario):
         v_dest_leader = config.v_ref['ld']
         v_others = config.v_ref['p']
         v_orig_foll = config.v_ref['fo']
+        v_dest_foll = config.v_ref['fd']
         v_ff_array = ([v_orig_leader] * self._n_orig_ahead
                       + [v_others] * self._n_platoon
                       + [v_orig_foll] * self._n_orig_behind
-                      + [v_dest_leader] + [v_others] * (self.n_per_lane[1] - 1))
+                      + [v_dest_leader]
+                      + [v_dest_foll] * (self.n_per_lane[1] - 1))
         self.vehicle_group.set_free_flow_speeds(v_ff_array)
         # Deviation from equilibrium position:
         delta_x = config.delta_x
@@ -429,8 +431,8 @@ class LaneChangeScenario(SimulationScenario):
         dt = 1.0e-2
         time = np.arange(0, final_time + dt, dt)
         self.vehicle_group.prepare_to_start_simulation(len(time))
-        # analysis.plot_initial_state(self.response_to_dataframe())
-        self.make_control_centralized()
+        analysis.plot_initial_state(self.response_to_dataframe())
+        # self.make_control_centralized()
         for i in range(len(time) - 1):
             if np.isclose(time[i], self.lc_intention_time, atol=dt / 10):
                 self.vehicle_group.set_vehicles_lane_change_direction(

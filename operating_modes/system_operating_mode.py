@@ -74,18 +74,18 @@ class SystemMode:
             ego_identifier, surrounding_position)]
 
     def create_altered_mode(
-            self, ego_surrounding_map: Dict[Union[str, int],
-                                            Dict[str, Union[str, int]]]
+            self,
+            mode_changes: Dict[Union[str, int], Dict[str, Union[str, int]]]
     ) -> SystemMode:
         """
         Creates another SystemMode instance similar to the original one
         except for the given follower/leader pair
-        :param ego_surrounding_map:
+        :param mode_changes:
         :return:
         """
         new_mode = copy.deepcopy(self)
         # Change only the requested pairs
-        for ego, surrounding_veh_map in ego_surrounding_map.items():
+        for ego, surrounding_veh_map in mode_changes.items():
             ego_id = self._get_id(ego)
             for surrounding_pos, other_veh in surrounding_veh_map.items():
                 surrounding_veh_id = self._get_id(other_veh)
@@ -158,19 +158,18 @@ class ModeSequence:
 
     def alter_and_add_mode(
             self, time: float,
-            follower_leader_changes: Dict[Union[str, int],
-                                          Dict[str, Union[str, int]]]):
+            mode_changes: Dict[Union[str, int], Dict[str, Union[str, int]]]):
         """
         Copies the latest mode, change it according to the given parameter,
         and adds it to the sequence
         :param time:
-        :param follower_leader_changes:
+        :param mode_changes:
         :return:
         """
-        if len(follower_leader_changes) == 0:
+        if len(mode_changes) == 0:
             return
         last_mode = self.get_latest_mode()
-        new_mode = last_mode.create_altered_mode(follower_leader_changes)
+        new_mode = last_mode.create_altered_mode(mode_changes)
         self.add_mode(time, new_mode)
 
     def to_sv_sequence(self) -> Dict[int, SVSequence]:
@@ -184,51 +183,3 @@ class ModeSequence:
                 surrounding_vehicle_sequences[ego_id].append(
                     (time, surrounding_ids))
         return surrounding_vehicle_sequences
-
-
-# TODO: if we create the notion of leader for optimal control vehicles, must
-#  change the enumerated TODOs below
-
-def create_synchronous_lane_change_mode_sequence(mode_sequence: ModeSequence,
-                                                 platoon_size: int):
-    latest_mode = mode_sequence.get_latest_mode()
-    time = mode_sequence.get_latest_switch_time()
-    switch_time = time + 1.0  # TODO: no idea what value to add here
-    lo = latest_mode.get_surrounding_vehicle_id('p1', 'lo')
-    ld = latest_mode.get_surrounding_vehicle_id('p1', 'ld')
-    fd = latest_mode.get_surrounding_vehicle_id('p1', 'fd')
-    changes = {}
-    if lo != ld:
-        changes['p1'] = {'lo': ld}  # TODO: change 1
-    if fd >= 0:
-        pN = 'p' + str(platoon_size)
-        changes[fd] = {'lo': pN, 'leader': pN}
-
-    mode_sequence.alter_and_add_mode(switch_time, changes)
-
-
-def create_leader_first_lane_change_mode_sequence(mode_sequence: ModeSequence,
-                                                  platoon_size: int):
-    latest_mode = mode_sequence.get_latest_mode()
-    fd = latest_mode.get_surrounding_vehicle_id('p1', 'fd')
-    time = mode_sequence.get_latest_switch_time()
-    dt = 1.0  # [s]
-    switch_time = time
-    for i in range(1, platoon_size + 1):
-        switch_time += dt
-        pi = 'p' + str(i)
-        lo = latest_mode.get_surrounding_vehicle_id(pi, 'lo')
-        ld = latest_mode.get_surrounding_vehicle_id(pi, 'ld')
-        changes = {}
-        if lo != ld:
-            changes[pi] = {'lo': ld}  # TODO change 2
-        if fd >= 0:
-            changes[fd] = {'lo': pi, 'leader': pi}
-        if i - 1 >= 1:  # not sure if it is necessary to 'erase' fd and ld
-            pi_previous = 'p' + str(i - 1)
-            changes[pi_previous] = {'ld': -1, 'fd': -1}
-        if i + 1 <= platoon_size:
-            pi_next = 'p' + str(i + 1)
-            changes[pi_next] = {'lo': lo, 'ld': pi}
-        mode_sequence.alter_and_add_mode(switch_time, changes)
-

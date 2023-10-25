@@ -42,7 +42,7 @@ class BaseVehicle(ABC):
     _ocp_controllable_interface: Type[BaseVehicleInterface]
     _ocp_non_controllable_interface: Type[BaseVehicleInterface]
     _desired_future_follower_id: int
-    _long_adjust_start_time: float
+    # _long_adjust_start_time: float
     _lc_start_time: float
 
     # Used when we need to copy a vehicle
@@ -331,7 +331,7 @@ class BaseVehicle(ABC):
         """
         self.initialize_simulation_logs(n_samples)
         self._desired_future_follower_id = -1
-        self._long_adjust_start_time = -np.inf
+        # self._long_adjust_start_time = -np.inf
         self._lc_start_time = -np.inf
 
         # Initial state
@@ -473,6 +473,31 @@ class BaseVehicle(ABC):
         """
         self._update_target_leader(vehicles)
 
+    # TODO: consider moving to OptimalVehicle and leaving it empty here
+    def guess_mode_sequence(self, mode_sequence: som.ModeSequence):
+        """
+        Guesses the mode sequence during a lane change maneuver.
+        :param mode_sequence:
+        :return:
+        """
+        changes = self.get_surrounding_vehicle_changes_after_lane_change()
+        time = mode_sequence.get_latest_switch_time()
+        switch_time = time + 1.0  # TODO might need to adjust the time diff
+        mode_sequence.alter_and_add_mode(switch_time, changes)
+
+    def get_surrounding_vehicle_changes_after_lane_change(
+            self) -> Dict[int, Dict[str, int]]:
+        changes = {}
+        sv_ids = self.get_relevant_surrounding_vehicle_ids()
+        # Current choice: we do not erase safety-relevant vehicles
+        # changes[self.get_id()] = {'fd': -1, 'ld': -1}
+        if sv_ids['lo'] >= 0 or sv_ids['ld'] >= 0:
+            changes[self.get_id()] = {'lo': sv_ids['ld']}
+        if sv_ids['fd'] >= 0:
+            changes[sv_ids['fd']] = {'lo': self.get_id(),
+                                     'leader': self.get_id()}
+        return changes
+
     @staticmethod
     def compute_a_gap(leading_vehicle: BaseVehicle,
                       following_vehicle: BaseVehicle) -> float:
@@ -579,7 +604,8 @@ class BaseVehicle(ABC):
         return df
 
     def prepare_for_longitudinal_adjustments_start(self):
-        self._long_adjust_start_time = self.get_current_time()
+        pass
+        # self._long_adjust_start_time = self.get_current_time()
         # self._set_up_longitudinal_adjustments_control(vehicles)
 
     def prepare_for_lane_change_start(self):

@@ -47,9 +47,11 @@ class LongitudinalController:
             accel = self.saturate_accel(v_ego, v_ff, accel)
         return accel
 
-    def saturate_accel(self, v_ego, v_ff, desired_accel):
+    def saturate_accel(self, v_ego, v_ff, desired_accel) -> float:
         if v_ego >= v_ff and desired_accel > 0:
             return self.compute_velocity_control(v_ff, v_ego)
+        elif v_ego <= 0 and desired_accel < 0:
+            return 0.
         else:
             return desired_accel
 

@@ -40,24 +40,9 @@ class VehicleOptimalController:
     _desired_state: np.ndarray
     _cost_with_tracker: occ.OCPCostTracker
 
-    # Solver params
-    solver_max_iter: int = config.solver_max_iter
-    discretization_step: float = config.discretization_step
-    ftol: float = config.ftol
-    estimate_gradient: bool = config.estimate_gradient
-
-    # Our controller's params
-    max_iter: int = config.max_iter
-    time_horizon: float = config.time_horizon
-    has_terminal_lateral_constraints: bool = (
-        config.has_terminal_lateral_constraints)
-    has_safety_lateral_constraint: bool = config.has_safety_lateral_constraint
-    provide_initial_guess: bool = config.provide_initial_guess
-    initial_acceleration_guess: Union[str, float] = (
-        config.initial_acceleration_guess)
-    jumpstart_next_solver_call: bool = config.jumpstart_next_solver_call
-
     def __init__(self):
+        self.time_horizon = 0.
+        self._set_config()
         self._terminal_cost = None
         self._terminal_constraints = []
         self._constraints = []
@@ -72,6 +57,26 @@ class VehicleOptimalController:
 
         self._data_per_iteration = []
         self._results_summary: defaultdict[str, List] = defaultdict(list)
+
+    def _set_config(self):
+        # Solver params
+        self.solver_max_iter: int = config.solver_max_iter
+        self.discretization_step: float = config.discretization_step
+        self.ftol: float = config.ftol
+        self.estimate_gradient: bool = config.estimate_gradient
+
+        # Our controller's params
+        self.max_iter: int = config.max_iter
+        self.time_horizon: float = config.time_horizon
+        self.has_terminal_lateral_constraints: bool = (
+            config.has_terminal_lateral_constraints)
+        self.has_safety_lateral_constraint: bool = (
+            config.has_safety_lateral_constraint)
+        self.provide_initial_guess: bool = config.provide_initial_guess
+        self.initial_acceleration_guess: Union[str, float] = (
+            config.initial_acceleration_guess)
+        self.jumpstart_next_solver_call: bool = (
+            config.jumpstart_next_solver_call)
 
     def get_time_horizon(self) -> float:
         return self.time_horizon
@@ -202,14 +207,7 @@ class VehicleOptimalController:
         # input_sequence.alter_and_add_mode(
         #     1.0, {'ld1': {'lo': 'p1', 'leader': 'p1'},
         #           'p2': {'lo': 'ld1'}})
-        # Strategy testing =============== #
-        n_platoon = np.sum([1 for veh_id in self._controlled_veh_ids
-                            if vehicles[veh_id].get_name().startswith('p')])
-        # som.create_synchronous_lane_change_mode_sequence(input_sequence,
-        #                                                  int(n_platoon))
-        # som.create_leader_first_lane_change_mode_sequence(input_sequence,
-        #                                                   int(n_platoon))
-        # ================================ #
+        vehicles[self._center_veh_id].guess_mode_sequence(input_sequence)
 
         self._ocp_interface = vgi.VehicleGroupInterface(
             vehicles, self._controlled_veh_ids, self._center_veh_id)
@@ -273,8 +271,6 @@ class VehicleOptimalController:
                 last_input = self.ocp_result.inputs
                 last_states = self.ocp_result.states
                 initial_guess = (last_states, last_input)
-            else:
-                initial_guess = None
 
     def _set_ocp_configuration(self):
         self._set_ocp_dynamics()
@@ -399,11 +395,16 @@ class VehicleOptimalController:
         for veh_id in self._controlled_veh_ids:
             veh = self._ocp_interface.vehicles[veh_id]
             if veh.has_lane_change_intention():
-                lc_safety_constraint = NonlinearConstraint(
-                    self._ocp_interface.lane_changing_safety_constraint(veh_id),
-                    -epsilon, epsilon
-                )
-                self._constraints.append(lc_safety_constraint)
+                # lc_safety_constraint = NonlinearConstraint(
+                #     self._ocp_interface.lane_changing_safety_constraint(veh_id),
+                #     -epsilon, epsilon
+                # )
+                # self._constraints.append(lc_safety_constraint)
+                lc_safety_constraints = [NonlinearConstraint(
+                    fun, -epsilon, epsilon) for fun in
+                    self._ocp_interface.lane_changing_safety_constraints(
+                        veh_id)]
+                self._constraints.extend(lc_safety_constraints)
             if veh.is_long_control_optimal():
                 veh_foll_constraint = NonlinearConstraint(
                     self._ocp_interface.vehicle_following_safety_constraint(
