@@ -206,8 +206,8 @@ def main():
     )
     constants.Configuration.set_scenario_parameters(
         v_ref={'lo': 10., 'ld': 10., 'p': 10., 'fo': 10., 'fd': 10.},
-        delta_x={'lo': 0., 'ld': 18., 'p': 0., 'fd': 0.},
-        platoon_strategy=2
+        delta_x={'lo': 0., 'ld': 3., 'p': 0., 'fd': 0.},
+        platoon_strategy=1
     )
 
     start_time = time.time()

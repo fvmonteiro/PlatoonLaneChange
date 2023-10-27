@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 # import bisect
-from typing import Dict, List
-
 import numpy as np
 
 import constants
@@ -13,7 +11,7 @@ import vehicle_models.four_state_vehicles as fsv
 
 
 class Platoon:
-    current_inputs: Dict[int, float]
+    current_inputs: dict[int, float]
 
     _counter: int = 0
 
@@ -22,8 +20,8 @@ class Platoon:
         Platoon._counter += 1
 
         # Vehicles and their ids sorted by position (first is front-most)
-        self.vehicles: List[fsv.PlatoonVehicle] = []
-        self._id_to_position_map: Dict[int, int] = {}
+        self.vehicles: list[fsv.PlatoonVehicle] = []
+        self._id_to_position_map: dict[int, int] = {}
         self.add_vehicle(first_vehicle)
 
         strategy_number = constants.Configuration.platoon_strategy
@@ -32,13 +30,13 @@ class Platoon:
     def get_platoon_leader(self):
         return self.vehicles[0]
 
-    def get_platoon_leader_id(self):
+    def get_platoon_leader_id(self) -> int:
         return self.get_platoon_leader().get_id()
 
-    def get_platoon_last_vehicle_name(self):
+    def get_platoon_last_vehicle_name(self) -> str:
         return self.vehicles[-1].get_name()
 
-    def get_vehicle_ids(self):
+    def get_vehicle_ids(self) -> list[int]:
         return [veh.get_id() for veh in self.vehicles]
 
     def get_preceding_vehicle_id(self, veh_id: int) -> int:
@@ -65,8 +63,6 @@ class Platoon:
         elif new_vehicle.get_x() < self.vehicles[-1].get_x():
             self._id_to_position_map[new_vehicle.get_id()] = len(self.vehicles)
             self.vehicles.append(new_vehicle)
-            opt_control = self.get_optimal_controller()
-            new_vehicle.set_centralized_controller(opt_control)
         else:
             # bisect.insort(self.vehicles, new_vehicle, key=lambda v: v.get_x())
             idx = np.searchsorted([veh.get_x() for veh in self.vehicles],
@@ -76,8 +72,6 @@ class Platoon:
                              + self.vehicles[idx:])
             for i, veh in enumerate(self.vehicles):
                 self._id_to_position_map[veh.get_id()] = i
-            opt_control = self.get_optimal_controller()
-            new_vehicle.set_centralized_controller(opt_control)
 
     def get_dest_lane_leader_id(self, ego_id) -> int:
         """
@@ -98,6 +92,10 @@ class Platoon:
 
     def guess_mode_sequence(self, initial_mode_sequence: som.ModeSequence):
         return self.strategy.create_mode_sequence(initial_mode_sequence)
+    
+
+# class OptimalPlatoon(Platoon):
+#     def __init__
 
 
 class LaneChangeStrategy(ABC):
@@ -105,7 +103,7 @@ class LaneChangeStrategy(ABC):
     # When guessing modes, the time between each mode change
     switch_dt = 1.0  # TODO: might have to play with this value
 
-    def __init__(self, platoon_vehicles: List[fsv.PlatoonVehicle]):
+    def __init__(self, platoon_vehicles: list[fsv.PlatoonVehicle]):
         self.vehicles = platoon_vehicles
 
     def get_dest_lane_leader_id(self, ego_position) -> int:

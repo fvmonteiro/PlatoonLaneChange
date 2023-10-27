@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import time
-from typing import Dict, List, Union, Tuple, Set
+from typing import Union
 import warnings
 
 import control as ct
@@ -25,7 +25,7 @@ config = constants.Configuration
 class VehicleOptimalController:
     """
     The optimal controller follows the steps:
-    1. Set an operating mode sequence
+    1. set an operating mode sequence
     2. Solve the OPC with given mode sequence
     3. Apply optimal input and simulate system
     4. Compare assumed operating mode sequence to obtained mode sequence
@@ -47,16 +47,16 @@ class VehicleOptimalController:
         self._terminal_constraints = []
         self._constraints = []
         self._ocp_has_solution = False
-        self._controlled_veh_ids: Set[int] = set()
+        self._controlled_veh_ids: set[int] = set()
         # We center the system around some vehicle when solving the opc
         # to make the solution independent of shifts in initial position
         self._center_veh_id: int = 0
-        self._platoon_vehicle_pairs: List[Tuple[int, int]] = []
-        self._dest_lane_vehicles_ids: List[int] = []
+        self._platoon_vehicle_pairs: list[tuple[int, int]] = []
+        self._dest_lane_vehicles_ids: list[int] = []
         self._activation_time = np.inf
 
         self._data_per_iteration = []
-        self._results_summary: defaultdict[str, List] = defaultdict(list)
+        self._results_summary: defaultdict[str, list] = defaultdict(list)
 
     def _set_config(self):
         # Solver params
@@ -123,7 +123,7 @@ class VehicleOptimalController:
             # t_eval=np.arange(0, time_pts[-1], 0.01)
         )
 
-    def get_input(self, current_time: float, veh_ids: Union[int, List[int]],
+    def get_input(self, current_time: float, veh_ids: Union[int, list[int]],
                   t0: float = None):
         """
         Gets the optimal input found by the solver at the given time by linear
@@ -131,7 +131,7 @@ class VehicleOptimalController:
         :param current_time:
         :param veh_ids: Ids of vehicles for which we want the inputs
         :param t0: If None, we assume t0 = activation_time
-        :return: Dictionary with veh ids as keys and inputs as values if
+        :return: dictionary with veh ids as keys and inputs as values if
          multiple veh ids passed, single input vector if single veh id
         """
 
@@ -144,7 +144,7 @@ class VehicleOptimalController:
             t0 = self._activation_time
 
         delta_t = current_time - t0
-        current_inputs: Dict[int, np.ndarray] = {}
+        current_inputs: dict[int, np.ndarray] = {}
         for v_id in veh_ids:
             ego_inputs = self._ocp_inputs_per_vehicle[v_id]
             n_optimal_inputs = ego_inputs.shape[0]
@@ -168,7 +168,7 @@ class VehicleOptimalController:
         self.time_horizon = value
 
     def set_controlled_vehicles_ids(
-            self, controlled_veh_ids: Union[int, List[int]]):
+            self, controlled_veh_ids: Union[int, list[int]]):
         if np.isscalar(controlled_veh_ids):
             controlled_veh_ids = [controlled_veh_ids]
         self._center_veh_id = controlled_veh_ids[0]
@@ -182,8 +182,8 @@ class VehicleOptimalController:
             self._controlled_veh_ids.add(new_vehicle_id)
 
     def set_platoon_formation_constraint_parameters(
-            self, platoon_vehicles_ids: List[int],
-            dest_lane_vehicles_ids: List[int]):
+            self, platoon_vehicles_ids: list[int],
+            dest_lane_vehicles_ids: list[int]):
         self._platoon_vehicle_pairs = []
         for i in range(len(platoon_vehicles_ids)):
             for j in range(i + 1, len(platoon_vehicles_ids)):
@@ -194,7 +194,7 @@ class VehicleOptimalController:
         print('Platoon veh pairs:', self._platoon_vehicle_pairs)
         print('Dest lane vehs:', self._dest_lane_vehicles_ids)
 
-    def find_trajectory(self, vehicles: Dict[int, base.BaseVehicle]):
+    def find_trajectory(self, vehicles: dict[int, base.BaseVehicle]):
         """
         Solves the OPC for all listed controlled vehicles
         :param vehicles: All relevant vehicles
@@ -497,7 +497,7 @@ class VehicleOptimalController:
         #     self._ocp_has_solution = False
         # self._ocp_has_solution = True
 
-    def get_ocp_solver_simulation(self, vehicles: Dict[int, base.BaseVehicle]):
+    def get_ocp_solver_simulation(self, vehicles: dict[int, base.BaseVehicle]):
         sim_time = self.ocp_result.time
         initial_state_per_vehicle = (
             self._ocp_interface.map_state_to_vehicle_ids(self._initial_state)
@@ -525,7 +525,7 @@ class VehicleOptimalController:
         return vehicle_group
 
     def simulate_over_optimization_horizon(
-            self, vehicles: Dict[int, base.BaseVehicle]):
+            self, vehicles: dict[int, base.BaseVehicle]):
         dt = 1e-2
         sim_time = self.get_time_points(dt)
 
@@ -540,7 +540,7 @@ class VehicleOptimalController:
                                                  optimal_inputs)
         return vehicle_group
 
-    def create_initial_guess(self, vehicles: Dict[int, base.BaseVehicle]):
+    def create_initial_guess(self, vehicles: dict[int, base.BaseVehicle]):
         sim_time = self.get_time_points()
         initial_state_per_vehicle = (
             self._ocp_interface.map_state_to_vehicle_ids(self._initial_state)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Tuple, Union, Set
+from typing import Callable, Union
 import warnings
 
 import numpy as np
@@ -17,7 +17,7 @@ def update_vehicles(t, states, inputs, params):
     :param t: time
     :param states: Array with states of all vehicles [x1, y1, ..., xN, yN]
     :param inputs: Array with inputs of all vehicles [u11, u12, ..., u1N, u2N]
-    :param params: Dictionary which must contain the vehicle type
+    :param params: dictionary which must contain the vehicle type
     :return: the derivative of the state
     """
     vehicle_group_interface: VehicleGroupInterface = (
@@ -34,8 +34,8 @@ def vehicle_output(t, x, u, params):
 class VehicleGroupInterface:
     """ Class to help manage groups of vehicles """
 
-    def __init__(self, vehicles: Dict[int, base.BaseVehicle],
-                 controlled_veh_ids: Set[int], ego_id: int = None):
+    def __init__(self, vehicles: dict[int, base.BaseVehicle],
+                 controlled_veh_ids: set[int], ego_id: int = None):
         """
 
         :param vehicles: All simulation vehicles
@@ -44,7 +44,7 @@ class VehicleGroupInterface:
         :param controlled_veh_ids: Ids of vehicles controlled by the optimal
          controller
         """
-        self.vehicles: Dict[int, base.BaseVehicleInterface] = {}
+        self.vehicles: dict[int, base.BaseVehicleInterface] = {}
         # Often, we need to iterate over all vehicles in the order they were
         # created. The list below make that easy
         self.sorted_vehicle_ids = None
@@ -52,10 +52,10 @@ class VehicleGroupInterface:
         self.n_states, self.n_inputs = 0, 0
         # Maps the vehicle id to the index of its states in the state vector
         # containing all vehicles
-        self.state_idx_map: Dict[int, int] = {}
+        self.state_idx_map: dict[int, int] = {}
         # Maps the vehicle id to the index of its inputs in the full input
         # vector
-        self.input_idx_map: Dict[int, int] = {}
+        self.input_idx_map: dict[int, int] = {}
 
         self.create_vehicle_interfaces(vehicles, controlled_veh_ids,
                                        ego_id)
@@ -80,7 +80,7 @@ class VehicleGroupInterface:
 
     def get_initial_inputs_guess(
             self, accel_guess: Union[str, float], as_dict: bool = False
-    ) -> Union[np.ndarray, Dict[int, np.ndarray]]:
+    ) -> Union[np.ndarray, dict[int, np.ndarray]]:
         initial_guess_array = []
         initial_guess_dict = {}
         for veh_id in self.sorted_vehicle_ids:
@@ -108,14 +108,6 @@ class VehicleGroupInterface:
         return (initial_guess_dict if as_dict
                 else np.array(initial_guess_array))
 
-    # def get_initial_inputs_guess_per_vehicle(self) -> Dict[int, np.ndarray]:
-    #     initial_guess = {}
-    #     for veh_id in self.sorted_vehicle_ids:
-    #         vehicle = self.vehicles[veh_id]
-    #         veh_desired_inputs = vehicle.get_initial_input_guess()
-    #         initial_guess[veh_id] = veh_desired_inputs
-    #     return initial_guess
-
     def get_initial_state(self):
         """
         Gets all vehicles' current states, which are used as the starting
@@ -126,7 +118,7 @@ class VehicleGroupInterface:
             initial_state.extend(self.vehicles[veh_id].get_initial_state())
         return np.array(initial_state + [0.])  # time is the last state
 
-    def get_state_indices(self, state_name: str) -> List[int]:
+    def get_state_indices(self, state_name: str) -> list[int]:
         """
         Get all the indices for a certain state within the full state vector
         """
@@ -175,7 +167,7 @@ class VehicleGroupInterface:
         for foll_id, sequence in sv_sequences.items():
             self.vehicles[foll_id].set_leader_sequence(sequence)
 
-    def create_input_names(self) -> List[str]:
+    def create_input_names(self) -> list[str]:
         input_names = []
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
@@ -185,7 +177,7 @@ class VehicleGroupInterface:
         return input_names
 
     def create_vehicle_interfaces(
-            self, vehicles: Dict[int, base.BaseVehicle],
+            self, vehicles: dict[int, base.BaseVehicle],
             controlled_veh_ids: set[int], ego_id: int = None
     ) -> None:
         """
@@ -218,7 +210,7 @@ class VehicleGroupInterface:
         self.n_states += 1  # time
         self.n_vehs = len(self.vehicles)
 
-    def create_output_names(self) -> List[str]:
+    def create_output_names(self) -> list[str]:
         output_names = []
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
@@ -331,7 +323,7 @@ class VehicleGroupInterface:
                                                     leader_states))
         return np.array(dxdt + [1])  # time is the last state
 
-    def cost_function(self, controlled_veh_ids: List[int]) -> Callable:
+    def cost_function(self, controlled_veh_ids: list[int]) -> Callable:
         tf = 0.0  # only relevant for desired final position
         x_ref = self.create_desired_state(tf)
         u_ref = self.get_desired_input()
@@ -362,33 +354,7 @@ class VehicleGroupInterface:
 
         return support
 
-    # def lane_changing_safety_constraint(self, ego_id: int) -> Callable:
-    #     ego_veh = self.vehicles[ego_id]
-    #
-    #     def support(states, inputs) -> float:
-    #         t = self.get_time(states)
-    #         gap_errors = [
-    #             self.compute_gap_error(
-    #                 states, ego_id, ego_veh.get_orig_lane_leader_id(t),
-    #                 False, is_follower_lane_changing=True),
-    #             self.compute_gap_error(
-    #                 states, ego_id, ego_veh.get_dest_lane_leader_id(t),
-    #                 False, is_follower_lane_changing=True),
-    #             self.compute_gap_error(
-    #                 states, ego_id, ego_veh.get_dest_lane_follower_id(t),
-    #                 True, is_follower_lane_changing=False)
-    #         ]
-    #         phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
-    #         margin = 1e-3
-    #         min_sum = np.sum([min(ge + margin, 0) ** 2
-    #                           # self._smooth_min_0(ge + margin)
-    #                           for ge in gap_errors])
-    #         # theta = self.get_a_vehicle_state_by_id(ego_id, states, 'theta')
-    #         return min_sum * phi
-    #
-    #     return support
-
-    def lane_changing_safety_constraints(self, ego_id: int) -> List[Callable]:
+    def lane_changing_safety_constraints(self, ego_id: int) -> list[Callable]:
         ego_veh = self.vehicles[ego_id]
         margin = 1e-3
 
@@ -432,7 +398,7 @@ class VehicleGroupInterface:
 
         return support
 
-    def platoon_constraint(self, platoon_ids: Tuple[int, int], other_id: int
+    def platoon_constraint(self, platoon_ids: tuple[int, int], other_id: int
                            ) -> Callable:
         def support(states, inputs) -> float:
             other_x = self.get_a_vehicle_state_by_id(other_id, states, 'x')
@@ -464,7 +430,7 @@ class VehicleGroupInterface:
         return follower_veh.compute_error_to_safe_gap(
             follower_states, leader_x, is_follower_lane_changing)
 
-    def map_input_to_vehicle_ids(self, array) -> Dict[int, np.ndarray]:
+    def map_input_to_vehicle_ids(self, array) -> dict[int, np.ndarray]:
         """
         Creates a dictionary mapping the vehicle id to chunks of the given array
         :param array:
@@ -472,7 +438,7 @@ class VehicleGroupInterface:
         """
         return self.map_array_to_vehicle_ids(array, False)
 
-    def map_state_to_vehicle_ids(self, array) -> Dict[int, np.ndarray]:
+    def map_state_to_vehicle_ids(self, array) -> dict[int, np.ndarray]:
         """
         Creates a dictionary mapping the vehicle id to chunks of the given array
         :param array:
@@ -481,7 +447,7 @@ class VehicleGroupInterface:
         return self.map_array_to_vehicle_ids(array, True)
 
     def map_array_to_vehicle_ids(self, array: np.ndarray,
-                                 is_state: bool) -> Dict[int, np.ndarray]:
+                                 is_state: bool) -> dict[int, np.ndarray]:
         """
         Creates a dictionary mapping the vehicle id to chunks of the given array
         :param array:

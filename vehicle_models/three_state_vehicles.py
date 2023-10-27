@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC
-from typing import Dict, List
 
 import numpy as np
 
@@ -27,7 +26,7 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
         """
         pass
 
-    def update_mode(self, vehicles: Dict[int, base.BaseVehicle]):
+    def update_mode(self, vehicles: dict[int, base.BaseVehicle]):
         pass
 
     def get_vel(self):
@@ -42,7 +41,7 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
         pass
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
-                          vehicles: Dict[int, base.BaseVehicle]):
+                          vehicles: dict[int, base.BaseVehicle]):
         """
         Sets the open loop controls v (velocity) and phi (steering wheel
         :param open_loop_controls: Dictionary containing 'v' and 'phi' values
@@ -54,14 +53,7 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
         self._inputs[self._input_idx['phi']] = open_loop_controls[
             self._input_idx['phi']]
 
-    # def _set_up_longitudinal_adjustments_control(
-    #         self, vehicles: Dict[int, base.BaseVehicle]):
-    #     pass
-
-    def _set_up_lane_change_control(self):
-        pass
-
-    def _update_target_leader(self, vehicles: Dict[int, base.BaseVehicle]):
+    def update_target_leader(self, vehicles: dict[int, base.BaseVehicle]):
         """
         Does nothing, since this vehicle class does not have autonomous
         longitudinal control
@@ -101,8 +93,7 @@ class ThreeStateVehicleInterface(base.BaseVehicleInterface, ABC):
         super().__init__(vehicle)
         self._set_model()
 
-    @classmethod
-    def _set_speed(cls, v0, state):
+    def _set_speed(self, v0, state):
         # Does nothing because velocity is an input for this model
         pass
 
@@ -113,7 +104,7 @@ class ThreeStateVehicleInterface(base.BaseVehicleInterface, ABC):
     def get_desired_input(self) -> np.ndarray:
         return np.array([self.get_free_flow_speed(), 0])
 
-    def get_input_limits(self) -> (List[float], List[float]):
+    def get_input_limits(self) -> (list[float], list[float]):
         return ([0, -self.get_phi_max()],
                 [self.get_free_flow_speed() + 5, self.get_phi_max()])
 

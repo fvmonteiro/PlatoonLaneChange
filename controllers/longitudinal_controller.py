@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Dict, Type
-
 import numpy as np
 
 import vehicle_models.base_vehicle as base
@@ -15,7 +13,7 @@ class LongitudinalController:
         self.kg = 0.5
         self.kv = 0.5
 
-    def compute_acceleration(self, vehicles: Dict[int, base.BaseVehicle]
+    def compute_acceleration(self, vehicles: dict[int, base.BaseVehicle]
                              ) -> float:
         """
         Computes acceleration for the ego vehicle following a leader
@@ -34,15 +32,18 @@ class LongitudinalController:
         return accel
 
     def compute_acceleration_from_interface(
-            self, ego_class: Type[base.BaseVehicleInterface],
+            self, vehicle_interface: base.BaseVehicleInterface,
             ego_states, v_ff, leader_states) -> float:
-        v_ego = ego_class.select_state_from_vector(ego_states, 'v')
+        v_ego = vehicle_interface.select_state_from_vector(ego_states, 'v')
         if leader_states is None or len(leader_states) == 0:
             accel = self.compute_velocity_control(v_ff, v_ego)
         else:
-            gap = (ego_class.select_state_from_vector(leader_states, 'x')
-                   - ego_class.select_state_from_vector(ego_states, 'x'))
-            v_leader = ego_class.select_state_from_vector(leader_states, 'v')
+            gap = (vehicle_interface.select_state_from_vector(leader_states,
+                                                              'x')
+                   - vehicle_interface.select_state_from_vector(ego_states,
+                                                                'x'))
+            v_leader = vehicle_interface.select_state_from_vector(
+                leader_states, 'v')
             accel = self.compute_gap_control(gap, v_ego, v_leader)
             accel = self.saturate_accel(v_ego, v_ff, accel)
         return accel
@@ -56,7 +57,7 @@ class LongitudinalController:
             return desired_accel
 
     def compute_accel_to_a_leader(
-            self, other_id: int, vehicles: Dict[int, base.BaseVehicle]
+            self, other_id: int, vehicles: dict[int, base.BaseVehicle]
     ) -> float:
         if other_id >= 0:
             other_vehicle = vehicles[other_id]
@@ -67,7 +68,7 @@ class LongitudinalController:
         else:
             return np.inf
 
-    def get_more_critical_leader(self, vehicles: Dict[int, base.BaseVehicle]
+    def get_more_critical_leader(self, vehicles: dict[int, base.BaseVehicle]
                                  ) -> int:
         """
         Compares the acceleration if following the origin or destination lane

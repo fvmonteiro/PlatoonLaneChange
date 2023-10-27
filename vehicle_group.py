@@ -1,4 +1,6 @@
-from typing import Any, Dict, Iterable, List, Type, Union, TypeVar, Set
+from __future__ import annotations
+
+from typing import Any, Iterable, Type, Union, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -15,11 +17,11 @@ class VehicleGroup:
     """ Class to help manage groups of vehicles """
 
     def __init__(self):
-        self.vehicles: Dict[int, base.BaseVehicle] = {}
+        self.vehicles: dict[int, base.BaseVehicle] = {}
         # Often, we need to iterate over all vehicles in the order they were
         # created. The list below makes that easy
-        self.sorted_vehicle_ids: List[int] = []
-        self.name_to_id: Dict[str, int] = {}
+        self.sorted_vehicle_ids: list[int] = []
+        self.name_to_id: dict[str, int] = {}
         # The full system (all vehicles) mode is defined by follower/leader
         # pairs.
         self.mode_sequence: som.ModeSequence = som.ModeSequence()
@@ -87,12 +89,12 @@ class VehicleGroup:
     def get_vehicle_by_name(self, name: str) -> base.BaseVehicle:
         return self.vehicles[self.name_to_id[name]]
 
-    def get_optimal_control_vehicles(self) -> List[fsv.OptimalControlVehicle]:
+    def get_optimal_control_vehicles(self) -> list[fsv.OptimalControlVehicle]:
         return self.get_vehicles_of_type(fsv.OptimalControlVehicle)
 
-    def get_platoon_vehicles(self) -> List[fsv.PlatoonVehicle]:
+    def get_platoon_vehicles(self) -> list[fsv.PlatoonVehicle]:
         return self.get_vehicles_of_type(fsv.PlatoonVehicle)
-        # platoon_vehs: List[fsv.PlatoonVehicle] = []
+        # platoon_vehs: list[fsv.PlatoonVehicle] = []
         # for veh_id in self.sorted_vehicle_ids:
         #     veh = self.vehicles[veh_id]
         #     if isinstance(veh, fsv.PlatoonVehicle):
@@ -100,8 +102,8 @@ class VehicleGroup:
         # return platoon_vehs
 
     def get_vehicles_of_type(self, vehicle_type: Type[base.BaseVehicle]
-                             ) -> List[V]:
-        selected_vehicles: List[vehicle_type] = []
+                             ) -> list[V]:
+        selected_vehicles: list[vehicle_type] = []
         for veh_id in self.sorted_vehicle_ids:
             veh = self.vehicles[veh_id]
             if isinstance(veh, vehicle_type):
@@ -114,7 +116,7 @@ class VehicleGroup:
                 return veh
         raise AttributeError("This vehicle group doesn't have any platoons")
 
-    def get_initial_desired_gaps(self, v_ref: List[float] = None):
+    def get_initial_desired_gaps(self, v_ref: list[float] = None):
         gaps = []
         for veh_id in self.sorted_vehicle_ids:
             if v_ref is None:
@@ -133,14 +135,14 @@ class VehicleGroup:
     def set_a_vehicle_free_flow_speed(self, veh_id, v_ff):
         self.vehicles[veh_id].set_free_flow_speed(v_ff)
 
-    def set_free_flow_speeds(self, values: Union[float, List, np.ndarray]):
+    def set_free_flow_speeds(self, values: Union[float, list, np.ndarray]):
         if np.isscalar(values):
             values = [values] * self.get_n_vehicles()
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
             vehicle.set_free_flow_speed(values[veh_id])
 
-    def set_free_flow_speeds_by_name(self, values: Dict[str, float]):
+    def set_free_flow_speeds_by_name(self, values: dict[str, float]):
         for vehicle in self.vehicles.values():
             vehicle.set_free_flow_speed(values[vehicle.get_name()])
 
@@ -151,8 +153,8 @@ class VehicleGroup:
                                       theta0[veh_id], v0[veh_id])
 
     def set_vehicles_lane_change_direction(
-            self, ids_or_names: List[Union[int, str]],
-            lc_direction: Union[int, List[int]]):
+            self, ids_or_names: list[Union[int, str]],
+            lc_direction: Union[int, list[int]]):
         if np.isscalar(lc_direction):
             lc_direction = [lc_direction] * len(ids_or_names)
         for i in range(len(ids_or_names)):
@@ -168,7 +170,7 @@ class VehicleGroup:
             veh_id = veh_id_or_name
         self.vehicles[veh_id].set_lane_change_direction(lc_direction)
 
-    def set_vehicle_names(self, names: List[str]):
+    def set_vehicle_names(self, names: list[str]):
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
             vehicle.set_name(names[veh_id])
@@ -189,7 +191,7 @@ class VehicleGroup:
     #     """
     #     self._is_controller_centralized = True
 
-    def map_values_to_names(self, values) -> Dict[str, Any]:
+    def map_values_to_names(self, values) -> dict[str, Any]:
         """
         Receives variables ordered in the same order as the vehicles were
         created and returns the variables in a dictionary with vehicle names as
@@ -209,8 +211,8 @@ class VehicleGroup:
         for vehicle in self.vehicles.values():
             vehicle.prepare_to_start_simulation(n_samples)
 
-    def create_vehicle_array(self,
-                             vehicle_classes: List[Type[base.BaseVehicle]]):
+    def create_vehicle_array_from_classes(
+            self, vehicle_classes: list[Type[base.BaseVehicle]]):
         """
 
         Populates the list of vehicles following the given classes
@@ -224,8 +226,15 @@ class VehicleGroup:
             self.sorted_vehicle_ids.append(vehicle.get_id())
             self.vehicles[vehicle.get_id()] = vehicle
 
-    def populate_with_copies(self, vehicles: Dict[int, base.BaseVehicle],
-                             controlled_vehicle_ids: Set[int],
+    def fill_vehicle_array(self, vehicles: list[base.BaseVehicle]):
+        self.vehicles = {}
+        self.sorted_vehicle_ids = []
+        for veh in vehicles:
+            self.sorted_vehicle_ids.append(veh.get_id())
+            self.vehicles[veh.get_id()] = veh
+
+    def populate_with_copies(self, vehicles: dict[int, base.BaseVehicle],
+                             controlled_vehicle_ids: set[int],
                              initial_state_per_vehicle=None):
         """
         Creates copies of existing vehicles and group in this instance. This
@@ -274,18 +283,21 @@ class VehicleGroup:
 
     def simulate_one_time_step(
             self, new_time: float,
-            open_loop_controls: Dict[int, np.ndarray] = None):
+            open_loop_controls: dict[int, np.ndarray] = None):
         if open_loop_controls is None:
             open_loop_controls = {}
-        self.update_surrounding_vehicles()
-        self.update_platoons()
-        self.update_vehicle_modes()
-        self.determine_inputs(open_loop_controls)
-        self.compute_derivatives()
-        self.update_states(new_time)
 
-    def write_vehicle_states(self, time, state_vectors: Dict[int, np.ndarray],
-                             optimal_inputs: Dict[int, np.ndarray]):
+        self.update_surrounding_vehicles()
+        for veh_id, veh in self.vehicles.items():
+            veh.analyze_platoons(self.vehicles)
+            veh.update_mode(self.vehicles)
+            veh.determine_inputs(open_loop_controls.get(veh_id, []),
+                                 self.vehicles)
+            veh.compute_derivatives()
+            veh.update_states(new_time)
+
+    def write_vehicle_states(self, time, state_vectors: dict[int, np.ndarray],
+                             optimal_inputs: dict[int, np.ndarray]):
         """
         Directly sets vehicle states and inputs when they were computed
         by the optimal control solver.
@@ -295,17 +307,12 @@ class VehicleGroup:
         :return:
         """
         for veh_id in self.sorted_vehicle_ids:
-            # ego_phi = optimal_inputs[veh_id]
-            # ego_phi = ego_phi[0] if len(ego_phi) > 0 else 0.
             self.vehicles[veh_id].write_state_and_input(
                 time, state_vectors[veh_id], optimal_inputs[veh_id])
 
     def update_surrounding_vehicles(self):
         for ego_vehicle in self.vehicles.values():
-            ego_vehicle.find_orig_lane_leader(self.vehicles.values())
-            ego_vehicle.find_dest_lane_vehicles(self.vehicles.values())
-            ego_vehicle.find_cooperation_requests(self.vehicles.values())
-            ego_vehicle.update_target_leader(self.vehicles)
+            ego_vehicle.update_surrounding_vehicles(self.vehicles)
         new_mode = som.SystemMode(self.vehicles)
         if self.get_current_mode() != new_mode:
             time = self.vehicles[0].get_current_time()
@@ -319,48 +326,15 @@ class VehicleGroup:
                         time, self.get_current_mode(), new_mode))
             self.mode_sequence.add_mode(time, new_mode)
 
-    def update_platoons(self):
-        for ego_vehicle in self.vehicles.values():
-            ego_vehicle.analyze_platoons(self.vehicles)
+    def update_states(self, new_time):
+        for vehicle in self.vehicles.values():
+            vehicle.update_states(new_time)
 
     def centralize_control(self):
         centralized_controller = opt_ctrl.VehicleOptimalController()
         ocv = self.get_optimal_control_vehicles()
         for vehicle in ocv:
             vehicle.set_centralized_controller(centralized_controller)
-
-    def determine_inputs(
-            self, open_loop_controls: Dict[int, np.ndarray]):
-        """
-        Sets the open loop controls and computes the closed loop controls for
-        all vehicles.
-        :param open_loop_controls: Dictionary whose keys are the vehicle id
-         and values are dictionaries with input name/value pairs.
-        :return: Nothing. Each vehicle stores the computed input values
-        """
-        for veh_id, vehicle in self.vehicles.items():
-            vehicle.determine_inputs(open_loop_controls.get(veh_id, []),
-                                     self.vehicles)
-
-    def update_vehicle_modes(self):
-        for vehicle in self.vehicles.values():
-            vehicle.update_mode(self.vehicles)
-
-    def compute_derivatives(self):
-        """
-        Computes the states derivatives
-        :return:
-        """
-        dxdt = []
-        for veh_id in self.sorted_vehicle_ids:
-            vehicle = self.vehicles[veh_id]
-            vehicle.compute_derivatives()
-            dxdt.extend(vehicle.get_derivatives())
-        return np.array(dxdt)
-
-    def update_states(self, new_time):
-        for vehicle in self.vehicles.values():
-            vehicle.update_states(new_time)
 
     def to_dataframe(self) -> pd.DataFrame:
         """

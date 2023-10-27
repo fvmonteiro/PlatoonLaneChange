@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, Iterable, List, TypeVar, Type, Union
+from typing import Iterable, TypeVar, Type, Union
 import warnings
 
 import numpy as np
 import pandas as pd
 
+import constants
 import constants as const
 import dynamics
 # import platoon
@@ -20,12 +21,12 @@ class BaseVehicle(ABC):
     free_flow_speed: float
     initial_state: np.ndarray
     target_lane: int
-    state_names: List[str]
-    input_names: List[str]
+    state_names: list[str]
+    input_names: list[str]
     _n_states: int
     _n_inputs: int
-    _state_idx: Dict[str, int]
-    _input_idx: Dict[str, int]
+    _state_idx: dict[str, int]
+    _input_idx: dict[str, int]
     _time: np.ndarray
     _states: np.ndarray
     _inputs: np.ndarray
@@ -39,8 +40,8 @@ class BaseVehicle(ABC):
     _leader_id: np.ndarray[int]  # vehicle used to determine current accel
     _derivatives: np.ndarray[float]
     _mode: modes.VehicleMode
-    _ocp_controllable_interface: Type[BaseVehicleInterface]
-    _ocp_non_controllable_interface: Type[BaseVehicleInterface]
+    _ocp_interface: Type[BaseVehicleInterface]
+    # _ocp_non_controllable_interface: Type[BaseVehicleInterface]
     _desired_future_follower_id: int
     # _long_adjust_start_time: float
     _lc_start_time: float
@@ -69,7 +70,7 @@ class BaseVehicle(ABC):
         self.brake_max = -4.0
         self.accel_max = 2.0
         # self._lateral_gain = 1
-        self._lc_duration = 5  # [s]
+        # self._lc_duration = 5  # [s]
         # Note: safe time headway values are used to linearly overestimate
         # the nonlinear safe gaps
         self.h_safe_lk = const.LK_TIME_HEADWAY
@@ -97,6 +98,14 @@ class BaseVehicle(ABC):
             setattr(vehicle_to, attr_name, getattr(vehicle_from, attr_name))
         vehicle_to.copy_initial_state(vehicle_from.get_states())
 
+    @classmethod
+    def get_accel_idx(cls):
+        return cls._input_idx['a']
+
+    @classmethod
+    def get_phi_idx(cls):
+        return cls._input_idx['phi']
+
     def get_id(self) -> int:
         return self._id
 
@@ -105,17 +114,18 @@ class BaseVehicle(ABC):
 
     def get_ocp_interface(self, is_vehicle_optimally_controlled: bool
                           ) -> BaseVehicleInterface:
-        if is_vehicle_optimally_controlled:
-            try:
-                return self._ocp_controllable_interface(self)
-            except AttributeError:
-                warnings.warn(
-                    f'Trying to get a controllable ocp interface for vehicle '
-                    f'{self.get_id()} of type {type(self)}, which does not '
-                    f'have an optimal controller'
-                )
-        else:
-            return self._ocp_non_controllable_interface(self)
+        return self._ocp_interface(self)
+        # if is_vehicle_optimally_controlled:
+        #     try:
+        #         return self._ocp_interface(self)
+        #     except AttributeError:
+        #         warnings.warn(
+        #             f'Trying to get a controllable ocp interface for vehicle '
+        #             f'{self.get_id()} of type {type(self)}, which does not '
+        #             f'have an optimal controller'
+        #         )
+        # else:
+        #     return self._ocp_non_controllable_interface(self)
 
     def get_current_time(self) -> float:
         return self._time[self._iter_counter]
@@ -172,7 +182,7 @@ class BaseVehicle(ABC):
     def get_incoming_vehicle_id(self) -> int:
         return self._incoming_vehicle_id[self._iter_counter]
 
-    def get_relevant_surrounding_vehicle_ids(self) -> Dict[str, int]:
+    def get_relevant_surrounding_vehicle_ids(self) -> dict[str, int]:
         """
         Returns the IDs relevant vehicles
         :return:
@@ -182,7 +192,7 @@ class BaseVehicle(ABC):
                 'fd': self.get_dest_lane_follower_id(),
                 'leader': self.get_current_leader_id()}
 
-    def get_possible_target_leader_ids(self) -> List[int]:
+    def get_possible_target_leader_ids(self) -> list[int]:
         """
         Returns the IDs of all vehicles possibly used as target leaders
         :return:
@@ -223,8 +233,7 @@ class BaseVehicle(ABC):
     def get_platoon(self):
         return None
 
-    def make_reset_copy(self, initial_state=None,
-                        new_vehicle_type: Type[BaseVehicle] = None) -> V:
+    def make_reset_copy(self, initial_state=None) -> V:
         """
         Creates copies of vehicles used in internal iterations of our optimal
         controller. For vehicles without optimal control, the method returns
@@ -233,20 +242,20 @@ class BaseVehicle(ABC):
         open loop type vehicle.
         :param initial_state: If None, sets the new vehicle's initial state
         equal to the most recent state of this instance
-        :param new_vehicle_type: If None, the new vehicle is of the same type
-        as this instance
         :return:
         """
-        if new_vehicle_type is None:
-            new_vehicle_type = type(self)
+        new_vehicle_type = type(self)
         new_vehicle = new_vehicle_type()
+        self.copy_attributes(new_vehicle, initial_state)
+        return new_vehicle
+
+    def copy_attributes(self, new_vehicle: BaseVehicle, initial_state=None):
         for attr_name in self.static_attribute_names:
             setattr(new_vehicle, attr_name, getattr(self, attr_name))
         if initial_state is None:
             initial_state = self.get_states()
         new_vehicle.copy_initial_state(initial_state)
         new_vehicle.target_lane = self.target_lane
-        return new_vehicle
 
     def make_open_loop_copy(self, initial_state=None) -> V:
         """
@@ -257,7 +266,7 @@ class BaseVehicle(ABC):
         open loop type vehicle.
         :return:
         """
-        return self.make_reset_copy(initial_state, type(self))
+        return self.make_reset_copy(initial_state)
 
     def _reset_copied_vehicle(self, new_vehicle: BaseVehicle,
                               initial_state=None) -> None:
@@ -406,6 +415,12 @@ class BaseVehicle(ABC):
     def is_in_a_platoon(self) -> bool:
         return not (self.get_platoon() is None)
 
+    def update_surrounding_vehicles(self, vehicles: dict[int, BaseVehicle]):
+        self.find_orig_lane_leader(vehicles.values())
+        self.find_dest_lane_vehicles(vehicles.values())
+        self.find_cooperation_requests(vehicles.values())
+        self.update_target_leader(vehicles)
+
     def find_orig_lane_leader(self, vehicles: Iterable[BaseVehicle]) -> None:
         ego_x = self.get_x()
         ego_y = self.get_y()
@@ -454,7 +469,7 @@ class BaseVehicle(ABC):
                     incoming_veh_x = other_x
         self._incoming_vehicle_id[self._iter_counter] = new_incoming_vehicle_id
 
-    def analyze_platoons(self, vehicles: Dict[int, BaseVehicle]):
+    def analyze_platoons(self, vehicles: dict[int, BaseVehicle]):
         pass
 
     def request_cooperation(self) -> None:
@@ -465,13 +480,15 @@ class BaseVehicle(ABC):
         if self._is_connected:
             self._incoming_vehicle_id = other_id
 
-    def update_target_leader(self, vehicles: Dict[int, BaseVehicle]) -> None:
+    @abstractmethod
+    def update_target_leader(self, vehicles: dict[int, BaseVehicle]) -> None:
         """
         Defines which surrounding vehicle should be used to determine this
         vehicle's own acceleration
         :return:
         """
-        self._update_target_leader(vehicles)
+        pass
+        # self._update_target_leader(vehicles)
 
     # TODO: consider moving to OptimalVehicle and leaving it empty here
     def guess_mode_sequence(self, mode_sequence: som.ModeSequence):
@@ -486,7 +503,7 @@ class BaseVehicle(ABC):
         mode_sequence.alter_and_add_mode(switch_time, changes)
 
     def get_surrounding_vehicle_changes_after_lane_change(
-            self) -> Dict[int, Dict[str, int]]:
+            self) -> dict[int, dict[str, int]]:
         changes = {}
         sv_ids = self.get_relevant_surrounding_vehicle_ids()
         # Current choice: we do not erase safety-relevant vehicles
@@ -531,10 +548,10 @@ class BaseVehicle(ABC):
         self._compute_derivatives(vel, theta, phi)
 
     def determine_inputs(self, open_loop_controls: np.ndarray,
-                         vehicles: Dict[int, BaseVehicle]) -> None:
+                         vehicles: dict[int, BaseVehicle]) -> None:
         """
         Sets the open loop controls and computes the closed loop controls.
-        :param open_loop_controls: Dictionary whose keys are the input name.
+        :param open_loop_controls: dictionary whose keys are the input name.
         :param vehicles: Surrounding vehicles
         :return: Nothing. The vehicle stores the computed input values
         """
@@ -550,7 +567,7 @@ class BaseVehicle(ABC):
         self._time[self._iter_counter] = next_time
 
     @abstractmethod
-    def update_mode(self, vehicles: Dict[int, BaseVehicle]) -> None:
+    def update_mode(self, vehicles: dict[int, BaseVehicle]) -> None:
         # only vehicles with controllers update their discrete states (modes)
         pass
 
@@ -612,7 +629,7 @@ class BaseVehicle(ABC):
         self._lc_start_time = self.get_current_time()
         self._set_up_lane_change_control()
 
-    def _set_model(self, state_names: List[str], input_names: List[str]):
+    def _set_model(self, state_names: list[str], input_names: list[str]):
         """
         Must be called in the constructor of every derived class to set the
         variables that define which vehicle model is implemented.
@@ -660,26 +677,17 @@ class BaseVehicle(ABC):
 
     @abstractmethod
     def _determine_inputs(self, open_loop_controls: np.ndarray,
-                          vehicles: Dict[int, BaseVehicle]):
+                          vehicles: dict[int, BaseVehicle]):
         """
         Sets the open loop controls and computes the closed loop controls.
-        :param open_loop_controls: Dictionary whose keys are the input name.
+        :param open_loop_controls: dictionary whose keys are the input name.
         :param vehicles: Surrounding vehicles
         :return: Nothing. The vehicle stores the computed input values
         """
         pass
 
     # @abstractmethod
-    # def _set_up_longitudinal_adjustments_control(
-    #         self, vehicles: Dict[int, BaseVehicle]):
-    #     pass
-
-    @abstractmethod
     def _set_up_lane_change_control(self):
-        pass
-
-    @abstractmethod
-    def _update_target_leader(self, vehicles: Dict[int, BaseVehicle]):
         pass
 
     def _write_optimal_inputs(self, optimal_inputs):
@@ -704,12 +712,12 @@ class BaseVehicle(ABC):
 #  vehicles and their interfaces with the opc solver
 class BaseVehicleInterface(ABC):
 
-    _state_names: List[str]
+    _state_names: list[str]
     n_states: int
-    _input_names: List[str]
+    _input_names: list[str]
     n_inputs: int
-    state_idx: Dict[str, int]
-    optimal_input_idx: Dict[str, int]
+    state_idx: dict[str, int]
+    optimal_input_idx: dict[str, int]
 
     def __init__(self, vehicle: BaseVehicle):
         """
@@ -729,11 +737,11 @@ class BaseVehicleInterface(ABC):
         # Only set for some vehicle types
         self._interval_number = 0
         # TODO: lump all these in a single dictionary
-        self.ocp_mode_switch_times: List[float] = []
-        self.ocp_origin_leader_sequence: List[int] = []
-        self.ocp_destination_leader_sequence: List[int] = []
-        self.ocp_destination_follower_sequence: List[int] = []
-        self.ocp_target_leader_sequence: List[int] = []
+        self.ocp_mode_switch_times: list[float] = []
+        self.ocp_origin_leader_sequence: list[int] = []
+        self.ocp_destination_leader_sequence: list[int] = []
+        self.ocp_destination_follower_sequence: list[int] = []
+        self.ocp_target_leader_sequence: list[int] = []
 
     def __repr__(self):
         return self.__class__.__name__ + ' id=' + str(self.get_id())
@@ -742,48 +750,42 @@ class BaseVehicleInterface(ABC):
         return (self.__class__.__name__ + ": id=" + str(self.get_id())
                 + "V_f=" + str(self.get_free_flow_speed()))
 
-    @classmethod
-    def _set_model(cls):
+    def _set_model(self):
         """
         Must be called in the constructor of every derived class to set the
         variables that define which vehicle model is implemented.
         :return:
         """
-        cls.n_states = len(cls._state_names)
-        cls.n_inputs = len(cls._input_names)
-        cls.state_idx = {cls._state_names[i]: i for i in range(cls.n_states)}
-        cls.optimal_input_idx = {cls._input_names[i]: i for i in
-                                 range(cls.n_inputs)}
+        self.n_states = len(self._state_names)
+        self.n_inputs = len(self._input_names)
+        self.state_idx = {self._state_names[i]: i for i in range(self.n_states)}
+        self.optimal_input_idx = {self._input_names[i]: i for i in
+                                  range(self.n_inputs)}
 
     @classmethod
     def get_state_names(cls):
         return cls._state_names
 
-    @classmethod
-    def get_input_names(cls):
-        return cls._input_names
+    def get_input_names(self):
+        return self._input_names
 
-    @classmethod
-    def select_state_from_vector(cls, states: Union[np.ndarray, List],
+    def select_state_from_vector(self, states: Union[np.ndarray, list],
                                  state_name: str) -> float:
-        return states[cls.state_idx[state_name]]
+        return states[self.state_idx[state_name]]
 
-    @classmethod
-    def select_input_from_vector(cls, optimal_inputs: Union[np.ndarray, List],
+    def select_input_from_vector(self, optimal_inputs: Union[np.ndarray, list],
                                  input_name: str) -> float:
-        return optimal_inputs[cls.optimal_input_idx[input_name]]
+        return optimal_inputs[self.optimal_input_idx[input_name]]
 
-    @classmethod
-    def select_vel_from_vector(cls, states: Union[np.ndarray, List],
-                               inputs: Union[np.ndarray, List]):
+    def select_vel_from_vector(self, states: Union[np.ndarray, list],
+                               inputs: Union[np.ndarray, list]):
         try:
-            return states[cls.state_idx['v']]
+            return states[self.state_idx['v']]
         except KeyError:
-            return inputs[cls.optimal_input_idx['v']]
+            return inputs[self.optimal_input_idx['v']]
 
-    @classmethod
-    def get_phi(cls, optimal_inputs):
-        return cls.select_input_from_vector(optimal_inputs, 'phi')
+    def get_phi(self, optimal_inputs):
+        return self.select_input_from_vector(optimal_inputs, 'phi')
 
     def get_id(self) -> int:
         return self.base_vehicle.get_id()
@@ -865,11 +867,11 @@ class BaseVehicleInterface(ABC):
     def set_leader_sequence(self, leader_sequence: som.SVSequence
                             ) -> None:
         self._interval_number = 0
-        self.ocp_mode_switch_times: List[float] = []
-        self.ocp_origin_leader_sequence: List[int] = []
-        self.ocp_destination_leader_sequence: List[int] = []
-        self.ocp_destination_follower_sequence: List[int] = []
-        self.ocp_target_leader_sequence: List[int] = []
+        self.ocp_mode_switch_times: list[float] = []
+        self.ocp_origin_leader_sequence: list[int] = []
+        self.ocp_destination_leader_sequence: list[int] = []
+        self.ocp_destination_follower_sequence: list[int] = []
+        self.ocp_target_leader_sequence: list[int] = []
         for t, l_id in leader_sequence:
             self.ocp_mode_switch_times.append(t)
             self.ocp_origin_leader_sequence.append(l_id['lo'])
@@ -878,18 +880,8 @@ class BaseVehicleInterface(ABC):
             self.ocp_target_leader_sequence.append(l_id['leader'])
 
     def set_time_interval(self, time: float) -> None:
-        # TODO: figure out what's wrong with the new approach
-        # n_switches = len(self.ocp_mode_switch_times) - 1
-        # # Reset interval number when the simulation is restarted
-        # if np.isclose(time, self.ocp_mode_switch_times[0]):
-        #     self._interval_number = 0
-        # # Updated interval number as time advances
-        # if (n_switches > self._interval_number
-        #         and time >= self.ocp_mode_switch_times[
-        #             self._interval_number + 1]):
-        #     self._interval_number += 1
-        # Old approach: search every time
-        if not np.isclose(self._time, time):
+        if (np.abs(self._time - time)
+                >= constants.Configuration.discretization_step):
             self._time = time
             idx = np.searchsorted(self.ocp_mode_switch_times, time,
                                   side='right')
@@ -904,10 +896,10 @@ class BaseVehicleInterface(ABC):
         self._set_speed(v, state_vector)
         return state_vector
 
-    def shift_initial_state(self, shift: Dict[str, float]) -> None:
+    def shift_initial_state(self, shift: dict[str, float]) -> None:
         """
         Shifts the initial state based on the given values
-        :param shift: Dictionary with state name and shift value
+        :param shift: dictionary with state name and shift value
         :return:
         """
         for state_name, value in shift.items():
@@ -933,14 +925,6 @@ class BaseVehicleInterface(ABC):
         else:
             safe_gap = self.compute_lane_keeping_safe_gap(v_ego)
         return gap - safe_gap
-
-    # def lane_changing_safety_constraint(self, ego_states, other_states, phi):
-    #     if not other_states:  # no risk
-    #         return 0
-    #     if is_other_behind:
-    #         follower_id, leader_id = other_id, lc_veh_id
-    #     else:
-    #         follower_id, leader_id = lc_veh_id, other_id
 
     def compute_derivatives(self, ego_states, inputs, leader_states):
         dxdt = np.zeros(self.n_states)
@@ -985,9 +969,8 @@ class BaseVehicleInterface(ABC):
         df['dest_lane_follower_id'] = self._destination_follower_id
         return df
 
-    @classmethod
     @abstractmethod
-    def _set_speed(cls, v0, state):
+    def _set_speed(self, v0, state):
         """
         Sets the proper element in array state equal to v0
         :param v0: speed to write
@@ -1001,7 +984,7 @@ class BaseVehicleInterface(ABC):
         pass
 
     @abstractmethod
-    def get_input_limits(self) -> (List[float], List[float]):
+    def get_input_limits(self) -> (list[float], list[float]):
         """
 
         :return: Tuple with lower limits first and upper limits second
@@ -1015,7 +998,7 @@ class BaseVehicleInterface(ABC):
         pass
 
     @abstractmethod
-    def get_accel(self, ego_states, inputs, leader_states):
+    def get_accel(self, ego_states, inputs, leader_states) -> float:
         pass
 
     def _set_model_old(self):

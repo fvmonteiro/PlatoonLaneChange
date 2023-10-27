@@ -35,14 +35,17 @@ class LaneChangingController(LateralController):
 
     def __init__(self, vehicle: base.BaseVehicle):
         super().__init__(vehicle)
-        self._lc_start_time = -np.inf
+        self._start_time = -np.inf
 
-    def start(self, lc_start_time: float, lc_duration: float):
-        self._lc_start_time = lc_start_time
+    def get_start_time(self) -> float:
+        return self._start_time
+
+    def compute_lc_trajectory(self, lc_start_time: float, lc_duration: float):
+        self._start_time = lc_start_time
         self._compute_polynomial_lc_trajectory(lc_duration)
 
     def compute_steering_wheel_angle(self):
-        delta_t = self.vehicle.get_current_time() - self._lc_start_time
+        delta_t = self.vehicle.get_current_time() - self._start_time
         yr = sum([self._polynomial_lc_coeffs[i] * delta_t ** i
                   for i in range(len(self._polynomial_lc_coeffs))])
         vyr = sum([i * self._polynomial_lc_coeffs[i] * delta_t ** (i - 1)

@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import pickle
 import warnings
-from typing import Dict, List, Union
+from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -239,7 +241,7 @@ def plot_platoon_lane_change(data: pd.DataFrame):
 
 
 def plot_gap_errors(data: pd.DataFrame,
-                    vehicle_pairs: Dict[Union[int, str], List[Union[int, str]]],
+                    vehicle_pairs: dict[Union[int, str], list[Union[int, str]]],
                     ax=None):
     if ax is None:
         fig, ax = plt.subplots()
@@ -337,8 +339,8 @@ def plot_vehicle_following(data: pd.DataFrame):
     plot_scenario_results(x_axes, y_axes, data)
 
 
-def plot_scenario_results(x_axes: List[str], y_axes: List[str],
-                          data: pd.DataFrame, axs: List = None):
+def plot_scenario_results(x_axes: list[str], y_axes: list[str],
+                          data: pd.DataFrame, axs: list = None):
     """
 
     :param x_axes: Name of the variable on the x-axis for each plot

@@ -1,18 +1,11 @@
 from __future__ import annotations
 
-from functools import partial
-from typing import Callable, List, Union
+from typing import Callable, Union
 
 import control.optimal as opt
+import numpy as np
 from scipy.linalg import block_diag
 from scipy.optimize import LinearConstraint, NonlinearConstraint
-
-import numpy as np
-
-
-# Alias for easier typing hints
-# LinearConstraint = sp.optimize.LinearConstraint
-# NonlinearConstraint = sp.optimize.NonlinearConstraint
 
 
 class OCPCostTracker:
@@ -41,23 +34,23 @@ class OCPCostTracker:
         self._current_call_costs: np.ndarray = np.zeros(self._n_time_points)
         self._call_counter: int = 0
         # One list of costs/states/inputs for each time we call the ocp solver
-        self._running_cost_per_call: List[List[float]] = []
-        self._terminal_cost_per_call: List[List[float]] = []
-        self._running_cost_per_iteration: List[List[float]] = []
-        self._terminal_cost_per_iteration: List[List[float]] = []
-        self._states_per_iteration: List[List[np.ndarray]] = []
-        self._inputs_per_iteration: List[List[np.ndarray]] = []
+        self._running_cost_per_call: list[list[float]] = []
+        self._terminal_cost_per_call: list[list[float]] = []
+        self._running_cost_per_iteration: list[list[float]] = []
+        self._terminal_cost_per_iteration: list[list[float]] = []
+        self._states_per_iteration: list[list[np.ndarray]] = []
+        self._inputs_per_iteration: list[list[np.ndarray]] = []
 
         # Best feasible iteration (for each call to the ocp solver)
-        # self._best_states: List[np.array] = []
-        # self._best_inputs: List[np.array] = []
+        # self._best_states: list[np.array] = []
+        # self._best_inputs: list[np.array] = []
         self._best_cost: float = np.inf
-        self._best_iteration: List[int] = []
+        self._best_iteration: list[int] = []
 
-    def get_running_cost(self) -> List[np.array]:
+    def get_running_cost(self) -> list[np.array]:
         return [np.array(costs) for costs in self._running_cost_per_iteration]
 
-    def get_terminal_cost(self) -> List[np.array]:
+    def get_terminal_cost(self) -> list[np.array]:
         return [np.array(costs) for costs in self._terminal_cost_per_iteration]
 
     def get_time_points(self) -> np.ndarray:

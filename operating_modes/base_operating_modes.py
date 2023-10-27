@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict
 import vehicle_models.base_vehicle as base
 
 
@@ -16,12 +15,12 @@ class VehicleMode(ABC):
 
     @abstractmethod
     def handle_lane_keeping_intention(
-            self, vehicles: Dict[int, base.BaseVehicle]) -> None:
+            self, vehicles: dict[int, base.BaseVehicle]) -> None:
         pass
 
     @abstractmethod
     def handle_lane_changing_intention(
-            self, vehicles: Dict[int, base.BaseVehicle]) -> None:
+            self, vehicles: dict[int, base.BaseVehicle]) -> None:
         pass
 
     def __str__(self):
