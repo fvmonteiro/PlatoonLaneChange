@@ -20,7 +20,7 @@ class OCPVehicleMode(vom.VehicleMode, ABC):
 
 class PlatoonVehicleMode(vom.VehicleMode, ABC):
     """ Base of vehicle modes for platoon vehicles"""
-    vehicle: fsv.PlatoonVehicle
+    vehicle: fsv.OptimalControlVehicle
 
 
 class CLLaneKeepingMode(CLVehicleMode):
@@ -47,7 +47,7 @@ class CLLongAdjustmentMode(CLVehicleMode):
 
     def handle_lane_changing_intention(
             self, vehicles: dict[int, base.BaseVehicle]) -> None:
-        if self.vehicle.is_lane_change_safe(vehicles):
+        if self.vehicle.can_start_lane_change(vehicles):
             self.vehicle.prepare_for_lane_change_start()
             self.vehicle.set_mode(CLLaneChangingMode())
         else:
@@ -115,47 +115,47 @@ class OCPLaneChangingMode(OCPVehicleMode):
         pass
 
 
-class PlatoonVehicleLaneKeepingMode(PlatoonVehicleMode):
-    def __init__(self):
-        super().__init__("Platoon vehicle lane keeping")
-
-    def handle_lane_keeping_intention(
-            self, vehicles: dict[int, base.BaseVehicle]) -> None:
-        pass
-
-    def handle_lane_changing_intention(
-            self, vehicles: dict[int, base.BaseVehicle]) -> None:
-        self.vehicle.prepare_for_longitudinal_adjustments_start()
-        self.vehicle.set_mode(PlatoonVehicleLongAdjustmentMode())
-
-
-class PlatoonVehicleLongAdjustmentMode(PlatoonVehicleMode):
-    def __init__(self):
-        super().__init__("Platoon vehicle long adjustment")
-
-    def handle_lane_keeping_intention(
-            self, vehicles: dict[int, base.BaseVehicle]) -> None:
-        self.vehicle.set_mode(PlatoonVehicleLaneKeepingMode())
-
-    def handle_lane_changing_intention(
-            self, vehicles: dict[int, base.BaseVehicle]) -> None:
-        if self.vehicle.can_start_lane_change(vehicles):
-            self.vehicle.prepare_for_lane_change_start()
-            self.vehicle.set_mode(PlatoonVehicleLaneChangingMode())
-        else:
-            self.vehicle.request_cooperation()
-
-
-class PlatoonVehicleLaneChangingMode(PlatoonVehicleMode):
-    def __init__(self):
-        super().__init__("Platoon vehicle lane changing")
-
-    def handle_lane_keeping_intention(
-            self, vehicles: dict[int, base.BaseVehicle]) -> None:
-        if not self.vehicle.is_lane_changing():
-            self.vehicle.reset_lane_change_start_time()
-            self.vehicle.set_mode(PlatoonVehicleLaneKeepingMode())
-
-    def handle_lane_changing_intention(
-            self, vehicles: dict[int, base.BaseVehicle]) -> None:
-        pass
+# class PlatoonVehicleLaneKeepingMode(PlatoonVehicleMode):
+#     def __init__(self):
+#         super().__init__("Platoon vehicle lane keeping")
+#
+#     def handle_lane_keeping_intention(
+#             self, vehicles: dict[int, base.BaseVehicle]) -> None:
+#         pass
+#
+#     def handle_lane_changing_intention(
+#             self, vehicles: dict[int, base.BaseVehicle]) -> None:
+#         self.vehicle.prepare_for_longitudinal_adjustments_start()
+#         self.vehicle.set_mode(PlatoonVehicleLongAdjustmentMode())
+#
+#
+# class PlatoonVehicleLongAdjustmentMode(PlatoonVehicleMode):
+#     def __init__(self):
+#         super().__init__("Platoon vehicle long adjustment")
+#
+#     def handle_lane_keeping_intention(
+#             self, vehicles: dict[int, base.BaseVehicle]) -> None:
+#         self.vehicle.set_mode(PlatoonVehicleLaneKeepingMode())
+#
+#     def handle_lane_changing_intention(
+#             self, vehicles: dict[int, base.BaseVehicle]) -> None:
+#         if self.vehicle.can_start_lane_change(vehicles):
+#             self.vehicle.prepare_for_lane_change_start()
+#             self.vehicle.set_mode(PlatoonVehicleLaneChangingMode())
+#         else:
+#             self.vehicle.request_cooperation()
+#
+#
+# class PlatoonVehicleLaneChangingMode(PlatoonVehicleMode):
+#     def __init__(self):
+#         super().__init__("Platoon vehicle lane changing")
+#
+#     def handle_lane_keeping_intention(
+#             self, vehicles: dict[int, base.BaseVehicle]) -> None:
+#         if not self.vehicle.is_lane_changing():
+#             self.vehicle.reset_lane_change_start_time()
+#             self.vehicle.set_mode(PlatoonVehicleLaneKeepingMode())
+#
+#     def handle_lane_changing_intention(
+#             self, vehicles: dict[int, base.BaseVehicle]) -> None:
+#         pass

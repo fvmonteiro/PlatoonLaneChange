@@ -11,23 +11,18 @@ import vehicle_models.four_state_vehicles as fsv
 
 
 class Platoon:
+    vehicles: list[fsv.FourStateVehicle]
+    strategy: LaneChangeStrategy
     current_inputs: dict[int, float]
 
     _counter: int = 0
 
-    def __init__(self, first_vehicle: fsv.PlatoonVehicle):
-        self._id: int = Platoon._counter
+    def __init__(self):
+        self._id: int = OptimalPlatoon._counter
         Platoon._counter += 1
-
-        # Vehicles and their ids sorted by position (first is front-most)
-        self.vehicles: list[fsv.PlatoonVehicle] = []
         self._id_to_position_map: dict[int, int] = {}
-        self.add_vehicle(first_vehicle)
 
-        strategy_number = constants.Configuration.platoon_strategy
-        self.strategy = _strategy_map[strategy_number](self.vehicles)
-
-    def get_platoon_leader(self):
+    def get_platoon_leader(self) -> fsv.FourStateVehicle:
         return self.vehicles[0]
 
     def get_platoon_leader_id(self) -> int:
@@ -53,26 +48,6 @@ class Platoon:
         else:
             return -1
 
-    def get_optimal_controller(self) -> opt_ctrl.VehicleOptimalController:
-        return self.get_platoon_leader().opt_controller
-
-    def add_vehicle(self, new_vehicle: fsv.PlatoonVehicle):
-        if len(self.vehicles) == 0:
-            self._id_to_position_map[new_vehicle.get_id()] = 0
-            self.vehicles.append(new_vehicle)
-        elif new_vehicle.get_x() < self.vehicles[-1].get_x():
-            self._id_to_position_map[new_vehicle.get_id()] = len(self.vehicles)
-            self.vehicles.append(new_vehicle)
-        else:
-            # bisect.insort(self.vehicles, new_vehicle, key=lambda v: v.get_x())
-            idx = np.searchsorted([veh.get_x() for veh in self.vehicles],
-                                  new_vehicle.get_x())
-            # Possibly slow, but irrelevant for the total run time
-            self.vehicles = (self.vehicles[:idx] + [new_vehicle]
-                             + self.vehicles[idx:])
-            for i, veh in enumerate(self.vehicles):
-                self._id_to_position_map[veh.get_id()] = i
-
     def get_dest_lane_leader_id(self, ego_id) -> int:
         """
         Defines sequence of leaders during a coordinated lane change maneuver.
@@ -90,12 +65,70 @@ class Platoon:
         ego_position = self._id_to_position_map[ego_id]
         return self.strategy.get_incoming_vehicle_id(ego_position)
 
+    def add_vehicle(self, new_vehicle: fsv.FourStateVehicle):
+        if len(self.vehicles) == 0:
+            self._id_to_position_map[new_vehicle.get_id()] = 0
+            self.vehicles.append(new_vehicle)
+        elif new_vehicle.get_x() < self.vehicles[-1].get_x():
+            self._id_to_position_map[new_vehicle.get_id()] = len(self.vehicles)
+            self.vehicles.append(new_vehicle)
+        else:
+            # bisect.insort(self.vehicles, new_vehicle, key=lambda v: v.get_x())
+            idx = np.searchsorted([veh.get_x() for veh in self.vehicles],
+                                  new_vehicle.get_x())
+            # Possibly slow, but irrelevant for the total run time
+            self.vehicles = (self.vehicles[:idx] + [new_vehicle]
+                             + self.vehicles[idx:])
+            for i, veh in enumerate(self.vehicles):
+                self._id_to_position_map[veh.get_id()] = i
+
+
+class OptimalPlatoon(Platoon):
+
+    def __init__(self, first_vehicle: fsv.OptimalControlVehicle):
+        super().__init__()
+
+        # Vehicles and their ids sorted by position (first is front-most)
+        self.vehicles: list[fsv.OptimalControlVehicle] = []
+        self.add_vehicle(first_vehicle)
+
+        strategy_number = constants.Configuration.platoon_strategy
+        self.strategy = _strategy_map[strategy_number](self.vehicles)
+
+    def get_platoon_leader(self) -> fsv.OptimalControlVehicle:
+        return self.vehicles[0]
+
+    def get_optimal_controller(self) -> opt_ctrl.VehicleOptimalController:
+        return self.get_platoon_leader().get_opt_controller()
+
+    def add_vehicle(self, new_vehicle: fsv.OptimalControlVehicle):
+        super().add_vehicle(new_vehicle)
+        new_vehicle.set_centralized_controller(self.get_optimal_controller())
+
     def guess_mode_sequence(self, initial_mode_sequence: som.ModeSequence):
         return self.strategy.create_mode_sequence(initial_mode_sequence)
     
 
-# class OptimalPlatoon(Platoon):
-#     def __init__
+class ClosedLoopPlatoon(Platoon):
+    def __init__(self, first_vehicle: fsv.ClosedLoopVehicle):
+        super().__init__()
+
+        # Vehicles and their ids sorted by position (first is front-most)
+        self.vehicles: list[fsv.ClosedLoopVehicle] = []
+        self.add_vehicle(first_vehicle)
+
+        strategy_number = constants.Configuration.platoon_strategy
+        self.strategy = _strategy_map[strategy_number](self.vehicles)
+
+    # def get_platoon_leader(self) -> fsv.ClosedLoopVehicle:
+    #     return self.vehicles[0]
+
+    def add_vehicle(self, new_vehicle: fsv.ClosedLoopVehicle):
+        super().add_vehicle(new_vehicle)
+
+    def can_start_lane_change(self, ego_id: int) -> bool:
+        ego_position = self._id_to_position_map[ego_id]
+        return self.strategy.can_start_lane_change(ego_position)
 
 
 class LaneChangeStrategy(ABC):
@@ -103,7 +136,7 @@ class LaneChangeStrategy(ABC):
     # When guessing modes, the time between each mode change
     switch_dt = 1.0  # TODO: might have to play with this value
 
-    def __init__(self, platoon_vehicles: list[fsv.PlatoonVehicle]):
+    def __init__(self, platoon_vehicles: list[fsv.FourStateVehicle]):
         self.vehicles = platoon_vehicles
 
     def get_dest_lane_leader_id(self, ego_position) -> int:
@@ -134,6 +167,14 @@ class LaneChangeStrategy(ABC):
         return self._get_incoming_vehicle_id(ego_position)
 
     @abstractmethod
+    def can_start_lane_change(self, ego_position: int) -> bool:
+        """
+        Unrelated to safety. This is just about if the vehicle is
+        authorized by the strategy to start its maneuver
+        """
+        pass
+
+    @abstractmethod
     def _get_dest_lane_leader_id(self, ego_position: int):
         pass
 
@@ -157,6 +198,9 @@ class LaneChangeStrategy(ABC):
 
 class IndividualStrategy(LaneChangeStrategy):
     """"Vehicles behave without platoon coordination"""
+
+    def can_start_lane_change(self, ego_position) -> bool:
+        return True
 
     def _get_dest_lane_leader_id(self, ego_position) -> int:
         ego_veh = self.vehicles[ego_position]
@@ -182,7 +226,15 @@ class SynchronousStrategy(LaneChangeStrategy):
     All platoon vehicles change lanes at the same time
     """
 
-    def _get_dest_lane_leader_id(self, ego_position) -> int:
+    def can_start_lane_change(self, ego_position: int) -> bool:
+        # Check if lane change is safe for all vehicles
+        # TODO: avoid recomputing for all vehicles during the same time step
+        for veh in self.vehicles:
+            if not veh.get_is_lane_change_safe():
+                return False
+        return True
+
+    def _get_dest_lane_leader_id(self, ego_position: int) -> int:
         ego_veh = self.vehicles[ego_position]
         if ego_position == 0:
             return ego_veh.get_dest_lane_leader_id()
@@ -192,7 +244,7 @@ class SynchronousStrategy(LaneChangeStrategy):
         # first
         return -1  # self.get_preceding_vehicle_id(ego_id)
 
-    def _get_incoming_vehicle_id(self, ego_position) -> int:
+    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         # ego_veh = self.vehicles[ego_position]
         if ego_position == 0:
             return -1
@@ -217,13 +269,20 @@ class SynchronousStrategy(LaneChangeStrategy):
 
 class LeaderFirstStrategy(LaneChangeStrategy):
 
-    def _get_dest_lane_leader_id(self, ego_position) -> int:
+    def can_start_lane_change(self, ego_position: int) -> bool:
+        # Check if preceding vehicle has finished its lane change
+        if ego_position == 0:
+            return True
+        preceding_veh = self.vehicles[ego_position - 1]
+        return not preceding_veh.has_lane_change_intention()
+
+    def _get_dest_lane_leader_id(self, ego_position: int) -> int:
         if ego_position == 0:
             ego_veh = self.vehicles[ego_position]
             return ego_veh.get_dest_lane_leader_id()
         return self.vehicles[ego_position - 1].get_id()
 
-    def _get_incoming_vehicle_id(self, ego_position) -> int:
+    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         if ego_position == 0:
             return -1
         # Strictly speaking, platoon vehicles in this strategy don't
@@ -263,7 +322,15 @@ class LeaderFirstStrategy(LaneChangeStrategy):
 
 
 class LastFirstStrategy(LaneChangeStrategy):
-    def _get_dest_lane_leader_id(self, ego_position) -> int:
+
+    def can_start_lane_change(self, ego_position: int) -> bool:
+        # Check if following vehicle has finished its lane change
+        if ego_position == len(self.vehicles) - 1:
+            return True
+        following_veh = self.vehicles[ego_position + 1]
+        return not following_veh.has_lane_change_intention()
+
+    def _get_dest_lane_leader_id(self, ego_position: int) -> int:
         if ego_position == len(self.vehicles) - 1:
             ego_veh = self.vehicles[ego_position]
             return ego_veh.get_dest_lane_leader_id()
@@ -277,7 +344,7 @@ class LastFirstStrategy(LaneChangeStrategy):
         follower_lo = follower.get_orig_lane_leader_id()
         return follower_lo
 
-    def _get_incoming_vehicle_id(self, ego_position) -> int:
+    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         if ego_position == 0:
             return -1
         # In theory, we only need to cooperate with the preceding vehicle
@@ -308,12 +375,18 @@ class LastFirstStrategy(LaneChangeStrategy):
 
 
 class LeaderFirstReverseStrategy(LaneChangeStrategy):
-    def _get_dest_lane_leader_id(self, ego_position) -> int:
-        ego_veh = self.vehicles[ego_position]
-        if not ego_veh.has_lane_change_intention():
-            return -1
 
+    def can_start_lane_change(self, ego_position: int) -> bool:
         if ego_position == 0:
+            return True
+        # Check if we have overtaken the former preceding vehicle
+        ego_veh = self.vehicles[ego_position]
+        return (ego_veh.get_dest_lane_follower_id()
+                == self.vehicles[ego_position - 1].get_id())
+
+    def _get_dest_lane_leader_id(self, ego_position: int) -> int:
+        if ego_position == 0:
+            ego_veh = self.vehicles[ego_position]
             return ego_veh.get_dest_lane_leader_id()
         # If the preceding veh has completed the lane change, then we want
         # to merge between the preceding veh and the vehicle ahead of it
@@ -325,18 +398,16 @@ class LeaderFirstReverseStrategy(LaneChangeStrategy):
         leader_lo = preceding.get_orig_lane_leader_id()
         return leader_lo
 
-    def _get_incoming_vehicle_id(self, ego_position) -> int:
-        ego_veh = self.vehicles[ego_position]
-        if ego_veh.has_lane_change_intention():
-            return -1
+    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
+        # ego_veh = self.vehicles[ego_position]
         if ego_position == len(self.vehicles) - 1:
             return -1
+        # Similarly to the last veh first case, we don't need to check whether
+        # the (former) follower has completed the lane change
         follower = self.vehicles[ego_position + 1]
         if follower.has_lane_change_intention():
-            return -1
-        # Similarly to the previous case, we don't need to check whether
-        # the (former) follower has completed the lane change
-        return self.vehicles[ego_position + 1].get_id()
+            return follower.get_id()
+        return -1
 
     def create_mode_sequence(self, mode_sequence: som.ModeSequence):
         pass

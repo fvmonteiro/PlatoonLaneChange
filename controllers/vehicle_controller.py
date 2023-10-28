@@ -19,8 +19,6 @@ class VehicleController(ABC):
     _lk_controller: lat_ctrl.LaneKeepingController
     _lc_controller: lat_ctrl.LaneChangingController
 
-    _lc_duration = 5  # only used by the closed loop control
-
     def __init__(self, ego_vehicle: fsv.FourStateVehicle,
                  can_change_lanes: bool, has_open_loop_acceleration: bool):
         self._ego_vehicle = ego_vehicle
@@ -33,6 +31,11 @@ class VehicleController(ABC):
 
     def get_opt_controller(self) -> opt_ctrl.VehicleOptimalController:
         return self._opt_controller
+
+    def set_opt_controller(
+            self, new_opt_controller: opt_ctrl.VehicleOptimalController
+    ) -> None:
+        self._opt_controller = new_opt_controller
 
     def determine_inputs(self, external_controls: np.ndarray,
                          vehicles: dict[int, fsv.FourStateVehicle]
@@ -59,7 +62,7 @@ class VehicleController(ABC):
     # TODO: make virtual? abstract?
     def set_up_lane_change_control(self, start_time):
         self._lc_controller.compute_lc_trajectory(
-            start_time, self._lc_duration)
+            start_time)
 
     @abstractmethod
     def _get_open_loop_acceleration(
@@ -180,7 +183,7 @@ class ClosedLoopControl(VehicleController):
     ) -> float:
         delta_t = (self._ego_vehicle.get_current_time()
                    - self._lc_controller.get_start_time())
-        if delta_t <= self._lc_duration:
+        if delta_t <= self._lc_controller.get_lc_duration():
             return self._lc_controller.compute_steering_wheel_angle()
         else:
             return self._lk_controller.compute_steering_wheel_angle()

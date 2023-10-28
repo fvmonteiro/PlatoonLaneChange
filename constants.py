@@ -29,9 +29,10 @@ class Configuration:
     time_horizon: float = 10.0  # [s]
     has_terminal_lateral_constraints: bool = False
     has_safety_lateral_constraint: bool = False
-    provide_initial_guess: bool = False
+    has_initial_state_guess: bool = False
     initial_acceleration_guess: Union[str, float] = 0.0
     jumpstart_next_solver_call: bool = False
+    has_initial_mode_guess: bool = False
 
     # Scenario parameters
     v_ref = {'lo': 10., 'ld': 10., 'p': 10.,
@@ -70,7 +71,8 @@ class Configuration:
             has_lateral_safety_constraint: bool = False,
             provide_initial_guess: bool = False,
             initial_acceleration_guess: Union[str, float] = 0.0,
-            jumpstart_next_solver_call: bool = False
+            jumpstart_next_solver_call: bool = False,
+            has_initial_mode_guess: bool = False
     ) -> None:
         """
         Sets the configurations of the optimal controller which iteratively
@@ -95,6 +97,9 @@ class Configuration:
          the solver if jumpstart_next_solver_call is True.
         :param jumpstart_next_solver_call: Whether to use the solution of the
          previous call to the solver as starting point for the next call.
+        :param has_initial_mode_guess: If True, runs the system with closed
+         loop feedback controllers and uses the resulting mode sequence as
+         initial guess for the optimal controller
         :return:
         """
         if max_iter:
@@ -106,12 +111,13 @@ class Configuration:
             has_terminal_lateral_constraints)
         Configuration.has_safety_lateral_constraint = (
             has_lateral_safety_constraint)
-        Configuration.provide_initial_guess = (
+        Configuration.has_initial_state_guess = (
             provide_initial_guess)
         Configuration.initial_acceleration_guess = (
             initial_acceleration_guess)
         Configuration.jumpstart_next_solver_call = (
             jumpstart_next_solver_call)
+        Configuration.has_initial_mode_guess = has_initial_mode_guess
 
     @staticmethod
     def set_scenario_parameters(

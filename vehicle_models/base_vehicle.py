@@ -54,7 +54,7 @@ class BaseVehicle(ABC):
         '_is_connected', '_is_verbose',
     }
 
-    def __init__(self):
+    def __init__(self, is_connected: bool = False):
         """
 
         """
@@ -69,8 +69,6 @@ class BaseVehicle(ABC):
         self.phi_max = 0.1  # max steering wheel angle
         self.brake_max = -4.0
         self.accel_max = 2.0
-        # self._lateral_gain = 1
-        # self._lc_duration = 5  # [s]
         # Note: safe time headway values are used to linearly overestimate
         # the nonlinear safe gaps
         self.h_safe_lk = const.LK_TIME_HEADWAY
@@ -79,7 +77,7 @@ class BaseVehicle(ABC):
         self.h_ref_lc = const.LC_TIME_HEADWAY + 0.1
         self.c = const.STANDSTILL_DISTANCE
 
-        self._is_connected = False
+        self._is_connected = is_connected
         self._is_verbose = True
 
     def __repr__(self):
@@ -268,6 +266,9 @@ class BaseVehicle(ABC):
         """
         return self.make_reset_copy(initial_state)
 
+    def make_closed_loop_copy(self, initial_state=None) -> V:
+        return self.make_reset_copy(initial_state)
+
     def _reset_copied_vehicle(self, new_vehicle: BaseVehicle,
                               initial_state=None) -> None:
         if initial_state is None:
@@ -419,17 +420,15 @@ class BaseVehicle(ABC):
         self.find_orig_lane_leader(vehicles.values())
         self.find_dest_lane_vehicles(vehicles.values())
         self.find_cooperation_requests(vehicles.values())
-        self.update_target_leader(vehicles)
+        # self.update_target_leader(vehicles)
 
     def find_orig_lane_leader(self, vehicles: Iterable[BaseVehicle]) -> None:
         ego_x = self.get_x()
-        ego_y = self.get_y()
         orig_lane_leader_x = np.inf
         new_orig_leader_id = -1
         for other_vehicle in vehicles:
             other_x = other_vehicle.get_x()
-            other_y = other_vehicle.get_y()
-            if (np.abs(other_y - ego_y) < const.LANE_WIDTH / 2  # same lane
+            if (self.get_current_lane() == other_vehicle.get_current_lane()
                     and ego_x < other_x < orig_lane_leader_x):
                 orig_lane_leader_x = other_x
                 new_orig_leader_id = other_vehicle._id

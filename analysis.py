@@ -79,8 +79,11 @@ def plot_costs_vs_iteration(running_costs, terminal_costs,
 def plot_trajectory(data: pd.DataFrame):
     # min_y, max_y = data['y'].min(), data['y'].max()
     min_x, max_x = data['x'].min(), data['x'].max()
-    dt = 1.0  # [s]
     tf = data['t'].max()
+    if tf < 10:
+        dt = 1.0  # [s]
+    else:
+        dt = 2.0
     n = round(tf / dt) + 1
     time = np.arange(data['t'].min(), tf + dt / 2, dt)
     # time = np.linspace(data['t'].min(), tf, n)

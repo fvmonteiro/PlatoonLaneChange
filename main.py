@@ -76,10 +76,10 @@ def run_constraints_scenario(has_lo: bool, has_fo: bool, has_ld: bool,
         scenario.boundary_conditions_to_dataframe(), data)
 
 
-def run_cbf_lc_scenario(n_orig_ahead: int, n_orig_behind: int,
+def run_cbf_lc_scenario(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
                         n_dest_ahead: int, n_dest_behind: int):
-    scenario = scenarios.LaneChangeScenario.single_vehicle_feedback_lane_change(
-        n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind
+    scenario = scenarios.LaneChangeScenario.platoon_full_feedback_lane_change(
+        n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind
     )
     tf = 10.
     run_save_and_plot(scenario, tf)
@@ -91,7 +91,7 @@ def run_internal_optimal_controller(n_orig_ahead: int, n_orig_behind: int,
         n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind
     )
     scenario.create_test_initial_state()
-    tf = 10.
+    tf = constants.Configuration.time_horizon + 2
     run_save_and_plot(scenario, tf)
 
 
@@ -99,7 +99,7 @@ def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
                      n_dest_ahead: int, n_dest_behind: int,
                      is_acceleration_optimal: bool):
     tf = constants.Configuration.time_horizon + 2
-    scenario = scenarios.LaneChangeScenario.platoon_lane_change(
+    scenario = scenarios.LaneChangeScenario.optimal_platoon_lane_change(
         n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
         is_acceleration_optimal
     )
@@ -163,7 +163,7 @@ def mode_convergence_base_tests():
             n_ld, n_fd, n_lo, n_fo = (int(b) for b in "{0:04b}".format(i))
             print("============ Running scenario {} ============\t\n"
                   f"n_ld={i}, n_fd={n_ld}, n_lo={n_lo}, n_fo={n_fo}")
-            scenario = scenarios.LaneChangeScenario.platoon_lane_change(
+            scenario = scenarios.LaneChangeScenario.optimal_platoon_lane_change(
                 n_platoon, n_lo, n_fo, n_ld, n_fd,
                 is_acceleration_optimal=False)
             scenario.create_safe_uniform_speed_initial_state()
@@ -198,31 +198,27 @@ def main():
         ftol=1.0e-2, estimate_gradient=True
     )
     constants.Configuration.set_controller_parameters(
-        max_iter=3, time_horizon=5.0,
+        max_iter=3, time_horizon=10.0,
         has_terminal_lateral_constraints=False,
         has_lateral_safety_constraint=False,
         provide_initial_guess=True, initial_acceleration_guess='zero',
-        jumpstart_next_solver_call=True
+        jumpstart_next_solver_call=True, has_initial_mode_guess=True
     )
     constants.Configuration.set_scenario_parameters(
         v_ref={'lo': 10., 'ld': 10., 'p': 10., 'fo': 10., 'fd': 10.},
-        delta_x={'lo': 0., 'ld': 3., 'p': 0., 'fd': 0.},
-        platoon_strategy=1
+        delta_x={'lo': 0., 'ld': 6., 'p': 0., 'fd': 0.},
+        platoon_strategy=3
     )
 
     start_time = time.time()
-
     # run_constraints_scenario(n_orig_ahead > 0, n_orig_behind > 0,
     #                          n_dest_ahead > 0, n_dest_behind > 0)
-    # run_cbf_lc_scenario(n_orig_ahead, n_orig_behind, n_dest_ahead,
-    #                     n_dest_behind)
-    # run_internal_optimal_controller(n_orig_ahead, n_orig_behind, n_dest_ahead,
-    #                                 n_dest_behind)
+    # run_cbf_lc_scenario(n_platoon, n_orig_ahead, n_orig_behind,
+    #                     n_dest_ahead, n_dest_behind)
     run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
                      n_dest_ahead, n_dest_behind,
                      is_acceleration_optimal=True)
     # load_and_plot_latest_scenario()
-    # mode_convergence_base_tests()
 
     end_time = time.time()
 

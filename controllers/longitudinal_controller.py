@@ -27,8 +27,7 @@ class LongitudinalController:
             gap = self.vehicle.compute_gap_to_a_leader(leader)
             v_leader = leader.get_vel()
             accel = self.compute_gap_control(gap, v_ego, v_leader)
-            # Stay under free flow speed
-            accel = self.saturate_accel(v_ego, v_ff, accel)
+        accel = self.saturate_accel(self.saturate_speed(v_ego, v_ff, accel))
         return accel
 
     def compute_acceleration_from_interface(
@@ -45,16 +44,20 @@ class LongitudinalController:
             v_leader = vehicle_interface.select_state_from_vector(
                 leader_states, 'v')
             accel = self.compute_gap_control(gap, v_ego, v_leader)
-            accel = self.saturate_accel(v_ego, v_ff, accel)
+        accel = self.saturate_accel(self.saturate_speed(v_ego, v_ff, accel))
         return accel
 
-    def saturate_accel(self, v_ego, v_ff, desired_accel) -> float:
+    def saturate_speed(self, v_ego, v_ff, desired_accel) -> float:
         if v_ego >= v_ff and desired_accel > 0:
             return self.compute_velocity_control(v_ff, v_ego)
         elif v_ego <= 0 and desired_accel < 0:
             return 0.
         else:
             return desired_accel
+
+    def saturate_accel(self, desired_accel):
+        return min(max(self.vehicle.brake_max, desired_accel),
+                   self.vehicle.accel_max)
 
     def compute_accel_to_a_leader(
             self, other_id: int, vehicles: dict[int, base.BaseVehicle]

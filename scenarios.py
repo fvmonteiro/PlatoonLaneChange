@@ -242,19 +242,17 @@ class LaneChangeScenario(SimulationScenario):
         self._n_platoon = n_platoon
         self._n_dest_ahead, self._n_dest_behind = n_dest_ahead, n_dest_behind
 
-        orig_lane_vehs: list[base.V] = (
-            [fsv.ClosedLoopVehicle(can_change_lanes=False) for _
-             in range(n_orig_ahead)]
-            + [
-                lc_veh_type(
-                    can_change_lanes=True,
-                    has_open_loop_acceleration=is_acceleration_optimal) for _
-                in range(n_platoon)
-            ]
-            + [fsv.ClosedLoopVehicle(can_change_lanes=False) for _
-               in range(n_orig_behind)]
-        )
-        dest_lane_vehs: list[base.V] = [
+        vehicles_ahead = [fsv.ClosedLoopVehicle(can_change_lanes=False) for _
+                          in range(n_orig_ahead)]
+        lc_vehs = [lc_veh_type(
+            can_change_lanes=True,
+            has_open_loop_acceleration=is_acceleration_optimal,
+            is_connected=True
+        ) for _ in range(n_platoon)]
+        vehicles_behind = [fsv.ClosedLoopVehicle(can_change_lanes=False) for _
+                           in range(n_orig_behind)]
+        orig_lane_vehs = vehicles_ahead + lc_vehs + vehicles_behind
+        dest_lane_vehs = [
             fsv.ClosedLoopVehicle(can_change_lanes=False) for _
             in range(n_dest_ahead + n_dest_behind)
         ]
@@ -273,11 +271,11 @@ class LaneChangeScenario(SimulationScenario):
         self.vehicle_group.set_vehicle_names(vehicle_names)
 
     @classmethod
-    def platoon_lane_change(cls, n_platoon: int, n_orig_ahead: int,
-                            n_orig_behind: int, n_dest_ahead: int,
-                            n_dest_behind: int, is_acceleration_optimal: bool
-                            ) -> LaneChangeScenario:
-        lc_veh_type = fsv.PlatoonVehicle
+    def optimal_platoon_lane_change(
+            cls, n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
+            n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool
+    ) -> LaneChangeScenario:
+        lc_veh_type = fsv.OptimalControlVehicle
         scenario = cls(lc_veh_type, n_platoon, n_orig_ahead,
                        n_orig_behind, n_dest_ahead, n_dest_behind,
                        is_acceleration_optimal)
@@ -287,16 +285,16 @@ class LaneChangeScenario(SimulationScenario):
     def single_vehicle_optimal_lane_change(
             cls, n_orig_ahead: int, n_orig_behind: int,
             n_dest_ahead: int, n_dest_behind: int) -> LaneChangeScenario:
-        lc_veh_type = fsv.PlatoonVehicle
+        lc_veh_type = fsv.OptimalControlVehicle
         return cls(lc_veh_type, 1, n_orig_ahead,
                    n_orig_behind, n_dest_ahead, n_dest_behind, False)
 
     @classmethod
-    def single_vehicle_feedback_lane_change(
-            cls, n_orig_ahead: int, n_orig_behind: int,
+    def platoon_full_feedback_lane_change(
+            cls, n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
             n_dest_ahead: int, n_dest_behind: int) -> LaneChangeScenario:
         lc_veh_type = fsv.ClosedLoopVehicle
-        return cls(lc_veh_type, 1, n_orig_ahead,
+        return cls(lc_veh_type, n_platoon, n_orig_ahead,
                    n_orig_behind, n_dest_ahead, n_dest_behind, False)
 
     def get_n_platoon(self):
@@ -309,16 +307,16 @@ class LaneChangeScenario(SimulationScenario):
             opc_vehicle = self.vehicle_group.get_optimal_control_vehicles()[0]
         except IndexError:
             raise AttributeError  # no optimal control vehicles in this group
-        return (opc_vehicle.opt_controller.get_running_cost_history(),
-                opc_vehicle.opt_controller.get_terminal_cost_history())
+        return (opc_vehicle.get_opt_controller().get_running_cost_history(),
+                opc_vehicle.get_opt_controller().get_terminal_cost_history())
 
     def get_opc_cost_history(self):
         try:
             opc_vehicle = self.vehicle_group.get_optimal_control_vehicles()[0]
         except IndexError:
             raise AttributeError  # no optimal control vehicles in this group
-        return (opc_vehicle.opt_controller.get_running_cost_history(),
-                opc_vehicle.opt_controller.get_terminal_cost_history())
+        return (opc_vehicle.get_opt_controller().get_running_cost_history(),
+                opc_vehicle.get_opt_controller().get_terminal_cost_history())
 
     def save_cost_data(self, file_name: str) -> None:
         """
@@ -445,7 +443,7 @@ class LaneChangeScenario(SimulationScenario):
         analysis.plot_initial_state(self.response_to_dataframe())
         # self.make_control_centralized()
         for i in range(len(time) - 1):
-            if np.isclose(time[i], self.lc_intention_time, atol=dt / 10):
+            if np.abs(time[i] - self.lc_intention_time) < dt / 10:
                 self.vehicle_group.set_vehicles_lane_change_direction(
                     self.lc_vehicle_names, 1
                 )

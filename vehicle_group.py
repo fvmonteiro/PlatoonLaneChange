@@ -92,15 +92,6 @@ class VehicleGroup:
     def get_optimal_control_vehicles(self) -> list[fsv.OptimalControlVehicle]:
         return self.get_vehicles_of_type(fsv.OptimalControlVehicle)
 
-    def get_platoon_vehicles(self) -> list[fsv.PlatoonVehicle]:
-        return self.get_vehicles_of_type(fsv.PlatoonVehicle)
-        # platoon_vehs: list[fsv.PlatoonVehicle] = []
-        # for veh_id in self.sorted_vehicle_ids:
-        #     veh = self.vehicles[veh_id]
-        #     if isinstance(veh, fsv.PlatoonVehicle):
-        #         platoon_vehs.append(veh)
-        # return platoon_vehs
-
     def get_vehicles_of_type(self, vehicle_type: Type[base.BaseVehicle]
                              ) -> list[V]:
         selected_vehicles: list[vehicle_type] = []
@@ -109,12 +100,6 @@ class VehicleGroup:
             if isinstance(veh, vehicle_type):
                 selected_vehicles.append(veh)
         return selected_vehicles
-
-    def get_platoon_leader(self) -> fsv.PlatoonVehicle:
-        for veh in self.get_platoon_vehicles():
-            if veh.is_platoon_leader():
-                return veh
-        raise AttributeError("This vehicle group doesn't have any platoons")
 
     def get_initial_desired_gaps(self, v_ref: list[float] = None):
         gaps = []
@@ -233,12 +218,25 @@ class VehicleGroup:
             self.sorted_vehicle_ids.append(veh.get_id())
             self.vehicles[veh.get_id()] = veh
 
+    def populate_with_open_loop_copies(
+            self, vehicles: dict[int, base.BaseVehicle],
+            controlled_vehicle_ids: set[int], initial_state_per_vehicle=None):
+        self.populate_with_copies(vehicles, controlled_vehicle_ids, True,
+                                  initial_state_per_vehicle)
+
+    def populate_with_closed_loop_copies(
+            self, vehicles: dict[int, base.BaseVehicle],
+            controlled_vehicle_ids: set[int], initial_state_per_vehicle=None):
+        self.populate_with_copies(vehicles, controlled_vehicle_ids, False,
+                                  initial_state_per_vehicle)
+
     def populate_with_copies(self, vehicles: dict[int, base.BaseVehicle],
                              controlled_vehicle_ids: set[int],
+                             are_copies_open_loop: bool,
                              initial_state_per_vehicle=None):
         """
-        Creates copies of existing vehicles and group in this instance. This
-        is useful for simulations that happen during iterations of the optimal
+        Creates copies of existing vehicles and groups them in this instance.
+        This is useful for simulations that happen inside the optimal
         controller
         :param vehicles: All vehicles in the simulation
         :param controlled_vehicle_ids: Ids of vehicles being controlled by the
@@ -255,7 +253,12 @@ class VehicleGroup:
             else:
                 initial_state = None
             if veh_id in controlled_vehicle_ids:
-                vehicle = vehicles[veh_id].make_open_loop_copy(initial_state)
+                if are_copies_open_loop:
+                    vehicle = vehicles[veh_id].make_open_loop_copy(
+                        initial_state)
+                else:
+                    vehicle = vehicles[veh_id].make_closed_loop_copy(
+                        initial_state)
             else:
                 vehicle = vehicles[veh_id].make_reset_copy(initial_state)
             self.sorted_vehicle_ids.append(veh_id)
@@ -287,7 +290,21 @@ class VehicleGroup:
         if open_loop_controls is None:
             open_loop_controls = {}
 
+        # First we must check which vehicles are physically close to each other
         self.update_surrounding_vehicles()
+        # Given that, each vehicle decides who's its target leader
+        for veh in self.vehicles.values():
+            veh.update_target_leader(self.vehicles)
+        # Only then can we check the new system mode
+        new_mode = som.SystemMode(self.vehicles)
+        if self.get_current_mode() != new_mode:
+            time = self.vehicles[0].get_current_time()
+            if self._is_verbose:
+                if not self.mode_sequence.is_empty():
+                    print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
+                        time, self.get_current_mode(), new_mode))
+            self.mode_sequence.add_mode(time, new_mode)
+        # And last the dynamics and controls kick in
         for veh_id, veh in self.vehicles.items():
             veh.analyze_platoons(self.vehicles)
             veh.update_mode(self.vehicles)
@@ -313,18 +330,18 @@ class VehicleGroup:
     def update_surrounding_vehicles(self):
         for ego_vehicle in self.vehicles.values():
             ego_vehicle.update_surrounding_vehicles(self.vehicles)
-        new_mode = som.SystemMode(self.vehicles)
-        if self.get_current_mode() != new_mode:
-            time = self.vehicles[0].get_current_time()
-            if self._is_verbose:
-                if self.mode_sequence.is_empty():
-                    # print("Initial mode: {}".format(
-                    #     new_mode))
-                    pass
-                else:
-                    print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
-                        time, self.get_current_mode(), new_mode))
-            self.mode_sequence.add_mode(time, new_mode)
+        # new_mode = som.SystemMode(self.vehicles)
+        # if self.get_current_mode() != new_mode:
+        #     time = self.vehicles[0].get_current_time()
+        #     if self._is_verbose:
+        #         if self.mode_sequence.is_empty():
+        #             # print("Initial mode: {}".format(
+        #             #     new_mode))
+        #             pass
+        #         else:
+        #             print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
+        #                 time, self.get_current_mode(), new_mode))
+        #     self.mode_sequence.add_mode(time, new_mode)
 
     def update_states(self, new_time):
         for vehicle in self.vehicles.values():
