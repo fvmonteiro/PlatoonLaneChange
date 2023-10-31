@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Mapping
+
 import numpy as np
 
 import vehicle_models.base_vehicle as base
@@ -13,7 +15,7 @@ class LongitudinalController:
         self.kg = 0.5
         self.kv = 0.5
 
-    def compute_acceleration(self, vehicles: dict[int, base.BaseVehicle]
+    def compute_acceleration(self, vehicles: Mapping[int, base.BaseVehicle]
                              ) -> float:
         """
         Computes acceleration for the ego vehicle following a leader
@@ -60,7 +62,7 @@ class LongitudinalController:
                    self.vehicle.accel_max)
 
     def compute_accel_to_a_leader(
-            self, other_id: int, vehicles: dict[int, base.BaseVehicle]
+            self, other_id: int, vehicles: Mapping[int, base.BaseVehicle]
     ) -> float:
         if other_id >= 0:
             other_vehicle = vehicles[other_id]
@@ -71,7 +73,7 @@ class LongitudinalController:
         else:
             return np.inf
 
-    def get_more_critical_leader(self, vehicles: dict[int, base.BaseVehicle]
+    def get_more_critical_leader(self, vehicles: Mapping[int, base.BaseVehicle]
                                  ) -> int:
         """
         Compares the acceleration if following the origin or destination lane

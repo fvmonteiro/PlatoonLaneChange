@@ -97,11 +97,12 @@ def run_internal_optimal_controller(n_orig_ahead: int, n_orig_behind: int,
 
 def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
                      n_dest_ahead: int, n_dest_behind: int,
-                     is_acceleration_optimal: bool):
+                     is_acceleration_optimal: bool,
+                     are_vehicles_cooperative: bool):
     tf = constants.Configuration.time_horizon + 2
     scenario = scenarios.LaneChangeScenario.optimal_platoon_lane_change(
         n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
-        is_acceleration_optimal
+        is_acceleration_optimal, are_vehicles_cooperative
     )
     run_save_and_plot(scenario, tf)
 
@@ -165,7 +166,7 @@ def mode_convergence_base_tests():
                   f"n_ld={i}, n_fd={n_ld}, n_lo={n_lo}, n_fo={n_fo}")
             scenario = scenarios.LaneChangeScenario.optimal_platoon_lane_change(
                 n_platoon, n_lo, n_fo, n_ld, n_fd,
-                is_acceleration_optimal=False)
+                is_acceleration_optimal=False, are_vehicles_cooperative=False)
             scenario.create_safe_uniform_speed_initial_state()
             scenario.run(tf)
             n_iter = len(scenario.get_opc_results_summary()['iteration'])
@@ -188,9 +189,9 @@ def mode_convergence_base_tests():
 
 
 def main():
-    n_platoon = 2
+    n_platoon = 1
     n_orig_ahead, n_orig_behind = 0, 0
-    n_dest_ahead, n_dest_behind = 1, 0
+    n_dest_ahead, n_dest_behind = 0, 1
 
     constants.INCREASE_LC_TIME_HEADWAY = False
     constants.Configuration.set_solver_parameters(
@@ -206,8 +207,8 @@ def main():
     )
     constants.Configuration.set_scenario_parameters(
         v_ref={'lo': 10., 'ld': 10., 'p': 10., 'fo': 10., 'fd': 10.},
-        delta_x={'lo': 0., 'ld': 6., 'p': 0., 'fd': 0.},
-        platoon_strategy=3
+        delta_x={'lo': 0., 'ld': -6., 'p': 0., 'fd': 4.},
+        platoon_strategies='all'
     )
 
     start_time = time.time()
@@ -217,7 +218,8 @@ def main():
     #                     n_dest_ahead, n_dest_behind)
     run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
                      n_dest_ahead, n_dest_behind,
-                     is_acceleration_optimal=True)
+                     is_acceleration_optimal=True,
+                     are_vehicles_cooperative=False)
     # load_and_plot_latest_scenario()
 
     end_time = time.time()

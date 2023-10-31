@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import time
-from typing import Union
+from typing import Mapping, Sequence, Union
 import warnings
 
 import control as ct
@@ -17,7 +17,6 @@ import operating_modes.system_operating_mode as som
 import vehicle_models.base_vehicle as base
 import vehicle_group as vg
 import vehicle_group_ocp_interface as vgi
-
 
 config = constants.Configuration
 
@@ -39,6 +38,8 @@ class VehicleOptimalController:
     _initial_state: np.ndarray
     _desired_state: np.ndarray
     _cost_with_tracker: occ.OCPCostTracker
+
+    _internal_sim_dt = 1.0e-2  # to simulate the system (not to solve the ocp)
 
     def __init__(self):
         self.time_horizon = 0.
@@ -124,7 +125,7 @@ class VehicleOptimalController:
             # t_eval=np.arange(0, time_pts[-1], 0.01)
         )
 
-    def get_input(self, current_time: float, veh_ids: Union[int, list[int]],
+    def get_input(self, current_time: float, veh_ids: Union[int, Sequence[int]],
                   t0: float = None):
         """
         Gets the optimal input found by the solver at the given time by linear
@@ -169,7 +170,7 @@ class VehicleOptimalController:
         self.time_horizon = value
 
     def set_controlled_vehicles_ids(
-            self, controlled_veh_ids: Union[int, list[int]]):
+            self, controlled_veh_ids: Union[int, Sequence[int]]):
         if np.isscalar(controlled_veh_ids):
             controlled_veh_ids = [controlled_veh_ids]
         self._center_veh_id = controlled_veh_ids[0]
@@ -183,7 +184,7 @@ class VehicleOptimalController:
             self._controlled_veh_ids.add(new_vehicle_id)
 
     def set_platoon_formation_constraint_parameters(
-            self, platoon_vehicles_ids: list[int],
+            self, platoon_vehicles_ids: Sequence[int],
             dest_lane_vehicles_ids: list[int]):
         self._platoon_vehicle_pairs = []
         for i in range(len(platoon_vehicles_ids)):
@@ -195,7 +196,7 @@ class VehicleOptimalController:
         print('Platoon veh pairs:', self._platoon_vehicle_pairs)
         print('Dest lane vehs:', self._dest_lane_vehicles_ids)
 
-    def find_trajectory(self, vehicles: dict[int, base.BaseVehicle]):
+    def find_trajectory(self, vehicles: Mapping[int, base.BaseVehicle]):
         """
         Solves the OPC for all listed controlled vehicles
         :param vehicles: All relevant vehicles
@@ -204,87 +205,58 @@ class VehicleOptimalController:
 
         self._activation_time = vehicles[self._center_veh_id].get_current_time()
 
-        if self.has_initial_mode_guess:
-            # TODO: in this case we could also use the states and inputs
-            #  as initial guess
-            cl_simulation = self.get_strategy_mode_sequence(vehicles)
-            # Visual check of the closed loop strategy
-            if len(self._controlled_veh_ids) <= 1:
-                analysis.plot_constrained_lane_change(
-                    cl_simulation.to_dataframe(),
-                    vehicles[self._center_veh_id].get_id())
-            else:
-                analysis.plot_platoon_lane_change(cl_simulation.to_dataframe())
-            analysis.plot_trajectory(cl_simulation.to_dataframe())
-            input_sequence = cl_simulation.get_mode_sequence()
-        else:
-            input_sequence = som.ModeSequence()
-            input_sequence.add_mode(0.0, som.SystemMode(vehicles))
-
         self._ocp_interface = vgi.VehicleGroupInterface(
-            vehicles, self._controlled_veh_ids, self._center_veh_id)
+            vehicles, self._center_veh_id)
         self._set_ocp_dynamics()
         self._initial_state = self._ocp_interface.get_initial_state()
         self._desired_state = self._ocp_interface.create_desired_state(
             self.time_horizon)
         self._create_cost_with_tracker()
 
-        initial_guess = (self.create_initial_guess(vehicles)
-                         if self.provide_initial_guess else None)
+        # state_guess, input_guess = (self.create_initial_guess(vehicles)
+        #                             if self.provide_initial_guess else None)
+        mode_sequence_guess, state_guess, input_guess = (
+            self._create_initial_mode_guess(vehicles, plot_result=True))
         converged = False
         counter = 0
         while not converged and counter < self.max_iter:
             counter += 1
 
-            # TODO: remove field 'leader' from input sequence since it is
-            #  always null for optimal control vehicles
             print("Setting mode sequence to:\n"
-                  f"{input_sequence.to_string(skip_lines=True)}")
-            self._ocp_interface.set_mode_sequence(input_sequence)
+                  f"{mode_sequence_guess.to_string(skip_lines=True)}")
+            self._ocp_interface.set_mode_sequence(mode_sequence_guess)
             self._set_constraints()
             self._cost_with_tracker.start_recording()
 
             print("Calling ocp solver...")
             start_time = time.time()
-            self._solve_ocp(initial_guess)
+            self._solve_ocp((state_guess, input_guess))
             solve_time = time.time() - start_time
 
             # Temp: just checking what the optimizer "sees"
-            alt = self.get_ocp_solver_simulation(vehicles)
-            if len(self._platoon_vehicle_pairs) < 1:
-                analysis.plot_constrained_lane_change(
-                    alt.to_dataframe(), vehicles[self._center_veh_id].get_id())
-            else:
-                analysis.plot_platoon_lane_change(alt.to_dataframe())
+            self.check_ocp_solver_simulation(vehicles)
 
             simulated_vehicle_group = self.simulate_over_optimization_horizon(
-                vehicles)
+                vehicles, plot_result=True)
             self._data_per_iteration.append(
                 simulated_vehicle_group.to_dataframe())
-            if len(self._platoon_vehicle_pairs) < 1:
-                analysis.plot_constrained_lane_change(
-                    self._data_per_iteration[-1],
-                    vehicles[self._center_veh_id].get_id())
-            else:
-                analysis.plot_platoon_lane_change(self._data_per_iteration[-1])
             output_sequence = simulated_vehicle_group.get_mode_sequence()
 
-            # output_seq_str = som.mode_sequence_to_str(output_sequence)
             print("Input sequence:  {}\nOutput sequence: {}".format(
-                input_sequence, output_sequence
+                mode_sequence_guess, output_sequence
             ))
-            self._log_results(counter, str(input_sequence),
+            self._log_results(counter, str(mode_sequence_guess),
                               str(output_sequence), solve_time, self.ocp_result)
 
-            converged = input_sequence.is_equal_to(output_sequence,
-                                                   self.discretization_step)
+            converged = mode_sequence_guess.is_equal_to(
+                output_sequence, self.discretization_step)
 
             print("Converged?", converged)
-            input_sequence = output_sequence
+            mode_sequence_guess = output_sequence
             if self.jumpstart_next_solver_call and self.ocp_result.success:
-                last_input = self.ocp_result.inputs
-                last_states = self.ocp_result.states
-                initial_guess = (last_states, last_input)
+                input_guess = self.ocp_result.inputs
+                state_guess = self.ocp_result.states
+                # initial_guess = (last_states, last_input)
 
     def _set_ocp_configuration(self):
         self._set_ocp_dynamics()
@@ -340,6 +312,32 @@ class VehicleOptimalController:
             time_points, self._ocp_interface.n_states,
             running_cost, terminal_cost, self.solver_max_iter
         )
+
+    def _create_initial_mode_guess(
+            self, vehicles: Mapping[int, base.BaseVehicle], plot_result: bool = False
+    ) -> tuple[som.ModeSequence, np.ndarray, np.ndarray]:
+        if self.has_initial_mode_guess:
+            # TODO: in this case we could also use the states and inputs
+            #  as initial guess
+            cl_simulation = self.get_strategy_mode_sequence(vehicles,
+                                                            plot_result)
+            mode_sequence = cl_simulation.get_mode_sequence()
+            optimal_veh_ids = [
+                veh_id for veh_id in self._controlled_veh_ids
+                if vehicles[veh_id].get_has_open_loop_acceleration()]
+            mode_sequence.remove_leader_from_modes(optimal_veh_ids)
+            states = cl_simulation.get_all_states()
+            inputs = cl_simulation.get_all_inputs(self._controlled_veh_ids)
+            sampling = int(self.discretization_step // self._internal_sim_dt)
+            states = states[:, [i for i in range(0, states.shape[1], sampling)]]
+            inputs = inputs[:, [i for i in range(0, inputs.shape[1], sampling)]]
+        else:
+            mode_sequence = som.ModeSequence()
+            mode_sequence.add_mode(0.0, som.SystemMode(vehicles))
+            states, inputs = (self.create_initial_guess(vehicles)
+                              if self.provide_initial_guess else None)
+
+        return mode_sequence, states, inputs
 
     def _set_ocp_dynamics(self):
         params = {'vehicle_group_interface': self._ocp_interface}
@@ -445,7 +443,8 @@ class VehicleOptimalController:
                     0., np.inf
                 ))
 
-    def _solve_ocp(self, custom_initial_guess: np.ndarray = None):
+    def _solve_ocp(
+            self, custom_initial_guess: tuple[np.ndarray, np.ndarray] = None):
         time_pts = self.get_time_points()
 
         # Initial guess can be a guess just of the input or of both input and
@@ -470,14 +469,10 @@ class VehicleOptimalController:
                 'callback': self._cost_with_tracker.callback,
                 'jac': self._cost_gradient
             }
-            # minimize_method='trust-constr',
             # log=True
-            # basis=flat.BezierFamily(5, T=self._ocp_horizon)
         )
         # except RuntimeError:
         #     pass
-        # Note: the basis parameter above was set empirically - it might not
-        # always work well
 
         # TODO: testing stuff here
         self._solver_result = result
@@ -511,21 +506,71 @@ class VehicleOptimalController:
         #     self._ocp_has_solution = False
         # self._ocp_has_solution = True
 
-    def get_strategy_mode_sequence(self, vehicles: dict[int, base.BaseVehicle]):
-        dt = 1.0e-2
+    def get_strategy_mode_sequence(
+            self, vehicles: Mapping[int, base.BaseVehicle],
+            plot_result: bool = True):
+        dt = self._internal_sim_dt
         sim_time = self.get_time_points(dt)
+        initial_state_per_vehicle = (
+            self._ocp_interface.map_state_to_vehicle_ids(self._initial_state)
+        )
+        chosen_strategy = -1
+        best_cost = np.inf
+        vehicle_groups = []
+        for lc_strategy in config.platoon_strategies:
+            # Simulate
+            veh_group = vg.VehicleGroup()
+            veh_group.set_platoon_lane_change_strategy(lc_strategy)
+            veh_group.populate_with_closed_loop_copies(
+                vehicles, self._controlled_veh_ids, initial_state_per_vehicle)
+            veh_group.set_verbose(False)
+            veh_group.prepare_to_start_simulation(len(sim_time))
+            for i in range(len(sim_time) - 1):
+                veh_group.simulate_one_time_step(sim_time[i + 1])
+            # Check results
+            success = veh_group.check_lane_change_success()
+            r_cost, t_cost = self._cost_with_tracker.compute_simulation_cost(
+                veh_group.get_all_states(),
+                veh_group.get_all_inputs(self._controlled_veh_ids), sim_time)
+            print(f'Strategy {lc_strategy} successful? {success}. '
+                  f'Cost: {r_cost:.2f}(running) + {t_cost:.2f}(terminal) = '
+                  f'{r_cost + t_cost:.2f}')
+            # if plot_result:
+            #     data = veh_group.to_dataframe()
+            #     if len(self._controlled_veh_ids) <= 1:
+            #         analysis.plot_constrained_lane_change(
+            #             data, vehicles[self._center_veh_id].get_id())
+            #     else:
+            #         analysis.plot_platoon_lane_change(data)
+            #     analysis.plot_trajectory(data)
+            # Store
+            if success and r_cost + t_cost < best_cost:
+                best_cost = r_cost + t_cost
+                chosen_strategy = lc_strategy
+            vehicle_groups.append(veh_group)
 
-        vehicle_group = vg.VehicleGroup()
-        vehicle_group.populate_with_closed_loop_copies(
-            vehicles, self._controlled_veh_ids)
-        # veh_ids = vehicle_group.sorted_vehicle_ids
-        vehicle_group.set_verbose(False)
-        vehicle_group.prepare_to_start_simulation(len(sim_time))
-        for i in range(len(sim_time) - 1):
-            vehicle_group.simulate_one_time_step(sim_time[i + 1])
-        return vehicle_group
+        print(f'Strategy {chosen_strategy} chosen.')
+        if plot_result:
+            data = vehicle_groups[chosen_strategy].to_dataframe()
+            if len(self._controlled_veh_ids) <= 1:
+                analysis.plot_constrained_lane_change(
+                    data, vehicles[self._center_veh_id].get_id())
+            else:
+                analysis.plot_platoon_lane_change(data)
+            analysis.plot_trajectory(data)
+        return vehicle_groups[chosen_strategy]
 
-    def get_ocp_solver_simulation(self, vehicles: dict[int, base.BaseVehicle]):
+    def check_ocp_solver_simulation(
+            self, vehicles: Mapping[int, base.BaseVehicle],
+            plot_result: bool = True) -> vg.VehicleGroup:
+        """
+        Reads and plots the results of the OCP solution as the solver sees it,
+        that is, the expected open loop solution with the given mode sequence.
+        :param vehicles: All the simulation vehicles
+        :param plot_result: If True, plots the results
+        :return: The simulated vehicle group is returned in case further
+         manipulation of the results is needed.
+        """
         sim_time = self.ocp_result.time
         initial_state_per_vehicle = (
             self._ocp_interface.map_state_to_vehicle_ids(self._initial_state)
@@ -549,11 +594,25 @@ class VehicleOptimalController:
             )
             vehicle_group.write_vehicle_states(t, state_by_vehicle,
                                                inputs_by_vehicle)
+        if plot_result:
+            if len(self._platoon_vehicle_pairs) < 1:
+                analysis.plot_constrained_lane_change(
+                    vehicle_group.to_dataframe(),
+                    vehicles[self._center_veh_id].get_id())
+            else:
+                analysis.plot_platoon_lane_change(vehicle_group.to_dataframe())
         return vehicle_group
 
     def simulate_over_optimization_horizon(
-            self, vehicles: dict[int, base.BaseVehicle]):
-        dt = 1.0e-2
+            self, vehicles: Mapping[int, base.BaseVehicle],
+            plot_result: bool = False) -> vg.VehicleGroup:
+        """
+        Runs the system with the open loop solution.
+        :param vehicles: All the simulation vehicles
+        :param plot_result: If True, plots the results
+        :return: The simulated vehicle group.
+        """
+        dt = self._internal_sim_dt
         sim_time = self.get_time_points(dt)
 
         vehicle_group = vg.VehicleGroup()
@@ -566,9 +625,17 @@ class VehicleOptimalController:
             optimal_inputs = self.get_input(sim_time[i], veh_ids, t0=0.)
             vehicle_group.simulate_one_time_step(sim_time[i + 1],
                                                  optimal_inputs)
+        if plot_result:
+            if len(self._platoon_vehicle_pairs) < 1:
+                analysis.plot_constrained_lane_change(
+                    vehicle_group.to_dataframe(),
+                    vehicles[self._center_veh_id].get_id())
+            else:
+                analysis.plot_platoon_lane_change(vehicle_group.to_dataframe())
         return vehicle_group
 
-    def create_initial_guess(self, vehicles: dict[int, base.BaseVehicle]):
+    def create_initial_guess(self, vehicles: Mapping[int, base.BaseVehicle]
+                             ) -> (np.ndarray, np.ndarray):
         sim_time = self.get_time_points()
         initial_state_per_vehicle = (
             self._ocp_interface.map_state_to_vehicle_ids(self._initial_state)
@@ -581,19 +648,10 @@ class VehicleOptimalController:
         vehicle_group.prepare_to_start_simulation(len(sim_time))
         input_guess = self._ocp_interface.get_initial_inputs_guess(
             self.initial_acceleration_guess, as_dict=True)
-        # time is the last state
-        states = np.zeros([self._ocp_interface.n_states, len(sim_time)])
-        states[:, 0] = np.hstack((vehicle_group.get_current_state(),
-                                  0.0))
         for i in range(1, len(sim_time)):
             vehicle_group.simulate_one_time_step(sim_time[i], input_guess)
-            states[:, i] = np.hstack((vehicle_group.get_current_state(),
-                                      sim_time[i]))
-        input_array = []
-        [input_array.extend(a) for a in list(input_guess.values())]
-        inputs = np.repeat(input_array, len(sim_time)
-                           ).reshape(-1, len(sim_time))
-        return states, inputs
+        return (vehicle_group.get_all_states(),
+                vehicle_group.get_all_inputs(self._controlled_veh_ids))
 
     def _log_results(self, counter: int, input_sequence: str,
                      output_sequence: str, solve_time: float,

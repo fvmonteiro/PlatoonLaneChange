@@ -150,22 +150,8 @@ class OCPCostTracker:
 
         # Note: we're recomputing costs here, but given how simple they are
         # this should not affect performance
-
-        # Cost over time
-        costs = [self._running_cost_fun(states[:, i], inputs[:, i]) for
-                 i in range(self._n_time_points)]
-        # Compute the time intervals
-        dt = np.diff(self._time_points)
-        # Integrate the cost
-        running_cost = 0
-        for i in range(self._n_time_points - 1):
-            # Approximate the integral using trapezoidal rule
-            running_cost += 0.5 * (costs[i] + costs[i + 1]) * dt[i]
-
-        terminal_cost = 0.
-        if self.has_terminal_cost():
-            terminal_cost = self._terminal_cost_fun(states[:, -1],
-                                                    inputs[:, -1])
+        running_cost, terminal_cost = self.compute_simulation_cost(
+            states, inputs)
 
         # Store everyone
         self._running_cost_per_iteration[-1].append(running_cost)
@@ -208,6 +194,29 @@ class OCPCostTracker:
     # # control input.
     # inputs = x.reshape((-1, self._n_time_points))
 
+    def compute_simulation_cost(
+            self, states: np.ndarray, inputs: np.ndarray,
+            time_points: np.ndarray = None) -> (float, float):
+        if time_points is None:
+            time_points = self._time_points
+        n = len(time_points)
+        # Cost over time
+        costs = [self._running_cost_fun(states[:, i], inputs[:, i]) for
+                 i in range(n)]
+        # Compute the time intervals
+        dt = np.diff(time_points)
+        # Integrate the cost
+        running_cost = 0
+        for i in range(n - 1):
+            # Approximate the integral using trapezoidal rule
+            running_cost += 0.5 * (costs[i] + costs[i + 1]) * dt[i]
+
+        terminal_cost = 0.
+        if self.has_terminal_cost():
+            terminal_cost = self._terminal_cost_fun(states[:, -1],
+                                                    inputs[:, -1])
+        return running_cost, terminal_cost
+
     def check_feasibility(self, states, inputs):
         # margin = 1.0e-3
         for i in range(self._n_time_points):
@@ -242,7 +251,7 @@ class OCPCostTracker:
             self._current_call_costs = np.zeros(self._n_time_points)
             self._call_counter = 0
 
-    def _compute_states_inputs(self, x):
+    def _compute_states_inputs(self, x) -> (np.ndarray, np.ndarray):
         """
         Extracts state and input matrices with shape n_states (or n_inputs)
          by n_times from the vector of optimization variables.

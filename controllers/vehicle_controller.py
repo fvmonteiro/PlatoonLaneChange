@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import warnings
 from abc import ABC, abstractmethod
+from typing import Mapping
+import warnings
 
 import numpy as np
 
@@ -38,7 +39,7 @@ class VehicleController(ABC):
         self._opt_controller = new_opt_controller
 
     def determine_inputs(self, external_controls: np.ndarray,
-                         vehicles: dict[int, fsv.FourStateVehicle]
+                         vehicles: Mapping[int, fsv.FourStateVehicle]
                          ) -> (float, float):
         if self._has_open_loop_acceleration:
             accel = self._get_open_loop_acceleration(external_controls,
@@ -52,7 +53,7 @@ class VehicleController(ABC):
             phi = 0.
         return accel, phi
 
-    def get_target_leader_id(self, vehicles: dict[int, fsv.FourStateVehicle]
+    def get_target_leader_id(self, vehicles: Mapping[int, fsv.FourStateVehicle]
                              ) -> int:
         if self._has_open_loop_acceleration:
             return self._get_target_leader_id(vehicles)
@@ -67,19 +68,19 @@ class VehicleController(ABC):
     @abstractmethod
     def _get_open_loop_acceleration(
             self, external_controls: np.ndarray,
-            vehicles: dict[int, fsv.FourStateVehicle]
+            vehicles: Mapping[int, fsv.FourStateVehicle]
     ) -> float:
         pass
 
     @abstractmethod
     def _determine_steering_wheel_angle(
             self, external_controls: np.ndarray,
-            vehicles: dict[int, fsv.FourStateVehicle]
+            vehicles: Mapping[int, fsv.FourStateVehicle]
     ) -> float:
         pass
 
     @abstractmethod
-    def _get_target_leader_id(self, vehicles: dict[int, fsv.FourStateVehicle]
+    def _get_target_leader_id(self, vehicles: Mapping[int, fsv.FourStateVehicle]
                               ) -> int:
         pass
 
@@ -93,17 +94,18 @@ class ExternalControl(VehicleController):
 
     def _get_open_loop_acceleration(
             self, external_controls: np.ndarray,
-            vehicles: dict[int, fsv.FourStateVehicle]
+            vehicles: Mapping[int, fsv.FourStateVehicle]
     ) -> float:
         return external_controls[self._external_input_idx['a']]
 
     def _determine_steering_wheel_angle(
             self, external_controls: np.ndarray,
-            vehicles: dict[int, fsv.FourStateVehicle]
+            vehicles: Mapping[int, fsv.FourStateVehicle]
     ) -> float:
         return external_controls[self._external_input_idx['phi']]
 
-    def _get_target_leader_id(self, vehicles: dict[int, fsv.FourStateVehicle]):
+    def _get_target_leader_id(self,
+                              vehicles: Mapping[int, fsv.FourStateVehicle]):
         """
         No target leader, since this vehicle class does not have autonomous
         longitudinal control
@@ -123,7 +125,7 @@ class OptimalControl(VehicleController):
 
     def _get_open_loop_acceleration(
             self, external_controls: np.ndarray,
-            vehicles: dict[int, fsv.FourStateVehicle]
+            vehicles: Mapping[int, fsv.FourStateVehicle]
     ) -> float:
         t = self._ego_vehicle.get_current_time()
         if self._opt_controller.is_active(t):
@@ -134,7 +136,7 @@ class OptimalControl(VehicleController):
 
     def _determine_steering_wheel_angle(
             self, external_controls: np.ndarray,
-            vehicles: dict[int, fsv.FourStateVehicle]
+            vehicles: Mapping[int, fsv.FourStateVehicle]
     ) -> float:
         t = self._ego_vehicle.get_current_time()
         if self._opt_controller.is_active(t):
@@ -143,7 +145,7 @@ class OptimalControl(VehicleController):
         else:
             return self._lk_controller.compute_steering_wheel_angle()
 
-    def _get_target_leader_id(self, vehicles: dict[int, fsv.FourStateVehicle]
+    def _get_target_leader_id(self, vehicles: Mapping[int, fsv.FourStateVehicle]
                               ) -> int:
         if self._opt_controller.is_active(
                 self._ego_vehicle.get_current_time()):
@@ -170,7 +172,7 @@ class ClosedLoopControl(VehicleController):
 
     def _get_open_loop_acceleration(
             self, external_controls: np.ndarray,
-            vehicles: dict[int, fsv.FourStateVehicle]
+            vehicles: Mapping[int, fsv.FourStateVehicle]
     ) -> float:
         # we should never reach this
         warnings.warn('ClosedLoopController was constructed with'
@@ -179,7 +181,7 @@ class ClosedLoopControl(VehicleController):
 
     def _determine_steering_wheel_angle(
             self, external_controls: np.ndarray,
-            vehicles: dict[int, fsv.FourStateVehicle]
+            vehicles: Mapping[int, fsv.FourStateVehicle]
     ) -> float:
         delta_t = (self._ego_vehicle.get_current_time()
                    - self._lc_controller.get_start_time())
@@ -188,7 +190,7 @@ class ClosedLoopControl(VehicleController):
         else:
             return self._lk_controller.compute_steering_wheel_angle()
 
-    def _get_target_leader_id(self, vehicles: dict[int, fsv.FourStateVehicle]
+    def _get_target_leader_id(self, vehicles: Mapping[int, fsv.FourStateVehicle]
                               ) -> int:
         # we should never reach this
         warnings.warn('ClosedLoopController was constructed with'

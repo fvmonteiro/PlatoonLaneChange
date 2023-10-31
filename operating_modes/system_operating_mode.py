@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from collections import defaultdict
-from typing import Dict, List, Tuple, Union
+from typing import Dict, Iterable, List, Mapping, Tuple, Union
 
 import numpy as np
 
@@ -22,12 +22,12 @@ class SystemMode:
     system operation mode.
     """
 
-    def __init__(self, vehicles: Dict[int, base.BaseVehicle]):
+    def __init__(self, vehicles: Mapping[int, base.BaseVehicle]):
         # TODO: wouldn't it be easier to work only with vehicle names (str)
         #  instead of moving back and forth between ids and names?
-        self.mode: Dict[int, Dict[str, int]] = {}
-        self.id_to_name_map: Dict[int, str] = {-1: 'x'}  # for easier debugging
-        self.name_to_id: Dict[str, int] = {}  # makes editing/getting easier
+        self.mode: dict[int, dict[str, int]] = {}
+        self.id_to_name_map: dict[int, str] = {-1: 'x'}  # for easier debugging
+        self.name_to_id: dict[str, int] = {}  # makes editing/getting easier
         for veh_id, vehicle in vehicles.items():
             surrounding_veh_ids = vehicle.get_relevant_surrounding_vehicle_ids()
             self.mode[veh_id] = surrounding_veh_ids
@@ -74,8 +74,8 @@ class SystemMode:
             ego_identifier, surrounding_position)]
 
     def create_altered_mode(
-            self,
-            mode_changes: Dict[Union[str, int], Dict[str, Union[str, int]]]
+            self, mode_changes: Mapping[Union[str, int],
+                                        Mapping[str, Union[str, int]]]
     ) -> SystemMode:
         """
         Creates another SystemMode instance similar to the original one
@@ -153,12 +153,28 @@ class ModeSequence:
     def get_latest_mode(self) -> SystemMode:
         return self.sequence[-1][1]
 
+    def remove_leader_from_modes(self, vehicle_ids: Iterable[int]) -> None:
+        """
+        Empties (sets to -1) the field 'leader' for the selected vehicles on
+        all modes in the sequence.
+
+        Simulations with fully feedback controlled vehicles output the target
+        leader at every mode, but this is irrelevant to the optimal controller
+        and may delay the convergence over mode sequences.
+        :return:
+        """
+        for t, mode in self.sequence:
+            for veh in mode.mode.keys():
+                if veh in vehicle_ids:
+                    mode.mode[veh]['leader'] = -1
+
     def add_mode(self, time: float, mode: SystemMode):
         self.sequence.append((time, mode))
 
     def alter_and_add_mode(
             self, time: float,
-            mode_changes: Dict[Union[str, int], Dict[str, Union[str, int]]]):
+            mode_changes: Mapping[Union[str, int],
+                                  Mapping[str, Union[str, int]]]):
         """
         Copies the latest mode, change it according to the given parameter,
         and adds it to the sequence
@@ -172,12 +188,12 @@ class ModeSequence:
         new_mode = last_mode.create_altered_mode(mode_changes)
         self.add_mode(time, new_mode)
 
-    def to_sv_sequence(self) -> Dict[int, SVSequence]:
+    def to_sv_sequence(self) -> dict[int, SVSequence]:
         """
         Transforms a list of (time, mode) tuples into a dictionary where vehicle
         ids are keys and values are lists of (time, leader id) tuples
         """
-        surrounding_vehicle_sequences: Dict[int, SVSequence] = defaultdict(list)
+        surrounding_vehicle_sequences: dict[int, SVSequence] = defaultdict(list)
         for time, mode in self.sequence:
             for ego_id, surrounding_ids in mode.mode.items():
                 surrounding_vehicle_sequences[ego_id].append(

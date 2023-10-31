@@ -18,7 +18,7 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
 
     def __init__(self):
         super().__init__()
-        self._set_model(self._state_names, self._input_names)
+        self._set_model()
 
     def set_ocp_leader_sequence(self, leader_sequence):
         """
@@ -28,6 +28,9 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
 
     def update_mode(self, vehicles: dict[int, base.BaseVehicle]):
         pass
+
+    def get_has_open_loop_acceleration(self) -> bool:
+        return False
 
     def get_vel(self):
         try:

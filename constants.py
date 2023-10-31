@@ -1,4 +1,8 @@
-from typing import Union, Dict
+from __future__ import annotations
+
+from typing import Mapping, Union
+
+import numpy as np
 
 INCREASE_LC_TIME_HEADWAY = False
 LANE_WIDTH = 4  # [m]
@@ -38,7 +42,7 @@ class Configuration:
     v_ref = {'lo': 10., 'ld': 10., 'p': 10.,
              'fo': 10., 'fd': 10.}
     delta_x = {'lo': 0.0, 'ld': 0.0, 'p': 0.0, 'fo': 0.0, 'fd': 0.0}
-    platoon_strategy = 1  # 1: synch, 2: leader first, 3: last first,
+    platoon_strategies = [0]  # 1: synch, 2: leader first, 3: last first,
     # 4: leader first reverse
 
     @staticmethod
@@ -121,8 +125,9 @@ class Configuration:
 
     @staticmethod
     def set_scenario_parameters(
-            v_ref: Dict[str, float] = None, delta_x: Dict[str, float] = None,
-            platoon_strategy: int = 1):
+            v_ref: Mapping[str, float] = None,
+            delta_x: Mapping[str, float] = None,
+            platoon_strategies: Union[list[int], int, str] = 1):
         """
 
         :param v_ref: Free-flow speed for all vehicles. The accepted keys are:
@@ -131,8 +136,11 @@ class Configuration:
         :param delta_x: Deviation from equilibrium position. The accepted keys
          are: lo (origin leader), ld (destination leader), p (intra platoon),
          fo (origin follower), fd (destination follower)
-        :param platoon_strategy: 0: no platoon strategy, 1: synch,
-         2: leader first, 3: last first, 4: leader first reverse
+        :param platoon_strategies: Defines the strategies that may be used by
+         the optimal controller to generate the initial mode sequence guess.
+         Accepted numerical values are 0: no platoon strategy, 1: synch,
+         2: leader first, 3: last first, 4: leader first reverse. The only
+         accepted string is 'all'.
         :return:
         """
         if v_ref:
@@ -141,4 +149,8 @@ class Configuration:
         if delta_x:
             for key, value in delta_x.items():
                 Configuration.delta_x[key] = value
-        Configuration.platoon_strategy = platoon_strategy
+        if isinstance(platoon_strategies, str):
+            platoon_strategies = [i for i in range(5)]
+        elif np.isscalar(platoon_strategies):
+            platoon_strategies = [platoon_strategies]
+        Configuration.platoon_strategies = platoon_strategies

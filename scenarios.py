@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import pickle
-from typing import Type, Union
+from typing import Iterable, Mapping, Sequence, Type, Union
 
 import control as ct
 import numpy as np
@@ -27,14 +27,14 @@ class SimulationScenario(ABC):
         self.result_summary: dict = {}
 
     def create_uniform_vehicles(
-            self, n_per_lane: list[int], vehicle_class: Type[base.BaseVehicle],
+            self, n_per_lane: Iterable[int], vehicle_class: Type[base.BaseVehicle],
             free_flow_speed: float):
         array_2d = [[vehicle_class] * n for n in n_per_lane]
         self.create_vehicle_group(array_2d)
         self.vehicle_group.set_free_flow_speeds(free_flow_speed)
 
     def create_vehicle_group(
-            self, vehicle_classes: list[list[Type[base.BaseVehicle]]]):
+            self, vehicle_classes: Sequence[Sequence[Type[base.BaseVehicle]]]):
         for i in range(len(vehicle_classes)):
             self.n_per_lane.append(len(vehicle_classes[i]))
         flat_vehicle_list = [item for sublist in vehicle_classes for
@@ -231,7 +231,8 @@ class LaneChangeScenario(SimulationScenario):
     def __init__(self, lc_veh_type: Type[fsv.FourStateVehicle], n_platoon: int,
                  n_orig_ahead: int, n_orig_behind: int,
                  n_dest_ahead: int, n_dest_behind: int,
-                 is_acceleration_optimal: bool):
+                 is_acceleration_optimal: bool,
+                 are_vehicles_cooperative: bool = False):
         if n_platoon < 1:
             raise ValueError("Scenario must have at least one platoon vehicle")
 
@@ -242,20 +243,28 @@ class LaneChangeScenario(SimulationScenario):
         self._n_platoon = n_platoon
         self._n_dest_ahead, self._n_dest_behind = n_dest_ahead, n_dest_behind
 
-        vehicles_ahead = [fsv.ClosedLoopVehicle(can_change_lanes=False) for _
-                          in range(n_orig_ahead)]
+        vehicles_ahead = [
+            fsv.ClosedLoopVehicle(can_change_lanes=False,
+                                  is_connected=are_vehicles_cooperative) for _
+            in range(n_orig_ahead)]
         lc_vehs = [lc_veh_type(
             can_change_lanes=True,
             has_open_loop_acceleration=is_acceleration_optimal,
             is_connected=True
         ) for _ in range(n_platoon)]
-        vehicles_behind = [fsv.ClosedLoopVehicle(can_change_lanes=False) for _
-                           in range(n_orig_behind)]
+        vehicles_behind = [
+            fsv.ClosedLoopVehicle(can_change_lanes=False,
+                                  is_connected=are_vehicles_cooperative) for _
+            in range(n_orig_behind)]
         orig_lane_vehs = vehicles_ahead + lc_vehs + vehicles_behind
+        # dest_lane_vehs = [
+        #     fsv.ClosedLoopVehicle(can_change_lanes=False,
+        #                           is_connected=are_vehicles_cooperative) for _
+        #     in range(n_dest_ahead + n_dest_behind)]
         dest_lane_vehs = [
-            fsv.ClosedLoopVehicle(can_change_lanes=False) for _
-            in range(n_dest_ahead + n_dest_behind)
-        ]
+            fsv.OptimalControlVehicle(can_change_lanes=False,
+                                      is_connected=are_vehicles_cooperative)
+            for _ in range(n_dest_ahead + n_dest_behind)]
         self.n_per_lane = [len(orig_lane_vehs), len(dest_lane_vehs)]
         self.vehicle_group.fill_vehicle_array(orig_lane_vehs + dest_lane_vehs)
 
@@ -273,12 +282,13 @@ class LaneChangeScenario(SimulationScenario):
     @classmethod
     def optimal_platoon_lane_change(
             cls, n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
-            n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool
+            n_dest_ahead: int, n_dest_behind: int,
+            is_acceleration_optimal: bool, are_vehicles_cooperative: bool
     ) -> LaneChangeScenario:
         lc_veh_type = fsv.OptimalControlVehicle
         scenario = cls(lc_veh_type, n_platoon, n_orig_ahead,
                        n_orig_behind, n_dest_ahead, n_dest_behind,
-                       is_acceleration_optimal)
+                       is_acceleration_optimal, are_vehicles_cooperative)
         return scenario
 
     @classmethod
@@ -387,7 +397,7 @@ class LaneChangeScenario(SimulationScenario):
         self.create_initial_state(v_orig_leader, v_dest_leader, delta_x)
 
     def create_initial_state(self, v_orig: float, v_dest: float,
-                             delta_x: dict[str, float]):
+                             delta_x: Mapping[str, float]):
 
         # Initial states
         v0_array = ([v_orig] * self.n_per_lane[0]
@@ -441,7 +451,7 @@ class LaneChangeScenario(SimulationScenario):
         time = np.arange(0, final_time + dt, dt)
         self.vehicle_group.prepare_to_start_simulation(len(time))
         analysis.plot_initial_state(self.response_to_dataframe())
-        # self.make_control_centralized()
+        self.make_control_centralized()
         for i in range(len(time) - 1):
             if np.abs(time[i] - self.lc_intention_time) < dt / 10:
                 self.vehicle_group.set_vehicles_lane_change_direction(

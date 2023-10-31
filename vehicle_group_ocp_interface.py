@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Union
+from typing import Callable, Iterable, Mapping, Union
 import warnings
 
 import numpy as np
@@ -34,15 +34,13 @@ def vehicle_output(t, x, u, params):
 class VehicleGroupInterface:
     """ Class to help manage groups of vehicles """
 
-    def __init__(self, vehicles: dict[int, base.BaseVehicle],
-                 controlled_veh_ids: set[int], ego_id: int = None):
+    def __init__(self, vehicles: Mapping[int, base.BaseVehicle],
+                 ego_id: int = None):
         """
 
         :param vehicles: All simulation vehicles
         :param ego_id: If given, assumes this vehicle as the center of
          the system, i.e., its (x, y) = (0, 0)
-        :param controlled_veh_ids: Ids of vehicles controlled by the optimal
-         controller
         """
         self.vehicles: dict[int, base.BaseVehicleInterface] = {}
         # Often, we need to iterate over all vehicles in the order they were
@@ -57,8 +55,7 @@ class VehicleGroupInterface:
         # vector
         self.input_idx_map: dict[int, int] = {}
 
-        self.create_vehicle_interfaces(vehicles, controlled_veh_ids,
-                                       ego_id)
+        self.create_vehicle_interfaces(vehicles, ego_id)
 
     def get_input_limits(self):
         lower_bounds = []
@@ -163,6 +160,9 @@ class VehicleGroupInterface:
         return states[-1]
 
     def set_mode_sequence(self, mode_sequence: som.ModeSequence):
+        # optimal_veh_ids = [veh.get_id() for veh in self.vehicles.values()
+        #                    if veh.is_long_control_optimal()]
+        # mode_sequence.remove_leader_from_modes(optimal_veh_ids)
         sv_sequences = mode_sequence.to_sv_sequence()
         for foll_id, sequence in sv_sequences.items():
             self.vehicles[foll_id].set_leader_sequence(sequence)
@@ -177,14 +177,11 @@ class VehicleGroupInterface:
         return input_names
 
     def create_vehicle_interfaces(
-            self, vehicles: dict[int, base.BaseVehicle],
-            controlled_veh_ids: set[int], ego_id: int = None
+            self, vehicles: Mapping[int, base.BaseVehicle], ego_id: int = None
     ) -> None:
         """
 
         :param vehicles: All simulation vehicles
-        :param controlled_veh_ids: Ids of vehicles controlled by the optimal
-         controller
         :param ego_id: If given, assumes this vehicle as the center of
          the system, i.e., its (x, y) = (0, 0)
         :return:
@@ -197,9 +194,7 @@ class VehicleGroupInterface:
 
         self.sorted_vehicle_ids = []
         for veh_id in sorted(vehicles.keys()):
-            vehicle_interface = vehicles[veh_id].get_ocp_interface(
-                veh_id in controlled_veh_ids
-            )
+            vehicle_interface = vehicles[veh_id].get_ocp_interface()
             vehicle_interface.shift_initial_state(shift_map)
             self.sorted_vehicle_ids.append(vehicle_interface.get_id())
             self.vehicles[veh_id] = vehicle_interface
@@ -284,13 +279,11 @@ class VehicleGroupInterface:
             veh = self.vehicles[veh_id]
             if veh.n_inputs == 0:
                 continue
-            elif veh.is_long_control_optimal():
-                veh_costs.extend([accel_cost, phi_cost])
-            else:
-                # if accel_cost > 0:
-                #     warnings.warn('Trying to pass non-zero accel cost to a '
-                #                   'vehicle with feedback acceleration. '
-                #                   'Accel cost being ignored')
+            # TODO: challenge here. This works for the OPC solver, and should
+            #  work for our cost computation over the fb solution too
+            if veh.is_long_control_optimal():
+                veh_costs.append(accel_cost)
+            if veh.is_lat_control_optimal():
                 veh_costs.append(phi_cost)
 
         return np.diag(veh_costs)
@@ -323,7 +316,7 @@ class VehicleGroupInterface:
                                                     leader_states))
         return np.array(dxdt + [1])  # time is the last state
 
-    def cost_function(self, controlled_veh_ids: list[int]) -> Callable:
+    def cost_function(self, controlled_veh_ids: Iterable[int]) -> Callable:
         tf = 0.0  # only relevant for desired final position
         x_ref = self.create_desired_state(tf)
         u_ref = self.get_desired_input()

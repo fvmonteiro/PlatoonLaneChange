@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pickle
 import warnings
-from typing import Union
+from typing import Mapping, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -243,9 +243,10 @@ def plot_platoon_lane_change(data: pd.DataFrame):
     fig.show()
 
 
-def plot_gap_errors(data: pd.DataFrame,
-                    vehicle_pairs: dict[Union[int, str], list[Union[int, str]]],
-                    ax=None):
+def plot_gap_errors(
+        data: pd.DataFrame,
+        vehicle_pairs: Mapping[Union[int, str], list[Union[int, str]]],
+        ax=None):
     if ax is None:
         fig, ax = plt.subplots()
 

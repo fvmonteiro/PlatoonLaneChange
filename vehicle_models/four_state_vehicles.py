@@ -8,7 +8,6 @@ import numpy as np
 import controllers.longitudinal_controller as long_ctrl
 import controllers.optimal_controller as opt_ctrl
 import controllers.vehicle_controller as veh_ctrl
-import operating_modes.system_operating_mode as som
 import operating_modes.concrete_vehicle_modes as modes
 import platoon
 import vehicle_models.base_vehicle as base
@@ -44,11 +43,11 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             self._external_input_idx['phi'] = (
                     self._external_input_idx.get('a', -1) + 1)
 
-        self._set_model(self._state_names, self._input_names)
+        self._set_model()
 
-        # Controllers
         self._controller = self._controller_type(
             self, self._can_change_lanes, self._has_open_loop_acceleration)
+        self._is_lane_change_safe = False
 
     def get_can_change_lanes(self) -> bool:
         return self._can_change_lanes
@@ -72,6 +71,9 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         if not self.is_in_a_platoon():
             return self.get_dest_lane_leader_id()
         return self.get_platoon().get_dest_lane_leader_id(self.get_id())
+
+    def get_is_lane_change_safe(self):
+        return self._is_lane_change_safe
 
     def set_platoon(self, new_platoon: platoon.Platoon) -> None:
         self._platoon = new_platoon
@@ -107,7 +109,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
                 self.get_id())
             self._incoming_vehicle_id[self._iter_counter] = incoming_vehicle_id
 
-    def update_target_leader(self, vehicles: dict[int, FourStateVehicle]
+    def update_target_leader(self, vehicles: Mapping[int, FourStateVehicle]
                              ) -> None:
         self._leader_id[self._iter_counter] = (
             self._controller.get_target_leader_id(vehicles))
@@ -118,15 +120,16 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     def is_platoon_leader(self) -> bool:
         return self.get_id() == self._platoon.get_platoon_leader_id()
 
-    def analyze_platoons(self, vehicles: dict[int, base.BaseVehicle]
-                         ) -> None:
+    def analyze_platoons(self, vehicles: Mapping[int, base.BaseVehicle],
+                         platoon_lane_change_strategy: int) -> None:
 
         # [Aug 23] We are only simulating simple scenarios. At the start of
         # the simulation, every vehicle will either create its own platoon
         # or join the platoon of the vehicle ahead. Vehicles do not leave or
         # join platoons afterward
 
-        if not self._is_connected:
+        # We're only interested in lane changing platoons
+        if not self._is_connected or not self._can_change_lanes:
             return
 
         is_leader_in_a_platoon = (
@@ -143,7 +146,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
                 self.set_platoon(leader_platoon)
         else:
             if not self.is_in_a_platoon():
-                self._create_platoon()
+                self._create_platoon(platoon_lane_change_strategy)
                 # self.set_platoon(platoon.Platoon(self))
 
         # if not self.is_in_a_platoon():
@@ -162,8 +165,36 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         #             leader_platoon.add_vehicle(self)
         #             self.set_platoon(leader_platoon)
 
+    def check_is_lane_change_safe(self,
+                                  vehicles: Mapping[int, base.BaseVehicle]):
+        is_safe_to_orig_lane_leader = True
+        if self.has_orig_lane_leader():
+            orig_lane_leader = vehicles[self.get_orig_lane_leader_id()]
+            is_safe_to_orig_lane_leader = (
+                ClosedLoopVehicle.is_gap_safe_for_lane_change(
+                    orig_lane_leader, self))
+
+        is_safe_to_dest_lane_leader = True
+        if self.has_dest_lane_leader():
+            dest_lane_leader = vehicles[self.get_dest_lane_leader_id()]
+            is_safe_to_dest_lane_leader = (
+                ClosedLoopVehicle.is_gap_safe_for_lane_change(
+                    dest_lane_leader, self))
+
+        is_safe_to_dest_lane_follower = True
+        if self.has_dest_lane_follower():
+            dest_lane_follower = vehicles[self.get_dest_lane_follower_id()]
+            is_safe_to_dest_lane_follower = (
+                ClosedLoopVehicle.is_gap_safe_for_lane_change(
+                    self, dest_lane_follower))
+
+        self._is_lane_change_safe = (is_safe_to_orig_lane_leader
+                                     and is_safe_to_dest_lane_leader
+                                     and is_safe_to_dest_lane_follower)
+        return self._is_lane_change_safe
+
     def _determine_inputs(self, open_loop_controls: np.ndarray,
-                          vehicles: dict[int, FourStateVehicle]):
+                          vehicles: Mapping[int, FourStateVehicle]):
         accel, phi = self._controller.determine_inputs(open_loop_controls,
                                                        vehicles)
         self._inputs[self._input_idx['a']] = accel
@@ -184,7 +215,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         for i_name, i_idx in self._external_input_idx.items():
             self._inputs[self._input_idx[i_name]] = optimal_inputs[i_idx]
 
-    def _create_platoon(self):
+    def _create_platoon(self, platoon_lane_change_strategy: int):
         pass  # self.set_platoon(platoon.Platoon())
 
 
@@ -201,7 +232,7 @@ class OpenLoopVehicle(FourStateVehicle):
         super().__init__(can_change_lanes, has_open_loop_acceleration,
                          is_connected)
 
-    def update_mode(self, vehicles: dict[int, base.BaseVehicle]):
+    def update_mode(self, vehicles: Mapping[int, base.BaseVehicle]):
         pass
 
 
@@ -243,31 +274,35 @@ class OptimalControlVehicle(FourStateVehicle):
             self._is_connected)
         self.copy_attributes(new_vehicle, initial_state)
         new_vehicle._platoon = self.get_platoon()
+        new_vehicle._desired_future_follower_id = (
+            self._desired_future_follower_id)
         return new_vehicle
 
     def make_closed_loop_copy(self, initial_state=None) -> ClosedLoopVehicle:
         new_vehicle = ClosedLoopVehicle(
             self._can_change_lanes, False, self._is_connected)
         self.copy_attributes(new_vehicle, initial_state)
+        new_vehicle._desired_future_follower_id = (
+            self._desired_future_follower_id)
         return new_vehicle
 
     def get_intermediate_steps_data(self):
         return self.get_opt_controller().get_data_per_iteration()
 
-    def update_mode(self, vehicles: dict[int, base.BaseVehicle]):
+    def update_mode(self, vehicles: Mapping[int, base.BaseVehicle]):
         if self.has_lane_change_intention():
             self._mode.handle_lane_changing_intention(vehicles)
         else:
             self._mode.handle_lane_keeping_intention(vehicles)
 
-    def can_start_lane_change(self, vehicles: dict[int, base.BaseVehicle]
+    def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]
                               ) -> bool:
         if self.get_opt_controller().has_solution():
             return True
 
         if self.is_in_a_platoon():
             dest_lane_veh_ids = [veh.get_id() for veh in vehicles.values()
-                                 if veh.get_current_lane() == self.target_lane]
+                                 if veh.get_current_lane() == self._target_lane]
             self.get_opt_controller().\
                 set_platoon_formation_constraint_parameters(
                 self.get_platoon().get_vehicle_ids(), dest_lane_veh_ids
@@ -280,7 +315,7 @@ class OptimalControlVehicle(FourStateVehicle):
         return self.get_opt_controller().has_solution()
 
     def can_start_lane_change_with_checks(
-            self, vehicles: dict[int, base.BaseVehicle]) -> bool:
+            self, vehicles: Mapping[int, base.BaseVehicle]) -> bool:
         if self.get_opt_controller().has_solution():
             return True
 
@@ -313,14 +348,15 @@ class OptimalControlVehicle(FourStateVehicle):
         delta_t = self.get_current_time() - self._lc_start_time
         return delta_t <= self.get_opt_controller().get_time_horizon()
 
-    def _create_platoon(self) -> None:
-        self.set_platoon(platoon.OptimalPlatoon(self))
+    def _create_platoon(self, platoon_lane_change_strategy: int) -> None:
+        self.set_platoon(platoon.OptimalPlatoon(self,
+                                                platoon_lane_change_strategy))
 
-    def guess_mode_sequence(self, mode_sequence: som.ModeSequence):
-        if self.is_in_a_platoon():
-            self.get_platoon().guess_mode_sequence(mode_sequence)
-        else:
-            super().guess_mode_sequence(mode_sequence)
+    # def guess_mode_sequence(self, mode_sequence: som.ModeSequence):
+    #     if self.is_in_a_platoon():
+    #         self.get_platoon().guess_mode_sequence(mode_sequence)
+    #     else:
+    #         super().guess_mode_sequence(mode_sequence)
 
 
 class ClosedLoopVehicle(FourStateVehicle):
@@ -336,7 +372,6 @@ class ClosedLoopVehicle(FourStateVehicle):
         super().__init__(can_change_lanes, has_open_loop_acceleration,
                          is_connected)
         self.set_mode(modes.CLLaneKeepingMode())
-        self._is_lane_change_safe = False
 
     def get_platoon(self) -> Union[None, platoon.ClosedLoopPlatoon]:
         try:
@@ -344,7 +379,7 @@ class ClosedLoopVehicle(FourStateVehicle):
         except AttributeError:
             return None
 
-    def update_mode(self, vehicles: dict[int, base.BaseVehicle]):
+    def update_mode(self, vehicles: Mapping[int, base.BaseVehicle]):
         if self.has_lane_change_intention():
             self._mode.handle_lane_changing_intention(vehicles)
         else:
@@ -355,37 +390,6 @@ class ClosedLoopVehicle(FourStateVehicle):
         if self.check_is_lane_change_safe(vehicles):
             return (not self.is_in_a_platoon()
                     or self.get_platoon().can_start_lane_change(self.get_id()))
-
-    def check_is_lane_change_safe(self,
-                                  vehicles: Mapping[int, base.BaseVehicle]):
-        is_safe_to_orig_lane_leader = True
-        if self.has_orig_lane_leader():
-            orig_lane_leader = vehicles[self.get_orig_lane_leader_id()]
-            is_safe_to_orig_lane_leader = (
-                ClosedLoopVehicle.is_gap_safe_for_lane_change(
-                    orig_lane_leader, self))
-
-        is_safe_to_dest_lane_leader = True
-        if self.has_dest_lane_leader():
-            dest_lane_leader = vehicles[self.get_dest_lane_leader_id()]
-            is_safe_to_dest_lane_leader = (
-                ClosedLoopVehicle.is_gap_safe_for_lane_change(
-                    dest_lane_leader, self))
-
-        is_safe_to_dest_lane_follower = True
-        if self.has_dest_lane_follower():
-            dest_lane_follower = vehicles[self.get_dest_lane_follower_id()]
-            is_safe_to_dest_lane_follower = (
-                ClosedLoopVehicle.is_gap_safe_for_lane_change(
-                    self, dest_lane_follower))
-
-        self._is_lane_change_safe = (is_safe_to_orig_lane_leader
-                                     and is_safe_to_dest_lane_leader
-                                     and is_safe_to_dest_lane_follower)
-        return self._is_lane_change_safe
-
-    def get_is_lane_change_safe(self):
-        return self._is_lane_change_safe
 
     def is_lane_change_complete(self):
         return (np.abs(self.get_y() - self.get_target_y()) < 1e-2
@@ -404,13 +408,13 @@ class ClosedLoopVehicle(FourStateVehicle):
             following_vehicle.get_vel())
         return gap + margin >= safe_gap
 
-    def _create_platoon(self) -> None:
-        self.set_platoon(platoon.ClosedLoopPlatoon(self))
+    def _create_platoon(self, platoon_lane_change_strategy: int) -> None:
+        self.set_platoon(platoon.ClosedLoopPlatoon(
+            self, platoon_lane_change_strategy))
 
 
 class FourStateVehicleInterface(base.BaseVehicleInterface, ABC):
     _state_names = ['x', 'y', 'theta', 'v']
-    # _input_names = ['a', 'phi']
 
     def __init__(self, vehicle: FourStateVehicle):
         super().__init__(vehicle)
