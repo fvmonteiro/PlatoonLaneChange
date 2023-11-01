@@ -32,7 +32,13 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
     def get_has_open_loop_acceleration(self) -> bool:
         return False
 
-    def get_vel(self):
+    def get_optimal_input_history(self) -> np.ndarray:
+        return self.get_input_history()
+
+    def get_external_input_idx(self) -> dict[str, int]:
+        return self._input_idx
+
+    def get_vel(self) -> float:
         try:
             return self.get_an_input_by_name('v')
         except AttributeError:

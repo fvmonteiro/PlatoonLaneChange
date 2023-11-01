@@ -81,13 +81,19 @@ class VehicleGroup:
                 inputs.append(self.vehicles[veh_id].get_input_history())
         return np.vstack(inputs)
 
-    def get_all_optimal_inputs(
-            self, selected_vehicles_ids: Iterable[int] = None) -> np.ndarray:
+    def get_selected_inputs(
+            self, vehicle_inputs_map: Mapping[int, Iterable[str]] = None
+    ) -> np.ndarray:
         inputs = []
         for veh_id in self.sorted_vehicle_ids:
-            if (selected_vehicles_ids is None
-                    or veh_id in selected_vehicles_ids):
-                inputs.append(self.vehicles[veh_id].get_input_history())
+            vehicle = self.vehicles[veh_id]
+            input_history = vehicle.get_input_history()
+            if vehicle_inputs_map is None:
+                inputs.append(input_history)
+            elif veh_id in vehicle_inputs_map:
+                for input_name in vehicle_inputs_map[veh_id]:
+                    inputs.append(input_history[
+                                      vehicle.get_idx_of_input(input_name)])
         return np.vstack(inputs)
 
     def get_mode_sequence(self) -> som.ModeSequence:

@@ -97,13 +97,16 @@ class BaseVehicle(ABC):
             setattr(vehicle_to, attr_name, getattr(vehicle_from, attr_name))
         vehicle_to.copy_initial_state(vehicle_from.get_states())
 
-    @classmethod
-    def get_accel_idx(cls):
-        return cls._input_idx['a']
+    def get_idx_of_input(self, name: str) -> int:
+        return self._input_idx[name]
 
-    @classmethod
-    def get_phi_idx(cls):
-        return cls._input_idx['phi']
+    # @classmethod
+    # def get_accel_idx(cls):
+    #     return cls.get_idx_of_input('a')
+    #
+    # @classmethod
+    # def get_phi_idx(cls):
+    #     return cls.get_idx_of_input('phi')
 
     def get_id(self) -> int:
         return self._id
@@ -163,6 +166,14 @@ class BaseVehicle(ABC):
 
     def get_input_history(self) -> np.ndarray:
         return self._inputs_history
+
+    @abstractmethod
+    def get_external_input_idx(self) -> dict[str, int]:
+        pass
+
+    @abstractmethod
+    def get_optimal_input_history(self) -> np.ndarray:
+        pass
 
     def get_derivatives(self) -> np.ndarray:
         return self._derivatives

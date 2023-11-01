@@ -215,7 +215,7 @@ class VehicleOptimalController:
 
         # state_guess, input_guess = (self.create_initial_guess(vehicles)
         #                             if self.provide_initial_guess else None)
-        mode_sequence_guess, state_guess, input_guess = (
+        mode_sequence_guess, trajectory_guess = (
             self._create_initial_mode_guess(vehicles, plot_result=True))
         converged = False
         counter = 0
@@ -230,7 +230,7 @@ class VehicleOptimalController:
 
             print("Calling ocp solver...")
             start_time = time.time()
-            self._solve_ocp((state_guess, input_guess))
+            self._solve_ocp(trajectory_guess)
             solve_time = time.time() - start_time
 
             # Temp: just checking what the optimizer "sees"
@@ -254,9 +254,8 @@ class VehicleOptimalController:
             print("Converged?", converged)
             mode_sequence_guess = output_sequence
             if self.jumpstart_next_solver_call and self.ocp_result.success:
-                input_guess = self.ocp_result.inputs
-                state_guess = self.ocp_result.states
-                # initial_guess = (last_states, last_input)
+                trajectory_guess = (self.ocp_result.states,
+                                    self.ocp_result.inputs)
 
     def _set_ocp_configuration(self):
         self._set_ocp_dynamics()
@@ -314,8 +313,9 @@ class VehicleOptimalController:
         )
 
     def _create_initial_mode_guess(
-            self, vehicles: Mapping[int, base.BaseVehicle], plot_result: bool = False
-    ) -> tuple[som.ModeSequence, np.ndarray, np.ndarray]:
+            self, vehicles: Mapping[int, base.BaseVehicle],
+            plot_result: bool = False
+    ) -> tuple[som.ModeSequence, tuple[np.ndarray, np.ndarray]]:
         if self.has_initial_mode_guess:
             # TODO: in this case we could also use the states and inputs
             #  as initial guess
@@ -326,18 +326,23 @@ class VehicleOptimalController:
                 veh_id for veh_id in self._controlled_veh_ids
                 if vehicles[veh_id].get_has_open_loop_acceleration()]
             mode_sequence.remove_leader_from_modes(optimal_veh_ids)
+
             states = cl_simulation.get_all_states()
-            inputs = cl_simulation.get_all_inputs(self._controlled_veh_ids)
+            vehicle_input_map = {
+                veh_id: vehicles[veh_id].get_external_input_idx()
+                for veh_id in self._controlled_veh_ids}
+            inputs = cl_simulation.get_selected_inputs(vehicle_input_map)
             sampling = int(self.discretization_step // self._internal_sim_dt)
             states = states[:, [i for i in range(0, states.shape[1], sampling)]]
             inputs = inputs[:, [i for i in range(0, inputs.shape[1], sampling)]]
+            trajectory_guess = states, inputs
         else:
             mode_sequence = som.ModeSequence()
             mode_sequence.add_mode(0.0, som.SystemMode(vehicles))
-            states, inputs = (self.create_initial_guess(vehicles)
-                              if self.provide_initial_guess else None)
+            trajectory_guess = (self.create_initial_guess(vehicles)
+                                if self.provide_initial_guess else None)
 
-        return mode_sequence, states, inputs
+        return mode_sequence, trajectory_guess
 
     def _set_ocp_dynamics(self):
         params = {'vehicle_group_interface': self._ocp_interface}
@@ -481,12 +486,13 @@ class VehicleOptimalController:
                 occ.OptimalControlIterationResult.copy_original_result(result)
             )
         else:
-            # self.ocp_result = (
-            #     self._cost_with_tracker.get_best_iteration_result()
-            # )
-            # print('Using input from the minimum cost feasible iteration.\n'
-            #       'Iteration: {}. Cost: {}'.format(self.ocp_result.iteration,
-            #                                        self.ocp_result.cost))
+            if self.has_initial_mode_guess or self.provide_initial_guess:
+                self.ocp_result = (
+                    self._cost_with_tracker.get_best_iteration_result()
+                )
+                print('Using input from the minimum cost feasible iteration.\n'
+                      f'Iteration: {self.ocp_result.iteration}. '
+                      f'Cost: {self.ocp_result.cost}')
             self.ocp_result = (
                 self._cost_with_tracker.get_last_iteration_result()
             )
@@ -529,9 +535,14 @@ class VehicleOptimalController:
                 veh_group.simulate_one_time_step(sim_time[i + 1])
             # Check results
             success = veh_group.check_lane_change_success()
+            vehicle_input_map = {
+                veh_id: vehicles[veh_id].get_external_input_idx()
+                for veh_id in self._controlled_veh_ids}
+            relevant_inputs = veh_group.get_selected_inputs(vehicle_input_map)
             r_cost, t_cost = self._cost_with_tracker.compute_simulation_cost(
                 veh_group.get_all_states(),
-                veh_group.get_all_inputs(self._controlled_veh_ids), sim_time)
+                relevant_inputs,
+                sim_time)
             print(f'Strategy {lc_strategy} successful? {success}. '
                   f'Cost: {r_cost:.2f}(running) + {t_cost:.2f}(terminal) = '
                   f'{r_cost + t_cost:.2f}')
@@ -650,8 +661,11 @@ class VehicleOptimalController:
             self.initial_acceleration_guess, as_dict=True)
         for i in range(1, len(sim_time)):
             vehicle_group.simulate_one_time_step(sim_time[i], input_guess)
-        return (vehicle_group.get_all_states(),
-                vehicle_group.get_all_inputs(self._controlled_veh_ids))
+        vehicle_input_map = {
+            veh_id: vehicles[veh_id].get_external_input_idx()
+            for veh_id in self._controlled_veh_ids}
+        optimal_inputs = vehicle_group.get_selected_inputs(vehicle_input_map)
+        return vehicle_group.get_all_states(), optimal_inputs
 
     def _log_results(self, counter: int, input_sequence: str,
                      output_sequence: str, solve_time: float,

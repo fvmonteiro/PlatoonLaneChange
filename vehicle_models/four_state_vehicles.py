@@ -36,6 +36,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
 
         self._can_change_lanes = can_change_lanes
         self._has_open_loop_acceleration = has_open_loop_acceleration
+        # TODO: bad naming.
         self._external_input_idx = {}
         if self._has_open_loop_acceleration:
             self._external_input_idx['a'] = 0
@@ -66,6 +67,12 @@ class FourStateVehicle(base.BaseVehicle, ABC):
 
     def get_external_input_idx(self) -> dict[str, int]:
         return self._external_input_idx
+
+    def get_optimal_input_history(self) -> np.ndarray:
+        ret = []
+        for key in self._external_input_idx:
+            ret.append(self._inputs_history[self._input_idx[key]])
+        return np.array(ret)
 
     def get_desired_dest_lane_leader_id(self) -> int:
         if not self.is_in_a_platoon():

@@ -257,14 +257,14 @@ class LaneChangeScenario(SimulationScenario):
                                   is_connected=are_vehicles_cooperative) for _
             in range(n_orig_behind)]
         orig_lane_vehs = vehicles_ahead + lc_vehs + vehicles_behind
-        # dest_lane_vehs = [
-        #     fsv.ClosedLoopVehicle(can_change_lanes=False,
-        #                           is_connected=are_vehicles_cooperative) for _
-        #     in range(n_dest_ahead + n_dest_behind)]
         dest_lane_vehs = [
-            fsv.OptimalControlVehicle(can_change_lanes=False,
-                                      is_connected=are_vehicles_cooperative)
-            for _ in range(n_dest_ahead + n_dest_behind)]
+            fsv.ClosedLoopVehicle(can_change_lanes=False,
+                                  is_connected=are_vehicles_cooperative) for _
+            in range(n_dest_ahead + n_dest_behind)]
+        # dest_lane_vehs = [
+        #     fsv.OptimalControlVehicle(can_change_lanes=False,
+        #                               is_connected=are_vehicles_cooperative)
+        #     for _ in range(n_dest_ahead + n_dest_behind)]
         self.n_per_lane = [len(orig_lane_vehs), len(dest_lane_vehs)]
         self.vehicle_group.fill_vehicle_array(orig_lane_vehs + dest_lane_vehs)
 

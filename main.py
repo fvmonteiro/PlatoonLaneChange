@@ -189,9 +189,9 @@ def mode_convergence_base_tests():
 
 
 def main():
-    n_platoon = 1
-    n_orig_ahead, n_orig_behind = 0, 0
-    n_dest_ahead, n_dest_behind = 0, 1
+    n_platoon = 2
+    n_orig_ahead, n_orig_behind = 1, 0
+    n_dest_ahead, n_dest_behind = 1, 1
 
     constants.INCREASE_LC_TIME_HEADWAY = False
     constants.Configuration.set_solver_parameters(
@@ -206,8 +206,8 @@ def main():
         jumpstart_next_solver_call=True, has_initial_mode_guess=True
     )
     constants.Configuration.set_scenario_parameters(
-        v_ref={'lo': 10., 'ld': 10., 'p': 10., 'fo': 10., 'fd': 10.},
-        delta_x={'lo': 0., 'ld': -6., 'p': 0., 'fd': 4.},
+        v_ref={'lo': 10., 'ld': 10., 'p': 12., 'fo': 10., 'fd': 10.},
+        delta_x={'lo': 0., 'ld': 2., 'p': 0., 'fd': 2.},
         platoon_strategies='all'
     )
 

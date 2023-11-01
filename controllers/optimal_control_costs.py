@@ -162,7 +162,7 @@ class OCPCostTracker:
         # Store min cost values
         iteration_cost = running_cost + terminal_cost
         if (iteration_cost < self._best_cost
-                and self.check_feasibility(states, inputs)):
+                and True):  # self.check_feasibility(states, inputs)):
             self._best_cost = iteration_cost
             iteration = len(self._running_cost_per_iteration[-1]) - 1
             self._best_iteration[-1] = iteration

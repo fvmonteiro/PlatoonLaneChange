@@ -277,10 +277,8 @@ class VehicleGroupInterface:
         veh_costs = []
         for veh_id in self.sorted_vehicle_ids:
             veh = self.vehicles[veh_id]
-            if veh.n_inputs == 0:
-                continue
-            # TODO: challenge here. This works for the OPC solver, and should
-            #  work for our cost computation over the fb solution too
+            # if veh.n_inputs == 0:
+            #     continue
             if veh.is_long_control_optimal():
                 veh_costs.append(accel_cost)
             if veh.is_lat_control_optimal():
