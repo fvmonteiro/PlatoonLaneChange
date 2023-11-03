@@ -4,12 +4,8 @@ from typing import Mapping, Union
 
 import numpy as np
 
-INCREASE_LC_TIME_HEADWAY = False
 LANE_WIDTH = 4  # [m]
-# Lane Keeping [s]
-LK_TIME_HEADWAY = 1.0
-# Lane Changing [s]
-LC_TIME_HEADWAY = LK_TIME_HEADWAY + (0.2 if INCREASE_LC_TIME_HEADWAY else 0)
+TIME_HEADWAY = 1.0  # [s]
 STANDSTILL_DISTANCE = 1.0  # [m]
 
 UNIT_MAP = {'t': 's', 'x': 'm', 'y': 'm', 'theta': 'rad', 'v': 'm/s',
@@ -33,8 +29,9 @@ class Configuration:
     time_horizon: float = 10.0  # [s]
     has_terminal_lateral_constraints: bool = False
     has_safety_lateral_constraint: bool = False
-    has_initial_state_guess: bool = False
-    initial_acceleration_guess: Union[str, float] = 0.0
+    initial_input_guess: Union[None, str, float] = None
+    # has_initial_state_guess: bool = False
+    # initial_acceleration_guess: Union[str, float] = 0.0
     jumpstart_next_solver_call: bool = False
     has_initial_mode_guess: bool = False
 
@@ -44,6 +41,7 @@ class Configuration:
     delta_x = {'lo': 0.0, 'ld': 0.0, 'p': 0.0, 'fo': 0.0, 'fd': 0.0}
     platoon_strategies = [0]  # 1: synch, 2: leader first, 3: last first,
     # 4: leader first reverse
+    increase_lc_time_headway: bool = False
 
     @staticmethod
     def set_solver_parameters(
@@ -73,8 +71,9 @@ class Configuration:
             max_iter: int = None, time_horizon: float = None,
             has_terminal_lateral_constraints: bool = False,
             has_lateral_safety_constraint: bool = False,
-            provide_initial_guess: bool = False,
-            initial_acceleration_guess: Union[str, float] = 0.0,
+            initial_input_guess: Union[str, float, None] = None,
+            # provide_initial_guess: bool = False,
+            # initial_acceleration_guess: Union[str, float, None] = 0.0,
             jumpstart_next_solver_call: bool = False,
             has_initial_mode_guess: bool = False
     ) -> None:
@@ -90,15 +89,17 @@ class Configuration:
         :param has_lateral_safety_constraint: Whether to include a constraint to
          keep the lane changing vehicles between y(t0)-1 and y(tf)+1. This can
          sometimes speed up simulations or prevent erratic behavior.
-        :param provide_initial_guess: If true, simulates the system given the
-         initial input guess and passes an (inputs, states) tuple as initial
-         guess to the solver. It only affects the first call to the solver if
-         jumpstart_next_solver_call is True.
-        :param initial_acceleration_guess: Initial guess of the optimal
-         acceleration. We can provide the exact value or one of the strings
-         'zero', 'max' (max acceleration), 'min' (max brake). The same value
-         is used for the entire time horizon. It only affects the first call to
+        :param initial_input_guess: How to create the initial guess (a
+         state/input tuple) for the solver. It only affects the first call to
          the solver if jumpstart_next_solver_call is True.
+         None: provides no initial guess to the solver, i.e., the
+         initial input/state tuple is all zeros.
+         Numerical value: Assumes all controlled vehicles apply the given
+         acceleration value during the entire time horizon
+         'max'/'min'/'zero': Similar to a numerical value but uses the
+         maximum/minimum/zero acceleration
+         'mode': Uses the state/input tuple that generates the initial mode
+         guess (see has_initial_mode_guess)
         :param jumpstart_next_solver_call: Whether to use the solution of the
          previous call to the solver as starting point for the next call.
         :param has_initial_mode_guess: If True, runs the system with closed
@@ -106,19 +107,18 @@ class Configuration:
          initial guess for the optimal controller
         :return:
         """
+        if not has_initial_mode_guess and initial_input_guess == 'mode':
+            raise ValueError("has_initial_mode_guess must be set to True " 
+                             "if initial_input_guess is set to 'mode'")
         if max_iter:
             Configuration.max_iter = max_iter
         if time_horizon:
             Configuration.time_horizon = time_horizon
-
         Configuration.has_terminal_lateral_constraints = (
             has_terminal_lateral_constraints)
         Configuration.has_safety_lateral_constraint = (
             has_lateral_safety_constraint)
-        Configuration.has_initial_state_guess = (
-            provide_initial_guess)
-        Configuration.initial_acceleration_guess = (
-            initial_acceleration_guess)
+        Configuration.initial_input_guess = initial_input_guess
         Configuration.jumpstart_next_solver_call = (
             jumpstart_next_solver_call)
         Configuration.has_initial_mode_guess = has_initial_mode_guess
@@ -127,7 +127,8 @@ class Configuration:
     def set_scenario_parameters(
             v_ref: Mapping[str, float] = None,
             delta_x: Mapping[str, float] = None,
-            platoon_strategies: Union[list[int], int, str] = 1):
+            platoon_strategies: Union[list[int], int, str] = None,
+            increase_lc_time_headway: bool = False):
         """
 
         :param v_ref: Free-flow speed for all vehicles. The accepted keys are:
@@ -141,6 +142,8 @@ class Configuration:
          Accepted numerical values are 0: no platoon strategy, 1: synch,
          2: leader first, 3: last first, 4: leader first reverse. The only
          accepted string is 'all'.
+        :param increase_lc_time_headway: If True, the safe time headway for
+         lane changing is greater than the safe time headway for lane keeping.
         :return:
         """
         if v_ref:
@@ -149,8 +152,16 @@ class Configuration:
         if delta_x:
             for key, value in delta_x.items():
                 Configuration.delta_x[key] = value
+        if platoon_strategies is None:
+            platoon_strategies = 0
         if isinstance(platoon_strategies, str):
             platoon_strategies = [i for i in range(5)]
         elif np.isscalar(platoon_strategies):
             platoon_strategies = [platoon_strategies]
         Configuration.platoon_strategies = platoon_strategies
+        Configuration.increase_lc_time_headway = increase_lc_time_headway
+
+
+def get_lane_changing_time_headway() -> float:
+    return TIME_HEADWAY + (0.2 if Configuration.increase_lc_time_headway
+                           else 0.)

@@ -416,7 +416,7 @@ def quadratic_cost_gradient(n_states: int, n_inputs: int, n_times: int, Q, R,
 def _process_matrix_sizes(n_states: int, n_inputs: int, Q, R,
                           make_zero: bool = False):
     """
-    If make_zero True and the matrix is None, creates a matrix of zeros.
+    If make_zero is True and the matrix is None, creates a matrix of zeros.
     """
     if Q is not None:
         Q = np.atleast_2d(Q)

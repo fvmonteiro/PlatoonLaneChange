@@ -7,10 +7,8 @@ import warnings
 import numpy as np
 import pandas as pd
 
-import constants
-import constants as const
+import configuration as config
 import dynamics
-# import platoon
 from operating_modes import system_operating_mode as som
 import operating_modes.base_operating_modes as modes
 
@@ -72,11 +70,11 @@ class BaseVehicle(ABC):
         self._desired_future_follower_id = -1
         # Note: safe time headway values are used to linearly overestimate
         # the nonlinear safe gaps
-        self.h_safe_lk = const.LK_TIME_HEADWAY
-        self.h_ref_lk = const.LK_TIME_HEADWAY + 0.1
-        self.h_safe_lc = const.LC_TIME_HEADWAY
-        self.h_ref_lc = const.LC_TIME_HEADWAY + 0.1
-        self.c = const.STANDSTILL_DISTANCE
+        self.h_safe_lk = config.TIME_HEADWAY
+        self.h_ref_lk = self.h_safe_lk + 0.1
+        self.h_safe_lc = config.get_lane_changing_time_headway()
+        self.h_ref_lc = self.h_safe_lc + 0.1
+        self.c = config.STANDSTILL_DISTANCE
 
         self._is_connected = is_connected
         self._is_verbose = True
@@ -147,13 +145,13 @@ class BaseVehicle(ABC):
         return self._inputs[self._input_idx[input_name]]
 
     def get_current_lane(self) -> int:
-        return round(self.get_y() / const.LANE_WIDTH)
+        return round(self.get_y() / config.LANE_WIDTH)
 
     def get_target_lane(self) -> int:
         return self._target_lane
 
     def get_target_y(self) -> float:
-        return self._target_lane * const.LANE_WIDTH
+        return self._target_lane * config.LANE_WIDTH
 
     def get_states(self) -> np.ndarray:
         return self._states.copy()
@@ -447,14 +445,14 @@ class BaseVehicle(ABC):
         new_dest_leader_id = -1
         new_dest_follower_id = -1
         if self.has_lane_change_intention():
-            y_target_lane = self._target_lane * const.LANE_WIDTH
+            y_target_lane = self._target_lane * config.LANE_WIDTH
             ego_x = self.get_x()
             dest_lane_follower_x = -np.inf
             dest_lane_leader_x = np.inf
             for other_vehicle in vehicles:
                 other_x = other_vehicle.get_x()
                 other_y = other_vehicle.get_y()
-                if np.abs(other_y - y_target_lane) < const.LANE_WIDTH / 2:
+                if np.abs(other_y - y_target_lane) < config.LANE_WIDTH / 2:
                     if ego_x <= other_x < dest_lane_leader_x:
                         dest_lane_leader_x = other_x
                         new_dest_leader_id = other_vehicle._id
@@ -851,7 +849,7 @@ class BaseVehicleInterface(ABC):
         return self.get_current_leader_id(time) >= 0
 
     def get_target_y(self) -> float:
-        return self.target_lane * const.LANE_WIDTH
+        return self.target_lane * config.LANE_WIDTH
 
     def is_long_control_optimal(self) -> bool:
         return 'a' in self._input_names or 'v' in self._input_names
@@ -879,7 +877,7 @@ class BaseVehicleInterface(ABC):
 
     def set_time_interval(self, time: float) -> None:
         if (np.abs(self._time - time)
-                >= constants.Configuration.discretization_step):
+                >= config.Configuration.discretization_step):
             self._time = time
             idx = np.searchsorted(self.ocp_mode_switch_times, time,
                                   side='right')
@@ -914,10 +912,10 @@ class BaseVehicleInterface(ABC):
     def compute_safe_gap(self, v_ego: float, safe_h: float) -> float:
         return safe_h * v_ego + self.base_vehicle.c
 
-    def compute_error_to_safe_gap(self, ego_states, leader_x,
-                                  has_lane_change_intention: bool) -> float:
-        gap = leader_x - self.select_state_from_vector(ego_states, 'x')
-        v_ego = self.select_state_from_vector(ego_states, 'v')
+    def compute_error_to_safe_gap(
+            self, x_ego: float, v_ego: float,
+            x_leader: float, has_lane_change_intention: bool) -> float:
+        gap = x_leader - x_ego
         if has_lane_change_intention:
             safe_gap = self.compute_lane_changing_safe_gap(v_ego)
         else:

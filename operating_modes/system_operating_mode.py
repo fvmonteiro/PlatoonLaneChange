@@ -113,7 +113,7 @@ SVSequence = List[Tuple[float, Dict[str, int]]]
 class ModeSequence:
 
     def __init__(self):
-        self.sequence: List[Tuple[float, SystemMode]] = []
+        self.sequence: list[tuple[float, SystemMode]] = []
 
     def __str__(self):
         return self.to_string(skip_lines=False)
@@ -133,6 +133,9 @@ class ModeSequence:
          considered the same.
         :return:
         """
+        self.remove_overlapping_modes(dt)
+        other.remove_overlapping_modes(dt)
+
         s1 = self.sequence
         s2 = other.sequence
         if len(s1) != len(s2):
@@ -153,21 +156,6 @@ class ModeSequence:
     def get_latest_mode(self) -> SystemMode:
         return self.sequence[-1][1]
 
-    def remove_leader_from_modes(self, vehicle_ids: Iterable[int]) -> None:
-        """
-        Empties (sets to -1) the field 'leader' for the selected vehicles on
-        all modes in the sequence.
-
-        Simulations with fully feedback controlled vehicles output the target
-        leader at every mode, but this is irrelevant to the optimal controller
-        and may delay the convergence over mode sequences.
-        :return:
-        """
-        for t, mode in self.sequence:
-            for veh in mode.mode.keys():
-                if veh in vehicle_ids:
-                    mode.mode[veh]['leader'] = -1
-
     def add_mode(self, time: float, mode: SystemMode):
         self.sequence.append((time, mode))
 
@@ -187,6 +175,54 @@ class ModeSequence:
         last_mode = self.get_latest_mode()
         new_mode = last_mode.create_altered_mode(mode_changes)
         self.add_mode(time, new_mode)
+
+    def remove_leader_from_modes(self, vehicle_ids: Iterable[int]) -> None:
+        """
+        Empties (sets to -1) the field 'leader' for the selected vehicles on
+        all modes in the sequence.
+
+        Simulations with fully feedback controlled vehicles output the target
+        leader at every mode, but this is irrelevant to the optimal controller
+        and may delay the convergence over mode sequences.
+        :return:
+        """
+        for t, mode in self.sequence:
+            for veh in mode.mode.keys():
+                if veh in vehicle_ids:
+                    mode.mode[veh]['leader'] = -1
+
+    def remove_overlapping_modes(self, dt):
+        """
+        Removes mode i if t_(i+1) - t_i < dt
+        :param dt:
+        :return:
+        """
+        to_be_removed = []
+        for i in range(len(self.sequence) - 1):
+            if self.sequence[i+1][0] - self.sequence[i][0] < dt:
+                to_be_removed.append(i)
+        self._remove_modes_by_idx(to_be_removed)
+        self.remove_repeated_modes()
+
+    def remove_repeated_modes(self):
+        """
+        Removes a mode if it is equal to the one before.
+        This should only (possibly) happen after removing overlapping modes
+        :return:
+        """
+        to_be_removed = []
+        for i in range(1, len(self.sequence)):
+            if self.sequence[i][1] == self.sequence[i-1][1]:
+                to_be_removed.append(i)
+        self._remove_modes_by_idx(to_be_removed)
+
+    def _remove_modes_by_idx(self, to_be_removed: Iterable[int]):
+        if to_be_removed:
+            s = [(self.sequence[i][0], str(self.sequence[i][1]))
+                 for i in to_be_removed]
+            print(f'Removing modes: {s} from mode sequence.')
+        self.sequence = [self.sequence[i] for i in range(len(self.sequence))
+                         if i not in to_be_removed]
 
     def to_sv_sequence(self) -> dict[int, SVSequence]:
         """

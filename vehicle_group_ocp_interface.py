@@ -6,6 +6,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
+import configuration
 from operating_modes import system_operating_mode as som
 import vehicle_models.base_vehicle as base
 
@@ -97,8 +98,12 @@ class VehicleGroupInterface:
                             f' {accel_guess}. Accepted values are zero, max, '
                             'min. Setting to zero.')
                         accel = 0.0
-                else:
+                elif accel_guess is not None:
                     accel = accel_guess
+                else:
+                    raise ValueError(
+                        'Trying to get initial acceleration guess, but '
+                        'initial_input_guess was set to None')
                 veh_desired_inputs[vehicle.optimal_input_idx['a']] = accel
             initial_guess_array.extend(veh_desired_inputs)
             initial_guess_dict[veh_id] = veh_desired_inputs
@@ -163,6 +168,8 @@ class VehicleGroupInterface:
         # optimal_veh_ids = [veh.get_id() for veh in self.vehicles.values()
         #                    if veh.is_long_control_optimal()]
         # mode_sequence.remove_leader_from_modes(optimal_veh_ids)
+        mode_sequence.remove_overlapping_modes(
+            configuration.Configuration.discretization_step)
         sv_sequences = mode_sequence.to_sv_sequence()
         for foll_id, sequence in sv_sequences.items():
             self.vehicles[foll_id].set_leader_sequence(sequence)
@@ -318,15 +325,14 @@ class VehicleGroupInterface:
         tf = 0.0  # only relevant for desired final position
         x_ref = self.create_desired_state(tf)
         u_ref = self.get_desired_input()
-        Q = self.create_state_cost_matrix(
-            y_cost=0.1, theta_cost=0., v_cost=0.1)
+        Q = self.create_state_cost_matrix(y_cost=0.1, theta_cost=0.,
+                                          v_cost=0.1)
         # Very specific to scenario with one platoon veh and fd
         # d = np.array([[1, 0, 0, 0, -1, 0, 0, -1]])
         # w_eg = 0.1
         # Q_eg = w_eg * np.matmul(d.transpose(), d)
         # Q += Q_eg
-        R = self.create_input_cost_matrix(accel_cost=0.1,
-                                          phi_cost=0.)
+        R = self.create_input_cost_matrix(accel_cost=0.1, phi_cost=0.)
 
         def support(states, inputs) -> float:
             t = self.get_time(states)
@@ -349,7 +355,7 @@ class VehicleGroupInterface:
         ego_veh = self.vehicles[ego_id]
         margin = 1e-3
 
-        def support1(states, inputs) -> float:
+        def to_lo(states, inputs) -> float:
             t = self.get_time(states)
             gap_error = self.compute_gap_error(
                     states, ego_id, ego_veh.get_orig_lane_leader_id(t),
@@ -357,7 +363,7 @@ class VehicleGroupInterface:
             phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
             return min(gap_error + margin, 0) ** 2 * phi
 
-        def support2(states, inputs) -> float:
+        def to_ld(states, inputs) -> float:
             t = self.get_time(states)
             gap_error = self.compute_gap_error(
                     states, ego_id, ego_veh.get_dest_lane_leader_id(t),
@@ -365,7 +371,7 @@ class VehicleGroupInterface:
             phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
             return min(gap_error + margin, 0) ** 2 * phi
 
-        def support3(states, inputs) -> float:
+        def to_fd(states, inputs) -> float:
             t = self.get_time(states)
             gap_error = self.compute_gap_error(
                     states, ego_id, ego_veh.get_dest_lane_follower_id(t),
@@ -373,7 +379,29 @@ class VehicleGroupInterface:
             phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
             return min(gap_error + margin, 0) ** 2 * phi
 
-        return [support1, support2, support3]
+        return [to_lo, to_ld, to_fd]
+
+    # def lane_changing_constraint_to_fd(self, ego_id: int) -> Callable:
+    #     ego_veh = self.vehicles[ego_id]
+    #     margin = 1e-3
+    #
+    #     def to_fd(states, inputs) -> float:
+    #         t = self.get_time(states)
+    #         foll_id = ego_veh.get_dest_lane_follower_id(t)
+    #         follower_veh = self.vehicles[foll_id]
+    #         x_follower = (
+    #             self.get_a_vehicle_state_by_id(foll_id, states, 'x'))
+    #         v_follower = (
+    #             self.get_a_vehicle_state_by_id(foll_id, states, 'v'))
+    #         x_leader = (
+    #             self.get_a_vehicle_state_by_id(ego_id, states, 'x'))
+    #         gap_error = follower_veh.compute_error_to_safe_gap(
+    #             x_follower, v_follower, x_leader, False)
+    #         phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
+    #         # theta = self.get_a_vehicle_state_by_id(ego_id, states, 'theta')
+    #         return min(gap_error + margin, 0) ** 2 * phi
+    #
+    #     return to_fd
 
     def vehicle_following_safety_constraint(self, ego_id: int) -> Callable:
         ego_veh = self.vehicles[ego_id]
@@ -413,13 +441,14 @@ class VehicleGroupInterface:
         else:
             follower_id, leader_id = ego_id, other_id
         follower_veh = self.vehicles[follower_id]
-        follower_states = (
-            self.get_vehicle_state_vector_by_id(
-                follower_id, states))
-        leader_x = (
+        x_follower = (
+            self.get_a_vehicle_state_by_id(follower_id, states, 'x'))
+        v_follower = (
+            self.get_a_vehicle_state_by_id(follower_id, states, 'v'))
+        x_leader = (
             self.get_a_vehicle_state_by_id(leader_id, states, 'x'))
         return follower_veh.compute_error_to_safe_gap(
-            follower_states, leader_x, is_follower_lane_changing)
+            x_follower, v_follower, x_leader, is_follower_lane_changing)
 
     def map_input_to_vehicle_ids(self, array) -> dict[int, np.ndarray]:
         """

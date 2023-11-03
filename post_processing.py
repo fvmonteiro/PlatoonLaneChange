@@ -1,6 +1,6 @@
 import pandas as pd
 
-import constants as const
+import configuration as config
 
 
 def compute_values_relative_to_other_vehicle(
@@ -70,4 +70,5 @@ def compute_all_relative_values(data: pd.DataFrame):
 
 
 def compute_default_safe_gap(vel):
-    return const.LC_TIME_HEADWAY * vel + const.STANDSTILL_DISTANCE
+    return (config.get_lane_changing_time_headway() * vel
+            + config.STANDSTILL_DISTANCE)

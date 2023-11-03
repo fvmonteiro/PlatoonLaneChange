@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-import constants as const
+import configuration as config
 import post_processing as pp
 
 
@@ -84,7 +84,7 @@ def plot_trajectory(data: pd.DataFrame):
         dt = 1.0  # [s]
     else:
         dt = 2.0
-    n = round(tf / dt) + 1
+    # n = round(tf / dt) + 1
     time = np.arange(data['t'].min(), tf + dt / 2, dt)
     # time = np.linspace(data['t'].min(), tf, n)
     step = round(dt / (data['t'].iloc[1] - data['t'].iloc[0]))
@@ -99,10 +99,10 @@ def plot_trajectory(data: pd.DataFrame):
                           x='x', y='y', marker='>', color=color, )
 
         ax[i].set_title('t = {}'.format(time[i]), loc='left')
-        ax[i].axhline(y=const.LANE_WIDTH / 2, linestyle='--', color='black')
+        ax[i].axhline(y=config.LANE_WIDTH / 2, linestyle='--', color='black')
         # ax[i].set_aspect('equal', adjustable='box')
         ax[i].set(xlim=(min_x - 2, max_x + 3),
-                  ylim=(-const.LANE_WIDTH / 2, 3 * const.LANE_WIDTH / 2))
+                  ylim=(-config.LANE_WIDTH / 2, 3 * config.LANE_WIDTH / 2))
         if i == len(time) - 1:
             ax[i].set(xlabel=_get_variable_with_unit('x'))
         else:
@@ -147,7 +147,7 @@ def plot_initial_and_final_states(data: pd.DataFrame, axis=None,
                        x='x', y='y', marker='>', color=color, alpha=0.6)
     min_y = data['y'].min()
     max_y = data['y'].max()
-    ax.axhline(y=const.LANE_WIDTH / 2, linestyle='--', color='black')
+    ax.axhline(y=config.LANE_WIDTH / 2, linestyle='--', color='black')
     ax.set(xlabel=_get_variable_with_unit('x'),
            ylabel=_get_variable_with_unit('y'),
            ylim=(min_y - 2, max_y + 2))
@@ -179,7 +179,7 @@ def plot_initial_state(data: pd.DataFrame, axis=None):
                    x='x', y='y', marker='>', color=color)
     min_y = data['y'].min()
     max_y = data['y'].max()
-    ax.axhline(y=const.LANE_WIDTH / 2, linestyle='--', color='black')
+    ax.axhline(y=config.LANE_WIDTH / 2, linestyle='--', color='black')
     ax.set(xlabel=_get_variable_with_unit('x'),
            ylabel=_get_variable_with_unit('y'),
            ylim=(min_y - 2, max_y + 2))
@@ -279,7 +279,7 @@ def plot_gap_errors(
     final_t = data['t'].max()
     ax.set(xlabel=_get_variable_with_unit('t'),
            ylabel=_get_variable_with_unit('gap_error'),
-           xlim=(0, final_t), ylim=(y_low, min(5, y_high)))
+           xlim=(0, final_t), ylim=(max(-5, y_low), min(5, y_high)))
 
 
 def plot_single_vehicle_lane_change_gap_errors(
@@ -327,7 +327,8 @@ def plot_single_vehicle_lane_change_gap_errors(
     final_t = data['t'].max()
     ax.set(xlabel=_get_variable_with_unit('t'),
            ylabel=_get_variable_with_unit('gap_error'),
-           xlim=(0, final_t), ylim=(y_low, min(5, y_high)))
+           xlim=(0, final_t), ylim=(max(-5, y_low), min(5, y_high))
+           )
 
 
 def plot_vehicle_following(data: pd.DataFrame):
@@ -407,20 +408,20 @@ def get_veh_data(data: pd.DataFrame, id_or_name: Union[int, str]
 
 def _get_variable_with_unit(variable: str):
     try:
-        return variable + ' [' + const.UNIT_MAP[variable] + ']'
+        return variable + ' [' + config.UNIT_MAP[variable] + ']'
     except KeyError:
         return variable
 
 
 def _get_color_by_name(veh_name: str):
     if veh_name == 'p1':
-        color = const.COLORS['dark_blue']
+        color = config.COLORS['dark_blue']
     elif veh_name == 'ego' or veh_name.startswith('p'):
-        color = const.COLORS['blue']
+        color = config.COLORS['blue']
     elif veh_name in {'lo', 'lo1', 'ld', 'ld1', 'fd', 'fd1'}:
-        color = const.COLORS['red']
+        color = config.COLORS['red']
     elif veh_name.startswith('ld') or veh_name.startswith('fd'):
-        color = const.COLORS['orange']
+        color = config.COLORS['orange']
     else:
-        color = const.COLORS['gray']
+        color = config.COLORS['gray']
     return color
