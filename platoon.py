@@ -420,6 +420,52 @@ class LeaderFirstReverseStrategy(LaneChangeStrategy):
     #     pass
 
 
+class BruteForceStrategy(LaneChangeStrategy):
+    """
+    Creates all vehicle merging orders and allows vehicles to try each
+    at a time
+    """
+
+    _id = 5
+
+    def __init__(self, platoon_vehicles: list[fsv.FourStateVehicle]):
+        super().__init__(platoon_vehicles)
+        current_path = []
+
+    def explore_order(self, veh_position: int,
+                      merging_order: list[int], gap_choice: list[bool],
+                      remaining_vehicles: set[int]):
+        veh_id = self.vehicles[veh_position].get_id()
+        remaining_vehicles.remove(veh_id)
+        self.explore_gap_choice(veh_position, True, merging_order,
+                                gap_choice, remaining_vehicles)
+        self.explore_gap_choice(veh_position, False, merging_order,
+                                gap_choice, remaining_vehicles)
+        remaining_vehicles.add(veh_id)
+
+    def explore_gap_choice(self, veh_position: int, overtake: bool,
+                           merging_order: list[int], gap_choice: list[bool],
+                           remaining_vehicles: set[int]):
+        if len(remaining_vehicles) == 0:
+            return
+        increment = 1
+        while (veh_position + increment < len(self.vehicles)
+               and (self.vehicles[veh_position + increment]
+                    not in remaining_vehicles)):
+            increment += 1
+        if veh_position + increment < len(self.vehicles):
+            self.explore_order(self.vehicles[veh_position + increment].get_id(),
+                               merging_order, gap_choice, remaining_vehicles)
+        decrement = 1
+        while (veh_position - decrement >= 0
+                and (self.vehicles[veh_position - decrement]
+                     not in remaining_vehicles)):
+            decrement += 1
+        if veh_position - decrement >= 0:
+            self.explore_order(self.vehicles[veh_position - decrement].get_id(),
+                               merging_order, gap_choice, remaining_vehicles)
+
+
 strategy_map = {
     IndividualStrategy.get_id(): IndividualStrategy,
     SynchronousStrategy.get_id(): SynchronousStrategy,

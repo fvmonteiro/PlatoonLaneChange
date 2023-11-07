@@ -2,7 +2,6 @@ import warnings
 import datetime
 import time
 
-
 import analysis
 import configuration
 import vehicle_models
@@ -43,34 +42,34 @@ def run_base_opc_scenario():
     # ]
     scenario.create_vehicle_group(vehicles)
     scenario.set_free_flow_speeds(v_ff)
-    scenario.set_boundary_conditions(tf)
+    scenario.create_initial_state()
+    scenario.set_desired_final_states(tf)
     scenario.solve()
-    scenario.run()
+    scenario.run(tf)
     scenario.save_response_data(trajectory_file_name)
     data = scenario.response_to_dataframe()
     analysis.plot_lane_change(data)
 
 
-def run_constraints_scenario(has_lo: bool, has_fo: bool, has_ld: bool,
-                             has_fd: bool):
-    tf = 10
-
+def run_with_external_controller(
+        n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
+        n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool,
+        are_vehicles_cooperative: bool):
     # Set-up
-    scenario = scenarios.LaneChangeWithConstraints(has_lo, has_fo,
-                                                   has_ld, has_fd)
-    scenario.set_boundary_conditions(tf)
+    tf = configuration.Configuration.time_horizon
+    scenario = scenarios.LaneChangeWithExternalController(
+        n_platoon, are_vehicles_cooperative)
+    scenario.create_initial_state(n_orig_ahead, n_orig_behind, n_dest_ahead,
+                                  n_dest_behind, is_acceleration_optimal)
+    scenario.set_desired_final_states(configuration.Configuration.time_horizon)
     # Solve
     print("Calling OCP solver")
     scenario.solve()
-    scenario.run()
-    # Check results
-    scenario.save_response_data(trajectory_file_name)
-    data = scenario.response_to_dataframe()
-    analysis.plot_constrained_lane_change(data, 'ego')
-    analysis.plot_constrained_lane_change(
-        scenario.ocp_simulation_to_dataframe(), 'ego')
-    analysis.compare_desired_and_actual_final_states(
-        scenario.boundary_conditions_to_dataframe(), data)
+    run_save_and_plot(scenario, tf)
+    # analysis.plot_constrained_lane_change(
+    #     scenario.ocp_simulation_to_dataframe(), 'p1')
+    # analysis.compare_desired_and_actual_final_states(
+    #     scenario.boundary_conditions_to_dataframe(), data)
 
 
 def run_cbf_lc_scenario(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
@@ -95,7 +94,7 @@ def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
     run_save_and_plot(scenario, tf)
 
 
-def run_save_and_plot(scenario: scenarios.LaneChangeScenario, tf: float):
+def run_save_and_plot(scenario: scenarios.SimulationScenario, tf: float):
     # scenario.create_test_initial_state()
     scenario.run(tf)
 
@@ -184,39 +183,44 @@ def load_and_plot_latest_scenario():
 
 
 def main():
-    n_platoon = 1
+    n_platoon = 2
     n_orig_ahead, n_orig_behind = 0, 0
     n_dest_ahead, n_dest_behind = 0, 1
 
     configuration.Configuration.set_solver_parameters(
         max_iter=100, discretization_step=0.2,
-        ftol=1.0e-2, estimate_gradient=True
+        ftol=1.0e-3, estimate_gradient=True
     )
     configuration.Configuration.set_controller_parameters(
-        max_iter=3, time_horizon=5.0,
+        max_iter=3, time_horizon=10.0,
         has_terminal_lateral_constraints=False,
         has_lateral_safety_constraint=False,
-        # initial_input_guess='zero',
-        jumpstart_next_solver_call=True, has_initial_mode_guess=False
+        # initial_input_guess=-1.5,
+        jumpstart_next_solver_call=True, has_initial_mode_guess=True
     )
     base_speed = 20.
     configuration.Configuration.set_scenario_parameters(
         v_ref={'lo': base_speed, 'ld': base_speed, 'p': base_speed,
                'fo': base_speed, 'fd': base_speed},
-        delta_x={'lo': 0., 'ld': 4., 'p': 0., 'fd': 4.},
+        delta_x={'lo': 0., 'ld': 10., 'p': 0., 'fd': 5.},
         platoon_strategies='all', increase_lc_time_headway=False
     )
+    is_acceleration_optimal = True
     are_vehicles_cooperative = False
 
     start_time = time.time()
+    run_with_external_controller(
+        n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
+        is_acceleration_optimal, are_vehicles_cooperative
+    )
     # run_cbf_lc_scenario(n_platoon, n_orig_ahead, n_orig_behind,
     #                     n_dest_ahead, n_dest_behind,
     #                     are_vehicles_cooperative)
-    run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
-                     n_dest_ahead, n_dest_behind,
-                     is_acceleration_optimal=True,
-                     are_vehicles_cooperative=are_vehicles_cooperative
-                     )
+    # run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
+    #                  n_dest_ahead, n_dest_behind,
+    #                  is_acceleration_optimal,
+    #                  are_vehicles_cooperative
+    #                  )
     # load_and_plot_latest_scenario()
     end_time = time.time()
 

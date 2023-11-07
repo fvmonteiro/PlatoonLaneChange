@@ -75,7 +75,7 @@ class VehicleOptimalController:
     def get_time_points(self, dt: float = None):
         if dt is None:
             dt = self.discretization_step  # [s]
-        n = round(self.time_horizon / dt) #+ 1  # +1 to get 'round' times
+        n = round(self.time_horizon / dt)  # + 1  # +1 to get 'round' times
         # We use the rounding function to prevent minor numerical differences
         # between time steps.
         rounding_precision = int(np.floor(np.log10(dt)))
@@ -266,12 +266,13 @@ class VehicleOptimalController:
             y_cost=0.1, theta_cost=0., v_cost=0.1)
         R = self._ocp_interface.create_input_cost_matrix(accel_cost=0.1,
                                                          phi_cost=0.0)
-        running_cost = occ.quadratic_cost(
-            self._ocp_interface.n_states, self._ocp_interface.n_inputs,
-            Q, R, self._desired_state, u_ref
-        )
+        # running_cost = occ.quadratic_cost(
+        #     self._ocp_interface.n_states, self._ocp_interface.n_inputs,
+        #     Q, R, self._desired_state, u_ref
+        # )
         # print('===== TRYING NEW COST FUNCTION =====')
-        # running_cost = self._ocp_interface.cost_function(controlled_veh_ids)
+        running_cost = self._ocp_interface.cost_function(
+            self._controlled_veh_ids)
 
         if not config.has_terminal_lateral_constraints:
             Q_terminal = (
@@ -335,6 +336,33 @@ class VehicleOptimalController:
         else:
             mode_sequence = som.ModeSequence()
             mode_sequence.add_mode(0.0, som.SystemMode(vehicles))
+
+            # TODO: temp tests Nov 6
+            # Each command below only works with a specific scenario
+            # Test 1: brake to merge behind fd by setting ld - OK
+            # mode_sequence.alter_and_add_mode(
+            #     0.3, {'p1': {'ld': 'fd1', 'fd': -1}}
+            # )
+            # Test 2: see if setting lo (hard constraint) also works - OK
+            # mode_sequence.alter_and_add_mode(
+            #     1.0, {'p1': {'lo': 'fd1', 'fd': -1}}
+            # )
+            # Test 3: p2 cooperates with p1
+            # - takes a few failed iterations, but OK
+            # mode_sequence.alter_and_add_mode(
+            #     2.0, {'p2': {'lo': 'p1', 'ld': -1}}
+            # )
+            # Test 4: "cooperation" through ld (could create a new sv type)
+            # didn't work
+            # mode_sequence.alter_and_add_mode(
+            #     2.0, {'p2': {'ld': 'p1'}}
+            # )
+            # Test 5: ld first reverse - not good
+            mode_sequence.alter_and_add_mode(
+                1.0, {'p2': {'lo': -1, 'ld': -1, 'fd': 'p1'}}
+            )
+            mode_sequence.alter_and_add_mode(7.0, {'p1': {'lo': 'p2'}})
+
             if config.initial_input_guess is not None:
                 trajectory_guess = self.create_initial_guess(vehicles)
 
@@ -357,7 +385,7 @@ class VehicleOptimalController:
         if config.has_terminal_lateral_constraints:
             self._set_terminal_constraints()
         self._set_safety_constraints()
-        self._set_platoon_formation_constraints()
+        # self._set_platoon_formation_constraints()
 
         self._cost_with_tracker.set_constraints(self._constraints)
 
@@ -408,11 +436,6 @@ class VehicleOptimalController:
         for veh_id in self._controlled_veh_ids:
             veh = self._ocp_interface.vehicles[veh_id]
             if veh.has_lane_change_intention():
-                # lc_safety_constraint = NonlinearConstraint(
-                #     self._ocp_interface.lane_changing_safety_constraint(veh_id),
-                #     -epsilon, epsilon
-                # )
-                # self._constraints.append(lc_safety_constraint)
                 lc_safety_constraints = [NonlinearConstraint(
                     fun, -epsilon, epsilon) for fun in
                     self._ocp_interface.lane_changing_safety_constraints(
@@ -466,7 +489,7 @@ class VehicleOptimalController:
             initial_guess=x0,
             minimize_options={
                 'maxiter': config.solver_max_iter, 'disp': True,
-                'ftol': config.ftol,
+                'ftol': config.ftol,  # 'eps': 1.0e-10,
                 'callback': self._cost_with_tracker.callback,
                 'jac': self._cost_gradient
             }

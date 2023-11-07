@@ -104,6 +104,14 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         self.copy_attributes(new_vehicle, initial_state)
         return new_vehicle
 
+    def make_closed_loop_copy(self, initial_state=None) -> ClosedLoopVehicle:
+        new_vehicle = ClosedLoopVehicle(
+            self._can_change_lanes, False, self._is_connected)
+        self.copy_attributes(new_vehicle, initial_state)
+        new_vehicle._desired_future_follower_id = (
+            self._desired_future_follower_id)
+        return new_vehicle
+
     def find_cooperation_requests(self, vehicles: Iterable[base.BaseVehicle]
                                   ) -> None:
         # Note that any optimal vehicle might be in a platoon, even if it
@@ -281,14 +289,6 @@ class OptimalControlVehicle(FourStateVehicle):
             self._is_connected)
         self.copy_attributes(new_vehicle, initial_state)
         new_vehicle._platoon = self.get_platoon()
-        new_vehicle._desired_future_follower_id = (
-            self._desired_future_follower_id)
-        return new_vehicle
-
-    def make_closed_loop_copy(self, initial_state=None) -> ClosedLoopVehicle:
-        new_vehicle = ClosedLoopVehicle(
-            self._can_change_lanes, False, self._is_connected)
-        self.copy_attributes(new_vehicle, initial_state)
         new_vehicle._desired_future_follower_id = (
             self._desired_future_follower_id)
         return new_vehicle

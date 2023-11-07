@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 import configuration as config
-import dynamics
+from vehicle_models import dynamics
 from operating_modes import system_operating_mode as som
 import operating_modes.base_operating_modes as modes
 

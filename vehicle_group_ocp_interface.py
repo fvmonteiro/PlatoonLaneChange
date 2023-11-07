@@ -323,30 +323,43 @@ class VehicleGroupInterface:
 
     def cost_function(self, controlled_veh_ids: Iterable[int]) -> Callable:
         tf = 0.0  # only relevant for desired final position
-        x_ref = self.create_desired_state(tf)
+        states_ref = self.create_desired_state(tf)
         u_ref = self.get_desired_input()
-        Q = self.create_state_cost_matrix(y_cost=0.1, theta_cost=0.,
-                                          v_cost=0.1)
-        # Very specific to scenario with one platoon veh and fd
-        # d = np.array([[1, 0, 0, 0, -1, 0, 0, -1]])
-        # w_eg = 0.1
-        # Q_eg = w_eg * np.matmul(d.transpose(), d)
-        # Q += Q_eg
-        R = self.create_input_cost_matrix(accel_cost=0.1, phi_cost=0.)
+        Q = self.create_state_cost_matrix(x_cost=0.0, y_cost=0.2,
+                                          theta_cost=0.0, v_cost=0.1)
+        R = self.create_input_cost_matrix(accel_cost=0.1, phi_cost=0.1)
+
+        vehs, x_idx, v_idx = [], [], []
+        for veh_id in controlled_veh_ids:
+            vehs.append(self.vehicles[veh_id])
+            x_idx.append(self.get_a_vehicle_state_index(veh_id, 'x'))
+            v_idx.append(self.get_a_vehicle_state_index(veh_id, 'v'))
 
         def support(states, inputs) -> float:
             t = self.get_time(states)
-            w_eg = 1.  # gap error weight
-            cost = ((states - x_ref) @ Q @ (states - x_ref)
+
+            # w_eg = 1.  # gap error weight
+            for i in range(len(vehs)):
+                leader_id = vehs[i].get_dest_lane_leader_id(t)
+                if leader_id > -1:
+                    leader_x = self.get_a_vehicle_state_by_id(leader_id, states,
+                                                              'x')
+                    gap_ref = vehs[i].compute_lane_keeping_safe_gap(
+                        states[v_idx[i]])
+                    states_ref[x_idx[i]] = leader_x - gap_ref
+                else:
+                    states_ref[x_idx[i]] = states[x_idx[i]]
+
+            cost = ((states - states_ref) @ Q @ (states - states_ref)
                     + (inputs - u_ref) @ R @ (inputs - u_ref)).item()
-            eg_cost = []
-            for ego_id in controlled_veh_ids:
-                ego_veh = self.vehicles[ego_id]
-                gap_error = self.compute_gap_error(
-                    states, ego_id, ego_veh.get_dest_lane_follower_id(t),
-                    is_other_behind=True, is_follower_lane_changing=False)
-                eg_cost.append(w_eg * min(gap_error, 0) ** 2)
-            cost += sum(eg_cost)
+            # eg_cost = []
+            # for ego_id in controlled_veh_ids:
+            #     ego_veh = self.vehicles[ego_id]
+            #     gap_error = self.compute_gap_error(
+            #         states, ego_id, ego_veh.get_dest_lane_follower_id(t),
+            #         is_other_behind=True, is_follower_lane_changing=False)
+            #     eg_cost.append(w_eg * min(gap_error, 0) ** 2)
+            # cost += sum(eg_cost)
             return cost
 
         return support

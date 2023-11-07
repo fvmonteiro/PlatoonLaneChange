@@ -91,11 +91,15 @@ def plot_trajectory(data: pd.DataFrame):
     fig, ax = plt.subplots(len(time), 1)
     fig.set_size_inches(6, 6)
     for i in range(len(time)):
+        k = i * step
+        if i == len(time) - 1:  # temp
+            k -= 1
+
         for veh_id in data['id'].unique():
             veh_data = data[data['id'] == veh_id]
             veh_name = veh_data['name'].iloc[0]
             color = _get_color_by_name(veh_name)
-            ax[i].scatter(data=veh_data.iloc[i * step],
+            ax[i].scatter(data=veh_data.iloc[k],
                           x='x', y='y', marker='>', color=color, )
 
         ax[i].set_title('t = {}'.format(time[i]), loc='left')
