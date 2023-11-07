@@ -30,8 +30,6 @@ class Configuration:
     has_terminal_lateral_constraints: bool = False
     has_safety_lateral_constraint: bool = False
     initial_input_guess: Union[None, str, float] = None
-    # has_initial_state_guess: bool = False
-    # initial_acceleration_guess: Union[str, float] = 0.0
     jumpstart_next_solver_call: bool = False
     has_initial_mode_guess: bool = False
 
@@ -72,8 +70,6 @@ class Configuration:
             has_terminal_lateral_constraints: bool = False,
             has_lateral_safety_constraint: bool = False,
             initial_input_guess: Union[str, float, None] = None,
-            # provide_initial_guess: bool = False,
-            # initial_acceleration_guess: Union[str, float, None] = 0.0,
             jumpstart_next_solver_call: bool = False,
             has_initial_mode_guess: bool = False
     ) -> None:
@@ -98,6 +94,8 @@ class Configuration:
          acceleration value during the entire time horizon
          'max'/'min'/'zero': Similar to a numerical value but uses the
          maximum/minimum/zero acceleration
+         'random': Randomly samples between min and max accel for each time
+         step
          'mode': Uses the state/input tuple that generates the initial mode
          guess (see has_initial_mode_guess)
         :param jumpstart_next_solver_call: Whether to use the solution of the

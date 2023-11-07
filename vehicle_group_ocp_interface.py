@@ -77,38 +77,39 @@ class VehicleGroupInterface:
         return np.array(desired_inputs_array)
 
     def get_initial_inputs_guess(
-            self, accel_guess: Union[str, float], as_dict: bool = False
-    ) -> Union[np.ndarray, dict[int, np.ndarray]]:
-        initial_guess_array = []
-        initial_guess_dict = {}
-        for veh_id in self.sorted_vehicle_ids:
-            vehicle = self.vehicles[veh_id]
-            veh_desired_inputs = vehicle.get_desired_input()
-            if vehicle.is_long_control_optimal():
-                if isinstance(accel_guess, str):
-                    if accel_guess == 'zero':
-                        accel = 0.
-                    elif accel_guess == 'max':
-                        accel = vehicle.get_accel_max()
-                    elif accel_guess == 'min':
-                        accel = vehicle.get_brake_max()
-                    else:
-                        warnings.warn(
-                            'Unrecognized string value for initial accel guess:'
-                            f' {accel_guess}. Accepted values are zero, max, '
-                            'min. Setting to zero.')
-                        accel = 0.0
-                elif accel_guess is not None:
-                    accel = accel_guess
-                else:
-                    raise ValueError(
-                        'Trying to get initial acceleration guess, but '
-                        'initial_input_guess was set to None')
-                veh_desired_inputs[vehicle.optimal_input_idx['a']] = accel
-            initial_guess_array.extend(veh_desired_inputs)
-            initial_guess_dict[veh_id] = veh_desired_inputs
-        return (initial_guess_dict if as_dict
-                else np.array(initial_guess_array))
+            self, accel_guess: Union[str, float], n_time_steps: int,
+    ) -> list[dict[int, np.ndarray]]:
+        # initial_guess_array = []
+        # initial_guess_dict = {}
+        input_guess = []
+        for i in range(n_time_steps):
+            current_guess = {}
+            for veh_id in self.sorted_vehicle_ids:
+                vehicle = self.vehicles[veh_id]
+                veh_desired_inputs = vehicle.get_desired_input()
+                if vehicle.is_long_control_optimal():
+                    if isinstance(accel_guess, str):
+                        if accel_guess == 'zero':
+                            accel = 0.
+                        elif accel_guess == 'max':
+                            accel = vehicle.get_accel_max()
+                        elif accel_guess == 'min':
+                            accel = vehicle.get_brake_max()
+                        elif accel_guess == 'random':
+                            # TODO: mean zero seems useless, but then what?
+                            accel = np.random.uniform(-2.0, 1.0)
+                        else:
+                            raise ValueError(
+                                'Trying to get initial acceleration guess, but '
+                                'initial_input_guess was set to None')
+                        veh_desired_inputs[
+                            vehicle.optimal_input_idx['a']] = accel
+                        # initial_guess_array.extend(veh_desired_inputs)
+                    current_guess[veh_id] = veh_desired_inputs
+                    input_guess.append(current_guess)
+                return input_guess
+                # return (initial_guess_dict if as_dict
+                #         else np.array(initial_guess_array))
 
     def get_initial_state(self):
         """

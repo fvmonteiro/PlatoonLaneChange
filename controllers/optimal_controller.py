@@ -385,6 +385,7 @@ class VehicleOptimalController:
         if config.has_terminal_lateral_constraints:
             self._set_terminal_constraints()
         self._set_safety_constraints()
+        print('NOT setting platoon formation constraints')
         # self._set_platoon_formation_constraints()
 
         self._cost_with_tracker.set_constraints(self._constraints)
@@ -680,9 +681,9 @@ class VehicleOptimalController:
         vehicle_group.set_verbose(False)
         vehicle_group.prepare_to_start_simulation(len(sim_time))
         input_guess = self._ocp_interface.get_initial_inputs_guess(
-            config.initial_input_guess, as_dict=True)
+            config.initial_input_guess, len(sim_time) - 1)
         for i in range(1, len(sim_time)):
-            vehicle_group.simulate_one_time_step(sim_time[i], input_guess)
+            vehicle_group.simulate_one_time_step(sim_time[i], input_guess[i-1])
         vehicle_input_map = {
             veh_id: vehicles[veh_id].get_external_input_idx()
             for veh_id in self._controlled_veh_ids}

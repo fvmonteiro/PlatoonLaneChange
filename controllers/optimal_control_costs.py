@@ -173,8 +173,12 @@ class OCPCostTracker:
             iterations = len(self._running_cost_per_iteration[-1])
             percentage = iterations * 100 / self._max_iterations
             if percentage % 5 == 0:
+                costs = [self._running_cost_per_iteration[-1][i]
+                         + self._terminal_cost_per_iteration[-1][i]
+                         for i in range(-5, 0)]
+                cost_str = ', '.join([f'{c:.2f}' for c in costs])
                 print(f'{iterations}/{self._max_iterations} iterations. '
-                      f'Last cost: {iteration_cost:.5g}.')
+                      f'Latest Costs: {cost_str}')
 
         # Compare iterations:
         # delta_cost = (np.diff(self._running_cost_per_iteration[-1][-2:])
@@ -372,8 +376,8 @@ def quadratic_cost(n_states: int, n_inputs: int, Q, R,
     if R is None:
         return lambda x, u: ((x - x0) @ Q @ (x - x0)).item()
     # Received both Q and R matrices
-    return lambda x, u: (
-            (x - x0) @ Q @ (x - x0) + (u - u0) @ R @ (u - u0)).item()
+    return lambda x, u: ((x - x0) @ Q @ (x - x0)
+                         + (u - u0) @ R @ (u - u0)).item()
 
 
 def quadratic_cost_gradient(n_states: int, n_inputs: int, n_times: int, Q, R,
