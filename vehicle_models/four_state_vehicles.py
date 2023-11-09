@@ -77,7 +77,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     def get_desired_dest_lane_leader_id(self) -> int:
         if not self.is_in_a_platoon():
             return self.get_dest_lane_leader_id()
-        return self.get_platoon().get_dest_lane_leader_id(self.get_id())
+        return self.get_platoon().get_desired_dest_lane_leader_id(self.get_id())
 
     def get_is_lane_change_safe(self):
         return self._is_lane_change_safe
@@ -135,8 +135,10 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     def is_platoon_leader(self) -> bool:
         return self.get_id() == self._platoon.get_platoon_leader_id()
 
-    def analyze_platoons(self, vehicles: Mapping[int, base.BaseVehicle],
-                         platoon_lane_change_strategy: int) -> None:
+    def analyze_platoons(
+            self, vehicles: Mapping[int, base.BaseVehicle],
+            platoon_lane_change_strategy: int,
+            strategy_parameters: tuple[list[int], list[int]] = None) -> None:
 
         # [Aug 23] We are only simulating simple scenarios. At the start of
         # the simulation, every vehicle will either create its own platoon
@@ -161,8 +163,8 @@ class FourStateVehicle(base.BaseVehicle, ABC):
                 self.set_platoon(leader_platoon)
         else:
             if not self.is_in_a_platoon():
-                self._create_platoon(platoon_lane_change_strategy)
-                # self.set_platoon(platoon.Platoon(self))
+                self.set_platoon(self._create_platoon(
+                    platoon_lane_change_strategy, strategy_parameters))
 
         # if not self.is_in_a_platoon():
         #     if is_leader_in_a_platoon:
@@ -230,8 +232,11 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         for i_name, i_idx in self._external_input_idx.items():
             self._inputs[self._input_idx[i_name]] = optimal_inputs[i_idx]
 
-    def _create_platoon(self, platoon_lane_change_strategy: int):
-        pass  # self.set_platoon(platoon.Platoon())
+    def _create_platoon(
+            self, platoon_lane_change_strategy: int,
+            strategy_parameters: tuple[list[int], list[int]] = None
+    ) -> platoon.Platoon:
+        pass
 
 
 class OpenLoopVehicle(FourStateVehicle):
@@ -266,6 +271,7 @@ class OptimalControlVehicle(FourStateVehicle):
         super().__init__(can_change_lanes, has_open_loop_acceleration,
                          is_connected)
 
+        self._platoon_type = platoon.OptimalPlatoon
         self.set_mode(modes.OCPLaneKeepingMode())
         self.get_opt_controller().set_controlled_vehicles_ids(self.get_id())
 
@@ -355,9 +361,10 @@ class OptimalControlVehicle(FourStateVehicle):
         delta_t = self.get_current_time() - self._lc_start_time
         return delta_t <= self.get_opt_controller().get_time_horizon()
 
-    def _create_platoon(self, platoon_lane_change_strategy: int) -> None:
-        self.set_platoon(platoon.OptimalPlatoon(self,
-                                                platoon_lane_change_strategy))
+    def _create_platoon(self, platoon_lane_change_strategy: int,
+                        strategy_parameters: tuple[list[int], list[int]] = None
+                        ) -> platoon.OptimalPlatoon:
+        return platoon.OptimalPlatoon(self, platoon_lane_change_strategy)
 
     # def guess_mode_sequence(self, mode_sequence: som.ModeSequence):
     #     if self.is_in_a_platoon():
@@ -378,6 +385,7 @@ class ClosedLoopVehicle(FourStateVehicle):
                  is_connected: bool = False):
         super().__init__(can_change_lanes, has_open_loop_acceleration,
                          is_connected)
+        self._platoon_type = platoon.ClosedLoopPlatoon
         self.set_mode(modes.CLLaneKeepingMode())
 
     def get_platoon(self) -> Union[None, platoon.ClosedLoopPlatoon]:
@@ -415,9 +423,11 @@ class ClosedLoopVehicle(FourStateVehicle):
             following_vehicle.get_vel())
         return gap + margin >= safe_gap
 
-    def _create_platoon(self, platoon_lane_change_strategy: int) -> None:
-        self.set_platoon(platoon.ClosedLoopPlatoon(
-            self, platoon_lane_change_strategy))
+    def _create_platoon(self, platoon_lane_change_strategy: int,
+                        strategy_parameters: tuple[list[int], list[int]] = None
+                        ) -> platoon.ClosedLoopPlatoon:
+        return platoon.ClosedLoopPlatoon(self, platoon_lane_change_strategy,
+                                         strategy_parameters)
 
 
 class FourStateVehicleInterface(base.BaseVehicleInterface, ABC):

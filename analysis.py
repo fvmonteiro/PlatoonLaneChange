@@ -76,7 +76,7 @@ def plot_costs_vs_iteration(running_costs, terminal_costs,
     plt.show()
 
 
-def plot_trajectory(data: pd.DataFrame):
+def plot_trajectory(data: pd.DataFrame, plot_title: str = None):
     # min_y, max_y = data['y'].min(), data['y'].max()
     min_x, max_x = data['x'].min(), data['x'].max()
     tf = data['t'].max()
@@ -112,6 +112,8 @@ def plot_trajectory(data: pd.DataFrame):
         else:
             ax[i].set_xticks([])
 
+    if plot_title:
+        fig.suptitle(plot_title, fontsize=14)
     fig.tight_layout()
     fig.show()
 

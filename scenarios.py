@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from abc import ABC, abstractmethod
 import pickle
 from typing import Iterable, Mapping, Sequence, Type, Union
@@ -10,7 +11,9 @@ import pandas as pd
 
 import analysis
 import controllers.optimal_controller as opt_ctrl
+import controllers.optimal_control_costs as occ
 import configuration
+import platoon
 from vehicle_group import VehicleGroup
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
@@ -25,7 +28,7 @@ class SimulationScenario(ABC):
     def __init__(self):
         self.n_per_lane: list[int] = []
         base.BaseVehicle.reset_vehicle_counter()
-        self.vehicle_group = VehicleGroup()
+        self.vehicle_group: VehicleGroup = VehicleGroup()
         self.result_summary: dict = {}
         self._are_vehicles_cooperative = False
         self.lc_vehicle_names = []
@@ -40,6 +43,10 @@ class SimulationScenario(ABC):
     @abstractmethod
     def get_opc_cost_history(self):
         pass
+
+    def get_lc_vehicle_ids(self):
+        return [veh.get_id() for veh in self.vehicle_group.get_all_vehicles()
+                if veh.get_name() in self.lc_vehicle_names]
 
     def save_cost_data(self, file_name: str) -> None:
         """
@@ -231,7 +238,7 @@ class SimulationScenario(ABC):
         :return:
         """
         if gap is None:
-            gap = self.vehicle_group.vehicles[0].free_flow_speed + 1
+            gap = self.vehicle_group.vehicles[0].get_free_flow_speed() + 1
         x0, y0, theta0, v0 = [], [], [], []
         for lane in range(len(self.n_per_lane)):
             lane_center = lane * configuration.LANE_WIDTH
@@ -298,10 +305,14 @@ class LaneChangeScenario(SimulationScenario):
 
     def platoon_full_feedback_lane_change(
             self, n_orig_ahead: int, n_orig_behind: int,
-            n_dest_ahead: int, n_dest_behind: int):
+            n_dest_ahead: int, n_dest_behind: int,
+            platoon_strategy_number: int,
+            strategy_params: tuple[list[int], list[int]] = None):
         self.create_test_scenario(
             'closed_loop', n_orig_ahead, n_orig_behind, n_dest_ahead,
             n_dest_behind, False)
+        self.vehicle_group.set_platoon_lane_change_strategy(
+            platoon_strategy_number, strategy_params)
 
     def create_full_lanes_initial_state(self):
         v_orig_leader = config.v_ref['lo']
@@ -352,14 +363,120 @@ class LaneChangeScenario(SimulationScenario):
         dt = 1.0e-2
         time = np.arange(0, final_time + dt, dt)
         self.vehicle_group.prepare_to_start_simulation(len(time))
-        analysis.plot_initial_state(self.response_to_dataframe())
-        self.make_control_centralized()
+        # analysis.plot_initial_state(self.response_to_dataframe())
+        # self.make_control_centralized()
         for i in range(len(time) - 1):
             if np.abs(time[i] - self._lc_intention_time) < dt / 10:
                 self.vehicle_group.set_vehicles_lane_change_direction(
                     self.lc_vehicle_names, 1
                 )
             self.vehicle_group.simulate_one_time_step(time[i + 1])
+
+
+class AllLaneChangeStrategies(LaneChangeScenario):
+
+    def __init__(self, n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
+                 n_dest_ahead: int, n_dest_behind: int,
+                 are_vehicles_cooperative: bool = False):
+        super().__init__(n_platoon, are_vehicles_cooperative)
+        self._noa = n_orig_ahead
+        self._nob = n_orig_behind
+        self._nda = n_dest_ahead
+        self._ndb = n_dest_behind
+
+    def run(self, final_time):
+        tf = final_time
+        sg = platoon.StrategyGenerator()
+        strategy_number = 5
+        all_positions = set([i for i in range(self._n_platoon)])
+        success = []
+        costs = []
+        best_cost = np.inf
+        best_strategy = {'merging_order': [], 'coop_order': []}
+        best_result = self.vehicle_group
+        counter = 0
+        for i in range(self._n_platoon):
+            remaining_vehicles = all_positions
+            print('Starting with veh', i)
+
+            # all_merging_orders, all_coop_orders = sg.get_all_orders(
+            #     self._n_platoon, [i])
+            # for merging_order, coop_order in zip(all_merging_orders[6:7],
+            #                                      all_coop_orders[6:7]):
+            for merging_order, coop_order in sg.generate_order_all(
+                    i, [], [], remaining_vehicles):
+                counter += 1
+                base.BaseVehicle.reset_vehicle_counter()
+                self.vehicle_group = VehicleGroup()
+                self.create_test_scenario(
+                    'closed_loop', self._noa, self._nob, self._nda, self._ndb,
+                    False)
+                self.vehicle_group.set_platoon_lane_change_strategy(
+                    strategy_number, (merging_order, coop_order))
+                self.vehicle_group.set_verbose(False)
+                LaneChangeScenario.run(self, tf)
+
+                # ============ Computing cost ============== #
+                # TODO: a mess for now
+
+                n_states = self.vehicle_group.get_n_states()
+                n_inputs = self.vehicle_group.get_n_inputs()
+                desired_input = [0.] * n_inputs  # TODO: hard codded
+
+                all_vehicles = self.vehicle_group.get_all_vehicles_in_order()
+                controlled_veh_ids = set(self.get_lc_vehicle_ids())
+                desired_state = occ.create_desired_state(all_vehicles, tf)
+                q_matrix = occ.create_state_cost_matrix(
+                    all_vehicles, controlled_veh_ids,
+                    x_cost=0.0, y_cost=0.2, theta_cost=0.0, v_cost=0.1)
+                r_matrix = occ.create_input_cost_matrix(
+                    all_vehicles, controlled_veh_ids,
+                    accel_cost=0.1, phi_cost=0.1)
+                running_cost = occ.quadratic_cost(
+                    n_states, n_inputs, q_matrix, r_matrix,
+                    desired_state, desired_input
+                )
+                q_terminal = occ.create_state_cost_matrix(
+                    all_vehicles, controlled_veh_ids, y_cost=10., theta_cost=1.)
+                r_terminal = occ.create_input_cost_matrix(
+                    all_vehicles, controlled_veh_ids, phi_cost=0.)
+                terminal_cost = occ.quadratic_cost(
+                    n_states, n_inputs, q_terminal, r_terminal,
+                    desired_state, desired_input
+                )
+                cost_with_tracker = occ.OCPCostTracker(
+                    np.array([0]), n_states,
+                    running_cost, terminal_cost,
+                    configuration.Configuration.solver_max_iter
+                )
+
+                success.append(self.vehicle_group.check_lane_change_success())
+                r_cost, t_cost = cost_with_tracker.compute_simulation_cost(
+                    self.vehicle_group.get_all_states(),
+                    self.vehicle_group.get_all_inputs(),
+                    self.vehicle_group.get_simulated_time())
+                costs.append(r_cost + t_cost)
+                if costs[-1] < best_cost:
+                    best_cost = costs[-1]
+                    best_strategy['merging_order'] = merging_order[:]
+                    best_strategy['coop_order'] = coop_order[:]
+                    best_result = self.vehicle_group
+
+                # print(
+                #     f'Strategy #{counter}. '
+                #     f'Order and coop: {merging_order}, {coop_order}'
+                #     f'\nSuccessful? {success[-1]}. '
+                #     f'Cost: {r_cost:.2f}(running) + {t_cost:.2f}(terminal) = '
+                #     f'{r_cost + t_cost:.2f}'
+                #     )
+                # ========================================= #
+
+        self.vehicle_group = best_result
+        print(f'{sg.counter} strategies tested.\n'
+              f'Success rate: {sum(success) / sg.counter * 100}%\n'
+              f'Best strategy: cost={best_cost}, '
+              f'merging order={best_strategy["merging_order"]}, '
+              f'coop order={best_strategy["coop_order"]}')
 
 
 class ExternalOptimalControlScenario(SimulationScenario, ABC):
@@ -443,12 +560,8 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
         dt = 1e-2
         result = self.controller.ocp_result
         time = np.arange(0, tf + dt, dt)
-        # inputs = np.zeros([result.inputs.shape[0], len(time)])
         veh_ids = self.vehicle_group.sorted_vehicle_ids
-        # for i in range(len(result.inputs)):
-        #     inputs[i, :] = np.interp(time, result.time, result.inputs[i])
         self.vehicle_group.prepare_to_start_simulation(len(time))
-        # self.vehicle_group.update_surrounding_vehicles()
         for i in range(len(time) - 1):
             current_inputs = self.controller.get_input(time[i], veh_ids)
             self.vehicle_group.simulate_one_time_step(time[i + 1],

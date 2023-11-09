@@ -43,7 +43,7 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
             return self.get_an_input_by_name('v')
         except AttributeError:
             # trying to read vehicle's speed before any input is computed
-            return self.free_flow_speed
+            return self._free_flow_speed
 
     def _set_speed(self, v0, state):
         # Does nothing because velocity is an input for this model

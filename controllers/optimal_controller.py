@@ -25,7 +25,7 @@ class VehicleOptimalController:
     """
     The optimal controller follows the steps:
     1. set an operating mode sequence
-    2. Solve the OPC with given mode sequence
+    2. Solve the OCP with given mode sequence
     3. Apply optimal input and simulate system
     4. Compare assumed operating mode sequence to obtained mode sequence
     5. Repeat steps 1-4 until convergence or iteration limit is reached
@@ -51,7 +51,7 @@ class VehicleOptimalController:
         self._constraints = []
         self._ocp_has_solution = False
         self._controlled_veh_ids: set[int] = set()
-        # We center the system around some vehicle when solving the opc
+        # We center the system around some vehicle when solving the ocp
         # to make the solution independent of shifts in initial position
         self._center_veh_id: int = 0
         self._platoon_vehicle_pairs: list[tuple[int, int]] = []
@@ -187,7 +187,7 @@ class VehicleOptimalController:
 
     def find_trajectory(self, vehicles: Mapping[int, base.BaseVehicle]):
         """
-        Solves the OPC for all listed controlled vehicles
+        Solves the OCP for all listed controlled vehicles
         :param vehicles: All relevant vehicles
         :return: Nothing. All relevant values are stored internally
         """
@@ -563,9 +563,7 @@ class VehicleOptimalController:
                 for veh_id in self._controlled_veh_ids}
             relevant_inputs = veh_group.get_selected_inputs(vehicle_input_map)
             r_cost, t_cost = self._cost_with_tracker.compute_simulation_cost(
-                veh_group.get_all_states(),
-                relevant_inputs,
-                sim_time)
+                veh_group.get_all_states(), relevant_inputs, sim_time)
             print(f'Strategy {lc_strategy} successful? {success}. '
                   f'Cost: {r_cost:.2f}(running) + {t_cost:.2f}(terminal) = '
                   f'{r_cost + t_cost:.2f}')

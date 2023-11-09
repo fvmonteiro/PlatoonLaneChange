@@ -16,8 +16,8 @@ import operating_modes.base_operating_modes as modes
 class BaseVehicle(ABC):
     _counter = 0
 
-    free_flow_speed: float
     initial_state: np.ndarray
+    _free_flow_speed: float
     _target_lane: int
     _state_names: list[str]
     _input_names: list[str]
@@ -112,8 +112,17 @@ class BaseVehicle(ABC):
     def get_name(self) -> str:
         return self._name
 
+    def get_n_states(self) -> int:
+        return self._n_states
+
+    def get_n_inputs(self) -> int:
+        return self._n_inputs
+
     def get_ocp_interface(self) -> BaseVehicleInterface:
         return self._ocp_interface(self)
+
+    def get_free_flow_speed(self) -> float:
+        return self._free_flow_speed
 
     @abstractmethod
     def get_has_open_loop_acceleration(self) -> bool:
@@ -145,7 +154,10 @@ class BaseVehicle(ABC):
         return self._inputs[self._input_idx[input_name]]
 
     def get_current_lane(self) -> int:
-        return round(self.get_y() / config.LANE_WIDTH)
+        try:
+            return round(self.get_y() / config.LANE_WIDTH)
+        except ValueError:
+            print('here we are')
 
     def get_target_lane(self) -> int:
         return self._target_lane
@@ -286,7 +298,7 @@ class BaseVehicle(ABC):
         new_vehicle.reset_simulation_logs()
 
     def set_free_flow_speed(self, v_ff: float) -> None:
-        self.free_flow_speed = v_ff
+        self._free_flow_speed = v_ff
 
     def set_name(self, value: str) -> None:
         self._name = value
@@ -475,8 +487,10 @@ class BaseVehicle(ABC):
                     incoming_veh_x = other_x
         self._incoming_vehicle_id[self._iter_counter] = new_incoming_vehicle_id
 
-    def analyze_platoons(self, vehicles: Mapping[int, BaseVehicle],
-                         platoon_lane_change_strategy: int):
+    def analyze_platoons(
+            self, vehicles: Mapping[int, BaseVehicle],
+            platoon_lane_change_strategy: int,
+            strategy_parameters: tuple[list[int], list[int]] = None):
         pass
 
     def request_cooperation(self) -> None:
@@ -521,7 +535,7 @@ class BaseVehicle(ABC):
         return self.h_safe_lc * v_ego + self.c
 
     def compute_free_flow_desired_gap(self) -> float:
-        return self.compute_desired_gap(self.free_flow_speed, self.h_ref_lk)
+        return self.compute_desired_gap(self._free_flow_speed, self.h_ref_lk)
 
     def compute_lane_keeping_desired_gap(self, vel: float = None) -> float:
         return self.compute_desired_gap(vel, self.h_ref_lk)
@@ -557,8 +571,11 @@ class BaseVehicle(ABC):
         dt = next_time - self.get_current_time()
         self._states = self._states + self._derivatives * dt
         self._states_history[:, self._iter_counter + 1] = self._states
+        self._time[self._iter_counter + 1] = next_time
+        # self._iter_counter += 1
+
+    def update_iteration_counter(self):
         self._iter_counter += 1
-        self._time[self._iter_counter] = next_time
 
     @abstractmethod
     def update_mode(self, vehicles: Mapping[int, BaseVehicle]) -> None:
@@ -787,7 +804,7 @@ class BaseVehicleInterface(ABC):
         return self.base_vehicle.get_name()
 
     def get_free_flow_speed(self) -> float:
-        return self.base_vehicle.free_flow_speed
+        return self.base_vehicle.get_free_flow_speed()
 
     def get_phi_max(self) -> float:
         return self.base_vehicle.phi_max

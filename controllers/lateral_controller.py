@@ -12,20 +12,29 @@ class LateralController:
         self._lateral_gain = 1.0
         self.vehicle = vehicle
 
-    def _translate_slip_to_steering_wheel_angle(self, slip_angle: float):
+    def _translate_slip_to_steering_wheel_angle(self, slip_angle: float
+                                                ) -> float:
         return np.arctan(self.vehicle.lr / (self.vehicle.lf + self.vehicle.lr)
                          * np.tan(slip_angle))
 
-    def _compute_cbf_slip_angle(self, y_ref: float, vy_ref: float):
+    def _compute_cbf_slip_angle(self, y_ref: float, vy_ref: float) -> float:
         lat_error = y_ref - self.vehicle.get_y()
         theta = self.vehicle.get_theta()
         vel = self.vehicle.get_vel()
-        return ((vy_ref + self._lateral_gain * lat_error)
-                / (vel * np.cos(theta)) - np.tan(theta))
+        margin = 1.0e-5
+        numerator = vy_ref + self._lateral_gain * lat_error
+        denominator = vel * np.cos(theta)
+        if vel < margin:
+            if np.abs(numerator) < margin:
+                return 0.
+            else:
+                return (self.vehicle.phi_max if numerator > 0
+                        else -self.vehicle.phi_max)
+        return numerator / denominator - np.tan(theta)
 
 
 class LaneKeepingController(LateralController):
-    def compute_steering_wheel_angle(self):
+    def compute_steering_wheel_angle(self) -> float:
         lane_center = self.vehicle.get_current_lane() * config.LANE_WIDTH
         slip_angle = self._compute_cbf_slip_angle(lane_center, 0.0)
         return self._translate_slip_to_steering_wheel_angle(slip_angle)

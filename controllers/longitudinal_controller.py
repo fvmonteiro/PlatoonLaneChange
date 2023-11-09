@@ -21,7 +21,7 @@ class LongitudinalController:
         Computes acceleration for the ego vehicle following a leader
         """
         v_ego = self.vehicle.get_vel()
-        v_ff = self.vehicle.free_flow_speed
+        v_ff = self.vehicle.get_free_flow_speed()
         if not self.vehicle.has_leader():
             accel = self.compute_velocity_control(v_ff, v_ego)
         else:

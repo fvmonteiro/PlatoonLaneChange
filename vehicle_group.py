@@ -26,10 +26,18 @@ class VehicleGroup:
         # pairs.
         self.mode_sequence: som.ModeSequence = som.ModeSequence()
         self._platoon_lane_change_strategy = 0
+        self._strategy_parameters = ([], [])
         self._is_verbose = True
 
     def get_n_vehicles(self):
         return len(self.vehicles)
+
+    def get_n_states(self):
+        # time is the last system state
+        return sum(veh.get_n_states() for veh in self.vehicles.values()) + 1
+
+    def get_n_inputs(self):
+        return sum(veh.get_n_inputs() for veh in self.vehicles.values())
 
     def get_current_mode(self) -> som.SystemMode:
         try:
@@ -40,7 +48,7 @@ class VehicleGroup:
     def get_free_flow_speeds(self):
         v_ff = np.zeros(self.get_n_vehicles())
         for veh_id in self.sorted_vehicle_ids:
-            v_ff[veh_id] = self.vehicles[veh_id].free_flow_speed
+            v_ff[veh_id] = self.vehicles[veh_id].get_free_flow_speed()
         return v_ff
 
     def get_full_initial_state_vector(self) -> np.ndarray:
@@ -52,11 +60,18 @@ class VehicleGroup:
     def get_all_vehicles(self) -> Iterable[base.BaseVehicle]:
         return self.vehicles.values()
 
+    def get_all_vehicles_in_order(self) -> list[base.BaseVehicle]:
+        return [self.vehicles[veh_id] for veh_id in self.sorted_vehicle_ids]
+
     def get_current_state(self) -> np.ndarray:
         states = []
         for veh_id in self.sorted_vehicle_ids:
             states.append(self.vehicles[veh_id].get_states())
+        states.append(self.vehicles[0].get_current_time())
         return np.hstack(states)
+
+    def get_simulated_time(self) -> np.ndarray:
+        return self.vehicles[0].get_simulated_time()
 
     def get_all_states(self) -> np.ndarray:
         states = []
@@ -125,15 +140,18 @@ class VehicleGroup:
         gaps = []
         for veh_id in self.sorted_vehicle_ids:
             if v_ref is None:
-                v = self.vehicles[veh_id].free_flow_speed
+                v = self.vehicles[veh_id].get_free_flow_speed()
             else:
                 v = v_ref[veh_id]
             gaps.append(
                 self.vehicles[veh_id].compute_lane_keeping_desired_gap(v))
         return gaps
 
-    def set_platoon_lane_change_strategy(self, strategy_number: int):
+    def set_platoon_lane_change_strategy(
+            self, strategy_number: int,
+            strategy_parameters: tuple[list[int], list[int]] = None):
         self._platoon_lane_change_strategy = strategy_number
+        self._strategy_parameters = strategy_parameters
 
     def set_verbose(self, value: bool):
         self._is_verbose = value
@@ -179,10 +197,11 @@ class VehicleGroup:
         self.vehicles[veh_id].set_lane_change_direction(lc_direction)
 
     def set_vehicle_names(self, names: Sequence[str]):
-        for veh_id in self.sorted_vehicle_ids:
+        for i in range(len(self.sorted_vehicle_ids)):
+            veh_id = self.sorted_vehicle_ids[i]
             vehicle = self.vehicles[veh_id]
-            vehicle.set_name(names[veh_id])
-            self.name_to_id[names[veh_id]] = veh_id
+            vehicle.set_name(names[i])
+            self.name_to_id[names[i]] = veh_id
 
     def has_vehicle_with_name(self, veh_name: str):
         return veh_name in self.name_to_id
@@ -330,15 +349,19 @@ class VehicleGroup:
                     print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
                         time, self.get_current_mode(), new_mode))
             self.mode_sequence.add_mode(time, new_mode)
-        # And last the dynamics and controls kick in
+        # Next the dynamics and controls kick in
         for veh_id, veh in self.vehicles.items():
-            veh.analyze_platoons(self.vehicles,
-                                 self._platoon_lane_change_strategy)
+            veh.analyze_platoons(
+                self.vehicles, self._platoon_lane_change_strategy,
+                self._strategy_parameters)
             veh.update_mode(self.vehicles)
             veh.determine_inputs(open_loop_controls.get(veh_id, []),
                                  self.vehicles)
             veh.compute_derivatives()
             veh.update_states(new_time)
+        # Last, we move the internal iteration counters
+        for veh in self.vehicles.values():
+            veh.update_iteration_counter()
 
     def write_vehicle_states(self, time,
                              state_vectors: Mapping[int, np.ndarray],
@@ -358,18 +381,6 @@ class VehicleGroup:
     def update_surrounding_vehicles(self):
         for ego_vehicle in self.vehicles.values():
             ego_vehicle.update_surrounding_vehicles(self.vehicles)
-        # new_mode = som.SystemMode(self.vehicles)
-        # if self.get_current_mode() != new_mode:
-        #     time = self.vehicles[0].get_current_time()
-        #     if self._is_verbose:
-        #         if self.mode_sequence.is_empty():
-        #             # print("Initial mode: {}".format(
-        #             #     new_mode))
-        #             pass
-        #         else:
-        #             print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
-        #                 time, self.get_current_mode(), new_mode))
-        #     self.mode_sequence.add_mode(time, new_mode)
 
     def update_states(self, new_time):
         for vehicle in self.vehicles.values():
@@ -378,9 +389,11 @@ class VehicleGroup:
     def check_lane_change_success(self) -> bool:
         for vehicle in self.vehicles.values():
             if vehicle.get_target_lane() != vehicle.get_current_lane():
-                print(f'Vehicle {vehicle.get_name()} did not finish the lane '
-                      f'change.\n(target lane: {vehicle.get_target_lane()}, '
-                      f'current lane: {vehicle.get_current_lane()}.)')
+                if self._is_verbose:
+                    print(
+                        f'Vehicle {vehicle.get_name()} did not finish the lane '
+                        f'change.\n(target lane: {vehicle.get_target_lane()}, '
+                        f'current lane: {vehicle.get_current_lane()}.)')
                 return False
         return True
 

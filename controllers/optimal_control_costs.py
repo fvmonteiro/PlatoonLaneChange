@@ -7,6 +7,8 @@ import numpy as np
 from scipy.linalg import block_diag
 from scipy.optimize import LinearConstraint, NonlinearConstraint
 
+import vehicle_models.base_vehicle as base
+
 
 class OCPCostTracker:
     """
@@ -341,9 +343,77 @@ class OptimalControlIterationResult:
         return obj
 
 
+def create_desired_state(vehicles: list[base.BaseVehicle], tf: float):
+    """
+    Creates a full (for all vehicles) state vector where all vehicles
+    travel at their current speeds, and are at their desired lateral
+    positions
+    """
+    # Note: xf and vf are irrelevant with the accel feedback model
+    desired_state = []
+    for veh in vehicles:
+        vf = veh.get_free_flow_speed()
+        xf = veh.get_x() + veh.get_vel() * tf
+        yf = veh.get_target_y()
+        thetaf = 0.0
+        desired_state.extend(veh.create_state_vector(xf, yf, thetaf, vf))
+    return np.array(desired_state + [0.])  # time is the last state
+
+
+def create_state_cost_matrix(
+        vehicles: list[base.BaseVehicle], controlled_veh_ids: set[int],
+        x_cost: float = 0, y_cost: float = 0,
+        theta_cost: float = 0, v_cost: float = 0):
+    """
+    Creates a diagonal cost function where each state of all controlled
+    vehicles gets the same weight
+    :param vehicles:
+    :param controlled_veh_ids:
+    :param x_cost:
+    :param y_cost:
+    :param theta_cost:
+    :param v_cost:
+    :return:
+    """
+    # Note: we may have to differentiate between 'fully' controlled vehicles
+    # and only accel or only phi controlled vehicles
+    veh_costs = []
+    for veh in vehicles:
+        if veh.get_id() in controlled_veh_ids:
+            veh_costs.extend(veh.create_state_vector(
+                x_cost, y_cost, theta_cost, v_cost))
+        else:
+            veh_costs.extend(veh.create_state_vector(0., 0., 0., 0.))
+
+    return np.diag(veh_costs + [0.])  # time is the last state
+
+
+def create_input_cost_matrix(vehicles: list[base.BaseVehicle],
+                             controlled_veh_ids: set[int],
+                             accel_cost: float = 0, phi_cost: float = 0):
+    """
+    Creates a diagonal cost function where each input of all controlled
+    vehicles gets the same weight
+    :param vehicles:
+    :param controlled_veh_ids:
+    :param accel_cost:
+    :param phi_cost:
+    :return:
+    """
+    veh_costs = []
+    for veh in vehicles:
+        if veh.get_id() in controlled_veh_ids:
+            veh_costs.append(accel_cost)
+            veh_costs.append(phi_cost)
+        else:
+            veh_costs.extend([0., 0.])
+
+    return np.diag(veh_costs)
+
+
 def quadratic_cost(n_states: int, n_inputs: int, Q, R,
-                   x0: Union[np.ndarray, float] = 0,
-                   u0: Union[np.ndarray, float] = 0) -> Callable:
+                   x_ref: Union[np.ndarray, float] = 0,
+                   u_ref: Union[np.ndarray, float] = 0) -> Callable:
     """
     Create quadratic cost function
     Returns a quadratic cost function that can be used for an optimal
@@ -358,9 +428,9 @@ def quadratic_cost(n_states: int, n_inputs: int, Q, R,
         Weighting matrix for state cost. Dimensions must match system state.
     :param R: 2D array_like
         Weighting matrix for input cost. Dimensions must match system input.
-    :param x0: 1D array
+    :param x_ref: 1D array
         Nominal value of the system state (for which cost should be zero).
-    :param u0: 1D array
+    :param u_ref: 1D array
         Nominal value of the system input (for which cost should be zero).
 
     :return: callable
@@ -372,12 +442,12 @@ def quadratic_cost(n_states: int, n_inputs: int, Q, R,
     Q, R = _process_matrix_sizes(n_states, n_inputs, Q, R, make_zero=False)
 
     if Q is None:
-        return lambda x, u: ((u - u0) @ R @ (u - u0)).item()
+        return lambda x, u: ((u - u_ref) @ R @ (u - u_ref)).item()
     if R is None:
-        return lambda x, u: ((x - x0) @ Q @ (x - x0)).item()
+        return lambda x, u: ((x - x_ref) @ Q @ (x - x_ref)).item()
     # Received both Q and R matrices
-    return lambda x, u: ((x - x0) @ Q @ (x - x0)
-                         + (u - u0) @ R @ (u - u0)).item()
+    return lambda x, u: ((x - x_ref) @ Q @ (x - x_ref)
+                         + (u - u_ref) @ R @ (u - u_ref)).item()
 
 
 def quadratic_cost_gradient(n_states: int, n_inputs: int, n_times: int, Q, R,
@@ -413,9 +483,6 @@ def quadratic_cost_gradient(n_states: int, n_inputs: int, n_times: int, Q, R,
 
     return support
 
-    # return lambda x, u: 2 * np.vstack((big_R @ (u-np.repeat(u0, n_times)),
-    #                                    big_Q @ (x-np.repeat(x0, n_times))))
-
 
 def _process_matrix_sizes(n_states: int, n_inputs: int, Q, R,
                           make_zero: bool = False):
@@ -441,17 +508,3 @@ def _process_matrix_sizes(n_states: int, n_inputs: int, Q, R,
         R = np.zeros(n_inputs)
 
     return Q, R
-
-# def _input_only_cost(x, u, R, u0):
-#     cost = ((u - u0) @ R @ (u - u0)).item()
-#     return cost
-#
-#
-# def _state_only_cost(x, u, Q, x0):
-#     cost = ((x - x0) @ Q @ (x - x0)).item()
-#     return cost
-#
-#
-# def _full_cost(x, u, Q, R, x0, u0):
-#     cost = ((x-x0) @ Q @ (x-x0) + (u-u0) @ R @ (u-u0)).item()
-#     return cost

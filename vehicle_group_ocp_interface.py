@@ -265,16 +265,16 @@ class VehicleGroupInterface:
                 #     warnings.warn('Trying to pass non-zero position or '
                 #                   'velocity cost to a vehicle with feedback '
                 #                   'acceleration. Setting both to zero')
-                veh_costs.extend(self.vehicles[veh_id].create_state_vector(
+                veh_costs.extend(veh.create_state_vector(
                     0., y_cost, theta_cost, 0.))
             else:  # steering wheel and accel optimal control
-                veh_costs.extend(self.vehicles[veh_id].create_state_vector(
+                veh_costs.extend(veh.create_state_vector(
                     x_cost, y_cost, theta_cost, v_cost))
 
         return np.diag(veh_costs + [0.])  # time is the last state
 
     def create_input_cost_matrix(self, accel_cost: float = 0,
-                                 phi_cost: float = 0, ):
+                                 phi_cost: float = 0):
         """
         Creates a diagonal cost function where each input of all controlled
         vehicles gets the same weight
@@ -293,10 +293,6 @@ class VehicleGroupInterface:
                 veh_costs.append(phi_cost)
 
         return np.diag(veh_costs)
-
-    # def update_surrounding_vehicles(self, time: float):
-    #     for veh_id in self.sorted_vehicle_ids:
-    #         self.vehicles[veh_id].set_time_interval(time)
 
     def update_vehicles(self, states, inputs):
         """
