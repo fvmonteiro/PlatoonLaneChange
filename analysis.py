@@ -77,8 +77,14 @@ def plot_costs_vs_iteration(running_costs, terminal_costs,
 
 
 def plot_cost_vs_ordering(cost: Iterable[float],
+                          completion_times: Iterable[float],
                           named_orderings: dict[str, int]):
+    # Analysis ideas:
+    # - Differentiate successful from non-finished maneuvers
+    # - Differentiate based on which vehicle starts the maneuver
+
     cost = np.array(cost)
+    completion_times = np.array(completion_times)
     special_x_ticks = [''] * len(cost)
     for key, value in named_orderings.items():
         special_x_ticks[value] = key
@@ -86,11 +92,18 @@ def plot_cost_vs_ordering(cost: Iterable[float],
     idx_sort = np.argsort(cost)[::-1]
     special_x_ticks = np.array(special_x_ticks)[idx_sort]
 
+    blue = 'tab:blue'
+    orange = 'tab:orange'
     fig, ax = plt.subplots(1, 1)
-    ax.plot(cost[idx_sort])
-    ax.set(xlabel='move/coop order',
-           ylabel='cost')
+    ax.plot(cost[idx_sort], label='cost', color=blue)
+    ax.set_ylabel('cost', color=blue)
+    ax.set_xlabel('move/coop order')
     ax.set_xticks([i for i in range(len(cost))], labels=special_x_ticks)
+    ax.tick_params(axis='y', labelcolor=blue)
+    ax_right = ax.twinx()
+    ax_right.plot(completion_times[idx_sort], label='LC time', color=orange)
+    ax_right.set_ylabel('LC time', color=orange)
+    ax_right.tick_params(axis='y', labelcolor=orange)
 
     fig.tight_layout()
     fig.show()

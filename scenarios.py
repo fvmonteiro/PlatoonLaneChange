@@ -8,10 +8,12 @@ import control as ct
 import numpy as np
 import pandas as pd
 
+import analysis
 import controllers.optimal_controller as opt_ctrl
 import controllers.optimal_control_costs as occ
 import configuration
 import platoon_lane_change_strategies as lc_strategy
+import post_processing as pp
 from vehicle_group import VehicleGroup
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
@@ -385,11 +387,13 @@ class AllLaneChangeStrategies(LaneChangeScenario):
         self.named_strategies_positions = {'LdF': -1, 'LVF': -1, 'LdFR': -1}
         self.best_strategy = {'merging_order': [], 'coop_order': []}
         self.costs = []
+        self.completion_times = []
+        self.accel_costs = []
 
     def run(self, final_time):
         tf = final_time
         sg = lc_strategy.StrategyGenerator()
-        strategy_number = 5
+        strategy_number = lc_strategy.TemplateRelaxedStrategy.get_id()
         all_positions = [i for i in range(self._n_platoon)]
 
         ldf_lc_order = all_positions
@@ -435,6 +439,10 @@ class AllLaneChangeStrategies(LaneChangeScenario):
                 self.vehicle_group.set_verbose(False)
                 LaneChangeScenario.run(self, tf)
 
+                # data = self.vehicle_group.to_dataframe()
+                # analysis.plot_trajectory(data, '#' + str(counter))
+                # analysis.plot_platoon_lane_change(data)
+
                 # ============ Computing cost ============== #
                 # TODO: a mess for now
 
@@ -456,7 +464,8 @@ class AllLaneChangeStrategies(LaneChangeScenario):
                     desired_state, desired_input
                 )
                 q_terminal = occ.create_state_cost_matrix(
-                    all_vehicles, controlled_veh_ids, y_cost=10., theta_cost=1.)
+                    all_vehicles, controlled_veh_ids, y_cost=100.,
+                    theta_cost=1.)
                 r_terminal = occ.create_input_cost_matrix(
                     all_vehicles, controlled_veh_ids, phi_cost=0.)
                 terminal_cost = occ.quadratic_cost(
@@ -489,6 +498,15 @@ class AllLaneChangeStrategies(LaneChangeScenario):
                 #     f'{r_cost + t_cost:.2f}'
                 #     )
                 # ========================================= #
+
+                # ============= Other costs =============== #
+                self.completion_times.append(
+                    np.max(pp.find_maneuver_completion_time(
+                        self.vehicle_group.get_all_vehicles())))
+                self.accel_costs.append(
+                    sum(pp.compute_acceleration_costs(
+                        self.vehicle_group.get_all_vehicles()).values())
+                )
 
         self.vehicle_group = best_result
         print(f'{sg.counter} strategies tested.\n'

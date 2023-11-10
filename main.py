@@ -96,6 +96,7 @@ def run_brute_force_strategy_test(
         are_vehicles_cooperative)
     run_save_and_plot(scenario, tf, 'Brute Force: Best Order')
     analysis.plot_cost_vs_ordering(scenario.costs,
+                                   scenario.completion_times,
                                    scenario.named_strategies_positions)
 
 
@@ -156,7 +157,7 @@ def main():
         ftol=1.0e-3, estimate_gradient=True
     )
     configuration.Configuration.set_controller_parameters(
-        max_iter=3, time_horizon=10.0,
+        max_iter=3, time_horizon=20.0,
         has_terminal_lateral_constraints=False,
         has_lateral_safety_constraint=False,
         # initial_input_guess=-1.5,
@@ -166,19 +167,19 @@ def main():
     configuration.Configuration.set_scenario_parameters(
         v_ref={'lo': base_speed, 'ld': base_speed, 'p': base_speed * 1.2,
                'fo': base_speed, 'fd': base_speed},
-        delta_x={'lo': 0., 'ld': 0., 'p': 0., 'fd': 15.},
-        platoon_strategies=[4], increase_lc_time_headway=False
+        delta_x={'lo': 0., 'ld': 25., 'p': 0., 'fd': 0.},
+        platoon_strategies=[12], increase_lc_time_headway=False
     )
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
 
     start_time = time.time()
-    run_cbf_lc_scenario(n_platoon, n_orig_ahead, n_orig_behind,
-                        n_dest_ahead, n_dest_behind,
-                        are_vehicles_cooperative)
-    # run_brute_force_strategy_test(
-    #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead,
-    #     n_dest_behind, are_vehicles_cooperative)
+    # run_cbf_lc_scenario(n_platoon, n_orig_ahead, n_orig_behind,
+    #                     n_dest_ahead, n_dest_behind,
+    #                     are_vehicles_cooperative)
+    run_brute_force_strategy_test(
+        n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead,
+        n_dest_behind, are_vehicles_cooperative)
 
     # run_with_external_controller(
     #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,

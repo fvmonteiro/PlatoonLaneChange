@@ -118,6 +118,12 @@ class BaseVehicle(ABC):
     def get_n_inputs(self) -> int:
         return self._n_inputs
 
+    def get_state_names(self) -> list[str]:
+        return self._state_names
+
+    def get_input_names(self) -> list[str]:
+        return self._input_names
+
     def get_ocp_interface(self) -> BaseVehicleInterface:
         return self._ocp_interface(self)
 
@@ -168,11 +174,26 @@ class BaseVehicle(ABC):
         except AttributeError:  # lazy coding
             return self._states
 
+    def get_x_history(self) -> np.ndarray:
+        return self.get_a_state_history('x')
+
+    def get_y_history(self) -> np.ndarray:
+        return self.get_a_state_history('y')
+
+    def get_theta_history(self) -> np.ndarray:
+        return self.get_a_state_history('theta')
+
+    def get_a_state_history(self, state_name: str) -> np.ndarray:
+        return self.get_state_history()[self._state_idx[state_name], :]
+
     def get_state_history(self) -> np.ndarray:
         return self._states_history
 
     def get_inputs(self) -> np.ndarray:
         return self._inputs.copy()
+
+    def get_an_input_history(self, input_name: str) -> np.ndarray:
+        return self.get_input_history()[self._input_idx[input_name], :]
 
     def get_input_history(self) -> np.ndarray:
         return self._inputs_history
@@ -187,6 +208,18 @@ class BaseVehicle(ABC):
 
     def get_derivatives(self) -> np.ndarray:
         return self._derivatives
+
+    def get_orig_lane_leader_id_history(self) -> np.ndarray:
+        return self._orig_leader_id
+
+    def get_dest_lane_leader_id_history(self) -> np.ndarray:
+        return self._destination_leader_id
+
+    def get_dest_lane_follower_id_history(self) -> np.ndarray:
+        return self._destination_follower_id
+
+    def get_incoming_vehicle_id_history(self) -> np.ndarray:
+        return self._incoming_vehicle_id
 
     def get_orig_lane_leader_id(self) -> int:
         return self._orig_leader_id[self._iter_counter]
@@ -509,19 +542,6 @@ class BaseVehicle(ABC):
         :return:
         """
         pass
-
-    # def get_surrounding_vehicle_changes_after_lane_change(
-    #         self) -> dict[int, dict[str, int]]:
-    #     changes = {}
-    #     sv_ids = self.get_relevant_surrounding_vehicle_ids()
-    #     # Current choice: we do not erase safety-relevant vehicles
-    #     # changes[self.get_id()] = {'fd': -1, 'ld': -1}
-    #     if sv_ids['lo'] >= 0 or sv_ids['ld'] >= 0:
-    #         changes[self.get_id()] = {'lo': sv_ids['ld']}
-    #     if sv_ids['fd'] >= 0:
-    #         changes[sv_ids['fd']] = {'lo': self.get_id(),
-    #                                  'leader': self.get_id()}
-    #     return changes
 
     @staticmethod
     def compute_a_gap(leading_vehicle: BaseVehicle,

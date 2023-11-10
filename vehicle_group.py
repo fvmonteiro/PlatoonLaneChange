@@ -102,13 +102,14 @@ class VehicleGroup:
         inputs = []
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
-            input_history = vehicle.get_input_history()
+            # input_history = vehicle.get_input_history()
             if vehicle_inputs_map is None:
-                inputs.append(input_history)
+                inputs.append(vehicle.get_input_history())
             elif veh_id in vehicle_inputs_map:
                 for input_name in vehicle_inputs_map[veh_id]:
-                    inputs.append(input_history[
-                                      vehicle.get_idx_of_input(input_name)])
+                    inputs.append(vehicle.get_an_input_history(input_name))
+                    # inputs.append(input_history[
+                    #                   vehicle.get_idx_of_input(input_name)])
         return np.vstack(inputs)
 
     def get_mode_sequence(self) -> som.ModeSequence:
@@ -396,10 +397,6 @@ class VehicleGroup:
                         f'current lane: {vehicle.get_current_lane()}.)')
                 return False
         return True
-
-    def find_maneuver_completion_time(self) -> float:
-        # TODO
-        pass
 
     def centralize_control(self):
         centralized_controller = opt_ctrl.VehicleOptimalController()

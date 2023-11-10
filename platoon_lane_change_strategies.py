@@ -188,7 +188,13 @@ class SynchronousStrategy(LaneChangeStrategy):
 
 
 class TemplateStrategy(LaneChangeStrategy):
-    _id = 5
+    """
+    Strategy class for which we must provide the lane changing order and
+    the cooperation order.
+    Any sequential one-by-one maneuver strategy can be described this way.
+    """
+
+    _id = 2
     _name = 'Brute Force strategy'
 
     _idx: int
@@ -201,10 +207,10 @@ class TemplateStrategy(LaneChangeStrategy):
     # at the destination lane
     _last_dest_lane_vehicle_idx: int
 
-    def set_parameters(self, merging_order: list[int] = None,
+    def set_parameters(self, lane_changing_order: list[int] = None,
                        cooperating_order: list[int] = None):
         self._idx = 0
-        self._lane_changing_order = merging_order
+        self._lane_changing_order = lane_changing_order
         self._cooperating_order = cooperating_order
         self._last_dest_lane_vehicle_idx = self._lane_changing_order[0]
 
@@ -257,19 +263,85 @@ class TemplateStrategy(LaneChangeStrategy):
         return -1
 
 
+class TemplateRelaxedStrategy(TemplateStrategy):
+    """
+    Similar to TemplateStrategy but allows vehicles to move as soon as it is
+    safe
+    There are some issues to address:
+    - How to ensure vehicles stay together? We keep the desired dest lane
+     leader to current dest lane leader comparison
+    - How to ensure cooperation once the next vehicle starts its lane change
+    """
+
+    _id = 3
+    _name = 'Relaxed brute force'
+
+    def can_start_lane_change(self, ego_position: int) -> bool:
+        if self._idx >= len(self._lane_changing_order):
+            return True
+        next_in_line = self._lane_changing_order[self._idx]
+        next_veh_to_maneuver = self.platoon_vehicles[next_in_line]
+        is_my_turn = ego_position == next_in_line
+        # If it's my turn, and I start moving, I can allow the next vehicle
+        # to move too.
+        if is_my_turn and next_veh_to_maneuver.get_is_lane_change_safe():
+            if self._cooperating_order[self._idx] == -1:
+                # If the vehicle started a maneuver behind all others (no
+                # coop), it is now the last vehicle
+                self._last_dest_lane_vehicle_idx = next_in_line
+            self._idx += 1
+
+        return (is_my_turn and
+                (next_veh_to_maneuver.get_desired_dest_lane_leader_id()
+                 == next_veh_to_maneuver.get_dest_lane_leader_id()))
+
+    def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
+        # First check if it's our turn to change lanes
+        if (self._idx >= len(self.platoon_vehicles)  # all platoon moved
+                or ego_position != self._lane_changing_order[self._idx]):
+            return -1
+        # The first vehicle to change lanes does so behind its destination
+        # lane leader
+        if self._idx == 0:
+            return self.platoon_vehicles[self._lane_changing_order[
+                self._idx]].get_dest_lane_leader_id()
+
+        coop_veh_id = self._cooperating_order[self._idx]
+        if coop_veh_id == -1:
+            # Merge behind the platoon vehicle farther back in the dest lane
+            return self.platoon_vehicles[
+                self._last_dest_lane_vehicle_idx].get_id()
+        else:
+            # Get the vehicle ahead the vehicle which helps generate the gap
+            return self.platoon_vehicles[self._cooperating_order[
+                self._idx]].get_orig_lane_leader_id()
+
+    def _get_incoming_vehicle_id(self, ego_position) -> int:
+        # We don't have to check whether the vehicle is already at the
+        # destination lane because the cooperating order already takes care
+        # of that
+        # TODO: cooperation is ending too soon
+        # if (self._idx < len(self.platoon_vehicles)
+        idx = min(self._idx, len(self.platoon_vehicles) - 1)
+        if ego_position == self._cooperating_order[idx]:
+            return self.platoon_vehicles[
+                self._lane_changing_order[idx]].get_id()
+        return -1
+
+
 class LeaderFirstStrategy(TemplateStrategy):
-    _id = 2
+    _id = 11
     _name = 'Leader First strategy'
 
     def __init__(self, platoon_vehicles: list[fsv.FourStateVehicle]):
         super().__init__(platoon_vehicles)
         self._is_initialized = False
 
-    def set_parameters(self, merging_order: list[int] = None,
+    def set_parameters(self, lane_changing_order: list[int] = None,
                        cooperating_order: list[int] = None):
-        merging_order = [i for i in range(len(self.platoon_vehicles))]
+        lane_changing_order = [i for i in range(len(self.platoon_vehicles))]
         cooperating_order = [-1] * len(self.platoon_vehicles)
-        super().set_parameters(merging_order, cooperating_order)
+        super().set_parameters(lane_changing_order, cooperating_order)
         self._is_initialized = True
 
     def can_start_lane_change(self, ego_position: int) -> bool:
@@ -289,19 +361,19 @@ class LeaderFirstStrategy(TemplateStrategy):
 
 
 class LastFirstStrategy(TemplateStrategy):
-    _id = 3
+    _id = 12
     _name = 'Last First strategy'
 
     def __init__(self, platoon_vehicles: list[fsv.FourStateVehicle]):
         super().__init__(platoon_vehicles)
         self._is_initialized = False
 
-    def set_parameters(self, merging_order: list[int] = None,
+    def set_parameters(self, lane_changing_order: list[int] = None,
                        cooperating_order: list[int] = None):
-        merging_order = [i for i in range(len(self.platoon_vehicles))]
-        merging_order.reverse()
-        cooperating_order = [-1] + merging_order[:-1]
-        super().set_parameters(merging_order, cooperating_order)
+        lane_changing_order = [i for i in range(len(self.platoon_vehicles))]
+        lane_changing_order.reverse()
+        cooperating_order = [-1] + lane_changing_order[:-1]
+        super().set_parameters(lane_changing_order, cooperating_order)
         self._is_initialized = True
 
     def can_start_lane_change(self, ego_position: int) -> bool:
@@ -321,18 +393,18 @@ class LastFirstStrategy(TemplateStrategy):
 
 
 class LeaderFirstReverseStrategy(TemplateStrategy):
-    _id = 4
+    _id = 13
     _name = 'Leader First Reverse strategy'
 
     def __init__(self, platoon_vehicles: list[fsv.FourStateVehicle]):
         super().__init__(platoon_vehicles)
         self._is_initialized = False
 
-    def set_parameters(self, merging_order: list[int] = None,
+    def set_parameters(self, lane_changing_order: list[int] = None,
                        cooperating_order: list[int] = None):
-        merging_order = [i for i in range(len(self.platoon_vehicles))]
-        cooperating_order = [-1] + merging_order[:-1]
-        super().set_parameters(merging_order, cooperating_order)
+        lane_changing_order = [i for i in range(len(self.platoon_vehicles))]
+        cooperating_order = [-1] + lane_changing_order[:-1]
+        super().set_parameters(lane_changing_order, cooperating_order)
         self._is_initialized = True
 
     def can_start_lane_change(self, ego_position: int) -> bool:
@@ -356,7 +428,7 @@ class LeaderFirstReverseStrategy(TemplateStrategy):
 # template strategy format
 
 class LeaderFirstStrategyHardCoded(LaneChangeStrategy):
-    _id = 6
+    _id = 101
     _name = 'Leader First strategy'
 
     def can_start_lane_change(self, ego_position: int) -> bool:
@@ -379,7 +451,7 @@ class LeaderFirstStrategyHardCoded(LaneChangeStrategy):
 
 
 class LastFirstStrategyHardCoded(LaneChangeStrategy):
-    _id = 7
+    _id = 102
     _name = 'Last First strategy'
 
     def can_start_lane_change(self, ego_position: int) -> bool:
@@ -413,7 +485,7 @@ class LastFirstStrategyHardCoded(LaneChangeStrategy):
 
 
 class LeaderFirstReverseStrategyHardCoded(LaneChangeStrategy):
-    _id = 8
+    _id = 103
     _name = 'Leader First Reverse strategy'
 
     def can_start_lane_change(self, ego_position: int) -> bool:
@@ -452,10 +524,11 @@ class LeaderFirstReverseStrategyHardCoded(LaneChangeStrategy):
 strategy_map = {
     IndividualStrategy.get_id(): IndividualStrategy,
     SynchronousStrategy.get_id(): SynchronousStrategy,
+    TemplateStrategy.get_id(): TemplateStrategy,
+    TemplateRelaxedStrategy.get_id(): TemplateRelaxedStrategy,
     LeaderFirstStrategy.get_id(): LeaderFirstStrategy,
     LastFirstStrategy.get_id(): LastFirstStrategy,
     LeaderFirstReverseStrategy.get_id(): LeaderFirstReverseStrategy,
-    TemplateStrategy.get_id(): TemplateStrategy,
     LeaderFirstStrategyHardCoded.get_id(): LeaderFirstStrategyHardCoded,
     LastFirstStrategyHardCoded.get_id(): LastFirstStrategyHardCoded,
     LeaderFirstReverseStrategyHardCoded.get_id():

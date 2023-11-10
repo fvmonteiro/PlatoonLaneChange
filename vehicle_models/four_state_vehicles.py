@@ -299,8 +299,8 @@ class OptimalControlVehicle(FourStateVehicle):
             self._desired_future_follower_id)
         return new_vehicle
 
-    def get_intermediate_steps_data(self):
-        return self.get_opt_controller().get_data_per_iteration()
+    def get_intermediate_results(self):
+        return self.get_opt_controller().get_simulation_per_iteration()
 
     def update_mode(self, vehicles: Mapping[int, base.BaseVehicle]):
         if self.has_lane_change_intention():
@@ -406,7 +406,7 @@ class ClosedLoopVehicle(FourStateVehicle):
         is_my_turn = (
                 not self.is_in_a_platoon()
                 or self.get_platoon().can_start_lane_change(self.get_id()))
-        # We can't short-circuit evaluation because the platoon's method
+        # We can't short-circuit the evaluation because the platoon's method
         # (can_start_lane_change) may update internal values.
         return is_safe and is_my_turn
 

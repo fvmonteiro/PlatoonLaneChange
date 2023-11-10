@@ -58,7 +58,7 @@ class VehicleOptimalController:
         self._dest_lane_vehicles_ids: list[int] = []
         self._activation_time = np.inf
 
-        self._data_per_iteration = []
+        self._data_per_iteration: list[vg.VehicleGroup] = []
         self._results_summary: defaultdict[str, list] = defaultdict(list)
 
     def _set_config(self):
@@ -82,28 +82,28 @@ class VehicleOptimalController:
         return np.round(np.linspace(0, self.time_horizon, n),
                         -rounding_precision)
 
-    def get_data_per_iteration(self):
+    def get_simulation_per_iteration(self) -> list[vg.VehicleGroup]:
         return self._data_per_iteration
 
-    def get_desired_state(self):
+    def get_desired_state(self) -> np.ndarray:
         return self._desired_state
 
     def get_results_summary(self):
         return self._results_summary
 
-    def get_activation_time(self):
+    def get_activation_time(self) -> float:
         return self._activation_time
 
     def has_solution(self) -> bool:
         return self._ocp_has_solution
 
-    def get_running_cost_history(self):
+    def get_running_cost_history(self) -> list[np.ndarray]:
         return self._cost_with_tracker.get_running_cost()
 
-    def get_terminal_cost_history(self):
+    def get_terminal_cost_history(self) -> list[np.ndarray]:
         return self._cost_with_tracker.get_terminal_cost()
 
-    def get_ocp_response(self):
+    def get_ocp_response(self) -> ct.TimeResponseData:
         """
         Gets the states as computed by the optimal control solver tool
         """
@@ -151,7 +151,7 @@ class VehicleOptimalController:
         else:
             return current_inputs
 
-    def is_active(self, current_time: float):
+    def is_active(self, current_time: float) -> bool:
         return (self._activation_time <= current_time
                 <= self._activation_time + self.time_horizon)
 
@@ -227,8 +227,7 @@ class VehicleOptimalController:
 
             simulated_vehicle_group = self.simulate_over_optimization_horizon(
                 vehicles, plot_result=True)
-            self._data_per_iteration.append(
-                simulated_vehicle_group.to_dataframe())
+            self._data_per_iteration.append(simulated_vehicle_group)
             output_sequence = simulated_vehicle_group.get_mode_sequence()
 
             print("Input sequence:  {}\nOutput sequence: {}".format(
@@ -627,12 +626,12 @@ class VehicleOptimalController:
             vehicle_group.write_vehicle_states(t, state_by_vehicle,
                                                inputs_by_vehicle)
         if plot_result:
+            data = vehicle_group.to_dataframe()
             if len(self._platoon_vehicle_pairs) < 1:
                 analysis.plot_constrained_lane_change(
-                    vehicle_group.to_dataframe(),
-                    vehicles[self._center_veh_id].get_id())
+                    data, vehicles[self._center_veh_id].get_id())
             else:
-                analysis.plot_platoon_lane_change(vehicle_group.to_dataframe())
+                analysis.plot_platoon_lane_change(data)
         return vehicle_group
 
     def simulate_over_optimization_horizon(
@@ -658,12 +657,12 @@ class VehicleOptimalController:
             vehicle_group.simulate_one_time_step(sim_time[i + 1],
                                                  optimal_inputs)
         if plot_result:
+            data = vehicle_group.to_dataframe()
             if len(self._platoon_vehicle_pairs) < 1:
                 analysis.plot_constrained_lane_change(
-                    vehicle_group.to_dataframe(),
-                    vehicles[self._center_veh_id].get_id())
+                    data, vehicles[self._center_veh_id].get_id())
             else:
-                analysis.plot_platoon_lane_change(vehicle_group.to_dataframe())
+                analysis.plot_platoon_lane_change(data)
         return vehicle_group
 
     def create_initial_guess(self, vehicles: Mapping[int, base.BaseVehicle]
