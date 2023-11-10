@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pickle
 import warnings
-from typing import Mapping, Union
+from typing import Mapping, Union, Iterable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -76,33 +76,48 @@ def plot_costs_vs_iteration(running_costs, terminal_costs,
     plt.show()
 
 
-def plot_trajectory(data: pd.DataFrame, plot_title: str = None):
+def plot_cost_vs_ordering(cost: Iterable[float],
+                          named_orderings: dict[str, int]):
+    cost = np.array(cost)
+    special_x_ticks = [''] * len(cost)
+    for key, value in named_orderings.items():
+        special_x_ticks[value] = key
+
+    idx_sort = np.argsort(cost)[::-1]
+    special_x_ticks = np.array(special_x_ticks)[idx_sort]
+
+    fig, ax = plt.subplots(1, 1)
+    ax.plot(cost[idx_sort])
+    ax.set(xlabel='move/coop order',
+           ylabel='cost')
+    ax.set_xticks([i for i in range(len(cost))], labels=special_x_ticks)
+
+    fig.tight_layout()
+    fig.show()
+
+
+def plot_trajectory(data: pd.DataFrame, plot_title: str = None,
+                    n_plots: int = 8):
     # min_y, max_y = data['y'].min(), data['y'].max()
     min_x, max_x = data['x'].min(), data['x'].max()
     tf = data['t'].max()
-    if tf < 10:
-        dt = 1.0  # [s]
-    else:
-        dt = 2.0
-    # n = round(tf / dt) + 1
+    dt = tf / n_plots
     time = np.arange(data['t'].min(), tf + dt / 2, dt)
-    # time = np.linspace(data['t'].min(), tf, n)
     step = round(dt / (data['t'].iloc[1] - data['t'].iloc[0]))
     fig, ax = plt.subplots(len(time), 1)
-    fig.set_size_inches(6, 6)
+    fig.set_size_inches(6, n_plots-1)
     for i in range(len(time)):
         k = i * step
-        if i == len(time) - 1:  # temp
-            k -= 1
-
         for veh_id in data['id'].unique():
             veh_data = data[data['id'] == veh_id]
             veh_name = veh_data['name'].iloc[0]
             color = _get_color_by_name(veh_name)
+            if i == len(time) - 1:  # temp
+                k = veh_data.shape[0] - 1
             ax[i].scatter(data=veh_data.iloc[k],
                           x='x', y='y', marker='>', color=color, )
 
-        ax[i].set_title('t = {}'.format(time[i]), loc='left')
+        ax[i].set_title('t = {:.1f}'.format(time[i]), loc='left')
         ax[i].axhline(y=config.LANE_WIDTH / 2, linestyle='--', color='black')
         # ax[i].set_aspect('equal', adjustable='box')
         ax[i].set(xlim=(min_x - 2, max_x + 3),

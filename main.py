@@ -3,14 +3,10 @@ from __future__ import annotations
 import datetime
 import time
 
-import numpy as np
-
 import analysis
 import configuration
 import vehicle_models
-import platoon
 import scenarios
-import controllers.optimal_control_costs as occ
 
 trajectory_file_name = 'trajectory_data.pickle'  # temp
 cost_file_name = 'cost_data.pickle'
@@ -86,9 +82,8 @@ def run_cbf_lc_scenario(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
         scenario.platoon_full_feedback_lane_change(
             n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
             strategy_number)
-        tf = configuration.Configuration.time_horizon + 2
-        run_save_and_plot(scenario, tf,
-                          platoon.strategy_map[strategy_number].get_name())
+        tf = configuration.Configuration.time_horizon
+        run_save_and_plot(scenario, tf)
 
 
 def run_brute_force_strategy_test(
@@ -99,7 +94,9 @@ def run_brute_force_strategy_test(
     scenario = scenarios.AllLaneChangeStrategies(
         n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
         are_vehicles_cooperative)
-    run_save_and_plot(scenario, tf, 'Brute Force')
+    run_save_and_plot(scenario, tf, 'Brute Force: Best Order')
+    analysis.plot_cost_vs_ordering(scenario.costs,
+                                   scenario.named_strategies_positions)
 
 
 def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
@@ -150,19 +147,16 @@ def load_and_plot_latest_scenario():
 
 def main():
 
-    # prob = Problem([i for i in range(3)])
-    # prob.solve()
-
-    n_platoon = 3
-    n_orig_ahead, n_orig_behind = 0, 0
-    n_dest_ahead, n_dest_behind = 0, 0
+    n_platoon = 2
+    n_orig_ahead, n_orig_behind = 1, 0
+    n_dest_ahead, n_dest_behind = 1, 1
 
     configuration.Configuration.set_solver_parameters(
         max_iter=100, discretization_step=0.2,
         ftol=1.0e-3, estimate_gradient=True
     )
     configuration.Configuration.set_controller_parameters(
-        max_iter=3, time_horizon=15.0,
+        max_iter=3, time_horizon=10.0,
         has_terminal_lateral_constraints=False,
         has_lateral_safety_constraint=False,
         # initial_input_guess=-1.5,
@@ -170,25 +164,26 @@ def main():
     )
     base_speed = 20.
     configuration.Configuration.set_scenario_parameters(
-        v_ref={'lo': base_speed, 'ld': base_speed, 'p': base_speed,
+        v_ref={'lo': base_speed, 'ld': base_speed, 'p': base_speed * 1.2,
                'fo': base_speed, 'fd': base_speed},
-        delta_x={'lo': 0., 'ld': 0., 'p': 0., 'fd': 0.},
-        platoon_strategies='all', increase_lc_time_headway=False
+        delta_x={'lo': 0., 'ld': 0., 'p': 0., 'fd': 15.},
+        platoon_strategies=[4], increase_lc_time_headway=False
     )
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
 
     start_time = time.time()
+    run_cbf_lc_scenario(n_platoon, n_orig_ahead, n_orig_behind,
+                        n_dest_ahead, n_dest_behind,
+                        are_vehicles_cooperative)
+    # run_brute_force_strategy_test(
+    #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead,
+    #     n_dest_behind, are_vehicles_cooperative)
+
     # run_with_external_controller(
     #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
     #     is_acceleration_optimal, are_vehicles_cooperative
     # )
-    # run_cbf_lc_scenario(n_platoon, n_orig_ahead, n_orig_behind,
-    #                     n_dest_ahead, n_dest_behind,
-    #                     are_vehicles_cooperative)
-    run_brute_force_strategy_test(
-        n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead,
-        n_dest_behind, are_vehicles_cooperative)
     # run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
     #                  n_dest_ahead, n_dest_behind,
     #                  is_acceleration_optimal,

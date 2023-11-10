@@ -148,16 +148,13 @@ class BaseVehicle(ABC):
                 else self.h_ref_lk)
 
     def get_a_state_by_name(self, state_name) -> float:
-        return self._states[self._state_idx[state_name]]
+        return self.get_states()[self._state_idx[state_name]]
 
     def get_an_input_by_name(self, input_name) -> float:
         return self._inputs[self._input_idx[input_name]]
 
     def get_current_lane(self) -> int:
-        try:
-            return round(self.get_y() / config.LANE_WIDTH)
-        except ValueError:
-            print('here we are')
+        return round(self.get_y() / config.LANE_WIDTH)
 
     def get_target_lane(self) -> int:
         return self._target_lane
@@ -166,7 +163,10 @@ class BaseVehicle(ABC):
         return self._target_lane * config.LANE_WIDTH
 
     def get_states(self) -> np.ndarray:
-        return self._states.copy()
+        try:
+            return self._states_history[:, self._iter_counter]
+        except AttributeError:  # lazy coding
+            return self._states
 
     def get_state_history(self) -> np.ndarray:
         return self._states_history

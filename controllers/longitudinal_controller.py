@@ -97,5 +97,5 @@ class LongitudinalController:
     def compute_gap_control(self, gap: float, v_ego: float,
                             v_leader: float) -> float:
         h_ref = self.vehicle.get_reference_time_headway()
-        return (self.kg * (gap - h_ref * v_ego - self.vehicle.c)
+        return (self.kg * (gap - (h_ref * v_ego + self.vehicle.c))
                 + self.kv * (v_leader - v_ego))

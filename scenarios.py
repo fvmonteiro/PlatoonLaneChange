@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 from abc import ABC, abstractmethod
 import pickle
 from typing import Iterable, Mapping, Sequence, Type, Union
@@ -9,11 +8,10 @@ import control as ct
 import numpy as np
 import pandas as pd
 
-import analysis
 import controllers.optimal_controller as opt_ctrl
 import controllers.optimal_control_costs as occ
 import configuration
-import platoon
+import platoon_lane_change_strategies as lc_strategy
 from vehicle_group import VehicleGroup
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
@@ -384,19 +382,30 @@ class AllLaneChangeStrategies(LaneChangeScenario):
         self._nda = n_dest_ahead
         self._ndb = n_dest_behind
 
+        self.named_strategies_positions = {'LdF': -1, 'LVF': -1, 'LdFR': -1}
+        self.best_strategy = {'merging_order': [], 'coop_order': []}
+        self.costs = []
+
     def run(self, final_time):
         tf = final_time
-        sg = platoon.StrategyGenerator()
+        sg = lc_strategy.StrategyGenerator()
         strategy_number = 5
-        all_positions = set([i for i in range(self._n_platoon)])
+        all_positions = [i for i in range(self._n_platoon)]
+
+        ldf_lc_order = all_positions
+        ldf_coop_order = [-1] * self._n_platoon
+        lvf_lc_order = all_positions[::-1]
+        lvf_coop_order = [-1] + lvf_lc_order[:1]
+        ldfr_lc_order = all_positions
+        ldfr_coop_order = [-1] + ldfr_lc_order[:-1]
+
+        remaining_vehicles = set(all_positions)
         success = []
-        costs = []
         best_cost = np.inf
-        best_strategy = {'merging_order': [], 'coop_order': []}
         best_result = self.vehicle_group
         counter = 0
         for i in range(self._n_platoon):
-            remaining_vehicles = all_positions
+
             print('Starting with veh', i)
 
             # all_merging_orders, all_coop_orders = sg.get_all_orders(
@@ -404,7 +413,17 @@ class AllLaneChangeStrategies(LaneChangeScenario):
             # for merging_order, coop_order in zip(all_merging_orders[6:7],
             #                                      all_coop_orders[6:7]):
             for merging_order, coop_order in sg.generate_order_all(
-                    i, [], [], remaining_vehicles):
+                    i, [], [], remaining_vehicles.copy()):
+                if (merging_order == ldf_lc_order
+                        and coop_order == ldf_coop_order):
+                    self.named_strategies_positions['LdF'] = counter
+                elif (merging_order == lvf_lc_order
+                        and coop_order == lvf_coop_order):
+                    self.named_strategies_positions['LVF'] = counter
+                elif (merging_order == ldfr_lc_order
+                        and coop_order == ldfr_coop_order):
+                    self.named_strategies_positions['LdFR'] = counter
+
                 counter += 1
                 base.BaseVehicle.reset_vehicle_counter()
                 self.vehicle_group = VehicleGroup()
@@ -455,11 +474,11 @@ class AllLaneChangeStrategies(LaneChangeScenario):
                     self.vehicle_group.get_all_states(),
                     self.vehicle_group.get_all_inputs(),
                     self.vehicle_group.get_simulated_time())
-                costs.append(r_cost + t_cost)
-                if costs[-1] < best_cost:
-                    best_cost = costs[-1]
-                    best_strategy['merging_order'] = merging_order[:]
-                    best_strategy['coop_order'] = coop_order[:]
+                self.costs.append(r_cost + t_cost)
+                if self.costs[-1] < best_cost:
+                    best_cost = self.costs[-1]
+                    self.best_strategy['merging_order'] = merging_order[:]
+                    self.best_strategy['coop_order'] = coop_order[:]
                     best_result = self.vehicle_group
 
                 # print(
@@ -475,8 +494,8 @@ class AllLaneChangeStrategies(LaneChangeScenario):
         print(f'{sg.counter} strategies tested.\n'
               f'Success rate: {sum(success) / sg.counter * 100}%\n'
               f'Best strategy: cost={best_cost}, '
-              f'merging order={best_strategy["merging_order"]}, '
-              f'coop order={best_strategy["coop_order"]}')
+              f'merging order={self.best_strategy["merging_order"]}, '
+              f'coop order={self.best_strategy["coop_order"]}')
 
 
 class ExternalOptimalControlScenario(SimulationScenario, ABC):

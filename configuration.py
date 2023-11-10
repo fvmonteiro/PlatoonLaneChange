@@ -37,8 +37,7 @@ class Configuration:
     v_ref = {'lo': 10., 'ld': 10., 'p': 10.,
              'fo': 10., 'fd': 10.}
     delta_x = {'lo': 0.0, 'ld': 0.0, 'p': 0.0, 'fo': 0.0, 'fd': 0.0}
-    platoon_strategies = [0]  # 1: synch, 2: leader first, 3: last first,
-    # 4: leader first reverse
+    platoon_strategies = [0]
     increase_lc_time_headway: bool = False
 
     @staticmethod
@@ -125,7 +124,7 @@ class Configuration:
     def set_scenario_parameters(
             v_ref: Mapping[str, float] = None,
             delta_x: Mapping[str, float] = None,
-            platoon_strategies: Union[list[int], int, str] = None,
+            platoon_strategies: Union[list[int], int] = None,
             increase_lc_time_headway: bool = False):
         """
 
@@ -152,8 +151,8 @@ class Configuration:
                 Configuration.delta_x[key] = value
         if platoon_strategies is None:
             platoon_strategies = 0
-        if isinstance(platoon_strategies, str):
-            platoon_strategies = [i for i in range(5)]
+        # if platoon_strategies == 'all':
+        #     platoon_strategies = [i for i in range(5)]
         elif np.isscalar(platoon_strategies):
             platoon_strategies = [platoon_strategies]
         Configuration.platoon_strategies = platoon_strategies

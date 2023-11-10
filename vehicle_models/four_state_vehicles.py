@@ -402,9 +402,13 @@ class ClosedLoopVehicle(FourStateVehicle):
 
     def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]
                               ) -> bool:
-        if self.check_is_lane_change_safe(vehicles):
-            return (not self.is_in_a_platoon()
-                    or self.get_platoon().can_start_lane_change(self.get_id()))
+        is_safe = self.check_is_lane_change_safe(vehicles)
+        is_my_turn = (
+                not self.is_in_a_platoon()
+                or self.get_platoon().can_start_lane_change(self.get_id()))
+        # We can't short-circuit evaluation because the platoon's method
+        # (can_start_lane_change) may update internal values.
+        return is_safe and is_my_turn
 
     def is_lane_change_complete(self):
         return (np.abs(self.get_y() - self.get_target_y()) < 1e-2

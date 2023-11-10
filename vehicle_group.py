@@ -397,6 +397,10 @@ class VehicleGroup:
                 return False
         return True
 
+    def find_maneuver_completion_time(self) -> float:
+        # TODO
+        pass
+
     def centralize_control(self):
         centralized_controller = opt_ctrl.VehicleOptimalController()
         ocv = self.get_optimal_control_vehicles()
