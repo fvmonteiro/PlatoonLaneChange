@@ -31,7 +31,7 @@ class BaseVehicle(ABC):
     _iter_counter: int
     _states_history: np.ndarray
     _inputs_history: np.ndarray
-    _orig_leader_id: np.ndarray[int]
+    _origin_leader_id: np.ndarray[int]
     _destination_leader_id: np.ndarray[int]
     _destination_follower_id: np.ndarray[int]
     _incoming_vehicle_id: np.ndarray[int]
@@ -46,7 +46,7 @@ class BaseVehicle(ABC):
 
     # Used when we need to copy a vehicle
     static_attribute_names = {
-        'free_flow_speed', '_id', '_name', 'lr', 'lf', 'wheelbase',
+        '_free_flow_speed', '_id', '_name', 'lr', 'lf', 'wheelbase',
         'phi_max', 'brake_max', 'accel_max',
         'h_safe_lk', 'h_ref_lk', 'h_safe_lc', 'h_ref_lc', 'c',
         '_is_connected', '_is_verbose',
@@ -80,10 +80,7 @@ class BaseVehicle(ABC):
         self._is_verbose = True
 
     def __repr__(self):
-        return self.__class__.__name__ + ' id=' + str(self._id)
-
-    def __str__(self):
-        return self.__class__.__name__ + ": " + str(self._name)
+        return f'{self.__class__.__name__} id={self._id}, name={self._name}'
 
     @staticmethod
     def reset_vehicle_counter():
@@ -98,31 +95,27 @@ class BaseVehicle(ABC):
     def get_idx_of_input(self, name: str) -> int:
         return self._input_idx[name]
 
-    # @classmethod
-    # def get_accel_idx(cls):
-    #     return cls.get_idx_of_input('a')
-    #
-    # @classmethod
-    # def get_phi_idx(cls):
-    #     return cls.get_idx_of_input('phi')
-
     def get_id(self) -> int:
         return self._id
 
     def get_name(self) -> str:
         return self._name
 
-    def get_n_states(self) -> int:
-        return self._n_states
+    @classmethod
+    def get_n_states(cls) -> int:
+        return len(cls._state_names)
 
-    def get_n_inputs(self) -> int:
-        return self._n_inputs
+    @classmethod
+    def get_n_inputs(cls) -> int:
+        return len(cls._input_names)
 
-    def get_state_names(self) -> list[str]:
-        return self._state_names
+    @classmethod
+    def get_state_names(cls) -> list[str]:
+        return cls._state_names
 
-    def get_input_names(self) -> list[str]:
-        return self._input_names
+    @classmethod
+    def get_input_names(cls) -> list[str]:
+        return cls._input_names
 
     def get_ocp_interface(self) -> BaseVehicleInterface:
         return self._ocp_interface(self)
@@ -209,25 +202,25 @@ class BaseVehicle(ABC):
     def get_derivatives(self) -> np.ndarray:
         return self._derivatives
 
-    def get_orig_lane_leader_id_history(self) -> np.ndarray:
-        return self._orig_leader_id
+    def get_origin_lane_leader_id_history(self) -> np.ndarray:
+        return self._origin_leader_id
 
-    def get_dest_lane_leader_id_history(self) -> np.ndarray:
+    def get_destination_lane_leader_id_history(self) -> np.ndarray:
         return self._destination_leader_id
 
-    def get_dest_lane_follower_id_history(self) -> np.ndarray:
+    def get_destination_lane_follower_id_history(self) -> np.ndarray:
         return self._destination_follower_id
 
     def get_incoming_vehicle_id_history(self) -> np.ndarray:
         return self._incoming_vehicle_id
 
-    def get_orig_lane_leader_id(self) -> int:
-        return self._orig_leader_id[self._iter_counter]
+    def get_origin_lane_leader_id(self) -> int:
+        return self._origin_leader_id[self._iter_counter]
 
-    def get_dest_lane_leader_id(self) -> int:
+    def get_destination_lane_leader_id(self) -> int:
         return self._destination_leader_id[self._iter_counter]
 
-    def get_dest_lane_follower_id(self) -> int:
+    def get_destination_lane_follower_id(self) -> int:
         return self._destination_follower_id[self._iter_counter]
 
     def get_incoming_vehicle_id(self) -> int:
@@ -238,9 +231,9 @@ class BaseVehicle(ABC):
         Returns the IDs relevant vehicles
         :return:
         """
-        return {'lo': self.get_orig_lane_leader_id(),
-                'ld': self.get_dest_lane_leader_id(),
-                'fd': self.get_dest_lane_follower_id(),
+        return {'lo': self.get_origin_lane_leader_id(),
+                'ld': self.get_destination_lane_leader_id(),
+                'fd': self.get_destination_lane_follower_id(),
                 'leader': self.get_current_leader_id()}
 
     def get_possible_target_leader_ids(self) -> list[int]:
@@ -251,10 +244,10 @@ class BaseVehicle(ABC):
         candidates = [
             # For safety, we always need to be aware of the vehicle physically
             # ahead on the same lane
-            self.get_orig_lane_leader_id(),
+            self.get_origin_lane_leader_id(),
             # The vehicle behind which we want to merge. When in a platoon,
             # this may be different from current destination lane leader
-            self.get_desired_dest_lane_leader_id(),
+            self.get_desired_destination_lane_leader_id(),
             # A vehicle that needs our cooperation to merge in front of us. The
             # value can be determined by a cooperation request or by a platoon
             # lane changing strategy
@@ -262,8 +255,8 @@ class BaseVehicle(ABC):
         ]
         return candidates
 
-    def get_desired_dest_lane_leader_id(self) -> int:
-        return self.get_dest_lane_leader_id()
+    def get_desired_destination_lane_leader_id(self) -> int:
+        return self.get_destination_lane_leader_id()
 
     def get_desired_future_follower_id(self) -> int:
         return self._desired_future_follower_id
@@ -279,12 +272,12 @@ class BaseVehicle(ABC):
         except IndexError:
             # Some vehicles never set a target leader because they do not
             # have closed-loop acceleration control
-            return self._orig_leader_id[self._iter_counter]
+            return self._origin_leader_id[self._iter_counter]
 
     def get_platoon(self):
         return None
 
-    def make_reset_copy(self, initial_state=None) -> V:
+    def make_reset_copy(self, initial_state: np.ndarray = None) -> V:
         """
         Creates copies of vehicles used in internal iterations of our optimal
         controller. For vehicles without optimal control, the method returns
@@ -300,15 +293,16 @@ class BaseVehicle(ABC):
         self.copy_attributes(new_vehicle, initial_state)
         return new_vehicle
 
-    def copy_attributes(self, new_vehicle: BaseVehicle, initial_state=None):
+    def copy_attributes(self, new_vehicle: BaseVehicle,
+                        initial_state: np.ndarray = None):
         for attr_name in self.static_attribute_names:
             setattr(new_vehicle, attr_name, getattr(self, attr_name))
         if initial_state is None:
             initial_state = self.get_states()
-        new_vehicle.copy_initial_state(initial_state)
+        new_vehicle.set_initial_state(full_state=initial_state)
         new_vehicle._target_lane = self._target_lane
 
-    def make_open_loop_copy(self, initial_state=None) -> V:
+    def make_open_loop_copy(self, initial_state: np.ndarray = None) -> V:
         """
         Creates copies of vehicles used in internal iterations of our optimal
         controller. For vehicles without optimal control, the method returns
@@ -319,14 +313,14 @@ class BaseVehicle(ABC):
         """
         return self.make_reset_copy(initial_state)
 
-    def make_closed_loop_copy(self, initial_state=None) -> V:
+    def make_closed_loop_copy(self, initial_state: np.ndarray = None) -> V:
         return self.make_reset_copy(initial_state)
 
     def _reset_copied_vehicle(self, new_vehicle: BaseVehicle,
-                              initial_state=None) -> None:
+                              initial_state: np.ndarray = None) -> None:
         if initial_state is None:
             initial_state = self.get_states()
-        new_vehicle.copy_initial_state(initial_state)
+        new_vehicle.set_initial_state(full_state=initial_state)
         new_vehicle._target_lane = self._target_lane
         new_vehicle.reset_simulation_logs()
 
@@ -339,9 +333,24 @@ class BaseVehicle(ABC):
     def set_verbose(self, value: bool) -> None:
         self._is_verbose = value
 
-    def set_initial_state(self, x: float, y: float, theta: float,
-                          v: float = None) -> None:
-        self.initial_state = self.create_state_vector(x, y, theta, v)
+    def set_initial_state(self, x: float = None, y: float = None,
+                          theta: float = None, v: float = None,
+                          full_state: np.ndarray = None) -> None:
+        """
+        We can either provide each state individually or the full state vector
+        directly. In the later case, the caller must ensure the states are in
+        the right order
+        :param x:
+        :param y:
+        :param theta:
+        :param v:
+        :param full_state:
+        :return:
+        """
+        if full_state is None:
+            self.initial_state = self.create_state_vector(x, y, theta, v)
+        else:
+            self.initial_state = full_state
         self._states = self.initial_state
         self._target_lane = self.get_current_lane()
 
@@ -352,6 +361,7 @@ class BaseVehicle(ABC):
                                              self._n_states))
         self.initial_state = initial_state
         self._states = self.initial_state
+        # self._target_lane = self.get_current_lane()
 
     def set_mode(self, mode: modes.VehicleMode) -> None:
         if self._is_verbose:
@@ -405,7 +415,7 @@ class BaseVehicle(ABC):
         self._time = np.zeros(n_samples)
         self._states_history = np.zeros([self._n_states, n_samples])
         self._inputs_history = np.zeros([self._n_inputs, n_samples])
-        self._orig_leader_id = -np.ones(n_samples, dtype=int)
+        self._origin_leader_id = -np.ones(n_samples, dtype=int)
         self._destination_leader_id = -np.ones(n_samples, dtype=int)
         self._destination_follower_id = -np.ones(n_samples, dtype=int)
         self._incoming_vehicle_id = -np.ones(n_samples, dtype=int)
@@ -417,25 +427,51 @@ class BaseVehicle(ABC):
     def reset_lane_change_start_time(self) -> None:
         self._lc_start_time = -np.inf
 
-    def has_orig_lane_leader(self) -> bool:
+    def truncate_simulation_history(self):
+        """
+        Truncates all the data matrices so that their size matches the
+        simulation length. Useful when simulations may end before the initially
+        set final time.
+        :return:
+        """
         try:
-            return self.get_orig_lane_leader_id() >= 0
+            self._time = self._time[:self._iter_counter + 1]
+            self._states_history = self._states_history[
+                                   :, :self._iter_counter + 1]
+            self._inputs_history = self._inputs_history[
+                                   :, :self._iter_counter + 1]
+            self._origin_leader_id = self._origin_leader_id[
+                                   :self._iter_counter + 1]
+            self._destination_leader_id = self._destination_leader_id[
+                                          :self._iter_counter + 1]
+            self._destination_follower_id = self._destination_follower_id[
+                                            :self._iter_counter + 1]
+            self._incoming_vehicle_id = self._incoming_vehicle_id[
+                                        :self._iter_counter + 1]
+            self._leader_id = self._leader_id[:self._iter_counter + 1]
+        except IndexError:
+            # The matrices already have the right size
+            pass
+
+    def has_origin_lane_leader(self) -> bool:
+        try:
+            return self.get_origin_lane_leader_id() >= 0
         except IndexError:
             warnings.warn("Warning: trying to access vehicle data "
                           "(orig lane leader id) before simulation start")
             return False
 
-    def has_dest_lane_leader(self) -> bool:
+    def has_destination_lane_leader(self) -> bool:
         try:
-            return self.get_dest_lane_leader_id() >= 0
+            return self.get_destination_lane_leader_id() >= 0
         except IndexError:
             warnings.warn("Warning: trying to access vehicle data "
                           "(dest lane leader id) before simulation start")
             return False
 
-    def has_dest_lane_follower(self) -> bool:
+    def has_destination_lane_follower(self) -> bool:
         try:
-            return self.get_dest_lane_follower_id() >= 0
+            return self.get_destination_lane_follower_id() >= 0
         except IndexError:
             warnings.warn("Warning: trying to access vehicle data "
                           "(dest lane follower id) before simulation start")
@@ -469,12 +505,12 @@ class BaseVehicle(ABC):
         return not (self.get_platoon() is None)
 
     def update_surrounding_vehicles(self, vehicles: Mapping[int, BaseVehicle]):
-        self.find_orig_lane_leader(vehicles.values())
-        self.find_dest_lane_vehicles(vehicles.values())
+        self.find_origin_lane_leader(vehicles.values())
+        self.find_destination_lane_vehicles(vehicles.values())
         self.find_cooperation_requests(vehicles.values())
         # self.update_target_leader(vehicles)
 
-    def find_orig_lane_leader(self, vehicles: Iterable[BaseVehicle]) -> None:
+    def find_origin_lane_leader(self, vehicles: Iterable[BaseVehicle]) -> None:
         ego_x = self.get_x()
         orig_lane_leader_x = np.inf
         new_orig_leader_id = -1
@@ -484,9 +520,10 @@ class BaseVehicle(ABC):
                     and ego_x < other_x < orig_lane_leader_x):
                 orig_lane_leader_x = other_x
                 new_orig_leader_id = other_vehicle._id
-        self._orig_leader_id[self._iter_counter] = new_orig_leader_id
+        self._origin_leader_id[self._iter_counter] = new_orig_leader_id
 
-    def find_dest_lane_vehicles(self, vehicles: Iterable[BaseVehicle]) -> None:
+    def find_destination_lane_vehicles(self, vehicles: Iterable[BaseVehicle]
+                                       ) -> None:
         new_dest_leader_id = -1
         new_dest_follower_id = -1
         if self.has_lane_change_intention():
@@ -513,7 +550,7 @@ class BaseVehicle(ABC):
         incoming_veh_x = np.inf
         if self._is_connected:
             for other_vehicle in vehicles:
-                other_request = other_vehicle._desired_future_follower_id
+                other_request = other_vehicle.get_desired_future_follower_id()
                 other_x = other_vehicle.get_x()
                 if other_request == self._id and other_x < incoming_veh_x:
                     new_incoming_vehicle_id = other_vehicle._id
@@ -528,7 +565,8 @@ class BaseVehicle(ABC):
 
     def request_cooperation(self) -> None:
         if self._is_connected:
-            self._desired_future_follower_id = self.get_dest_lane_follower_id()
+            self._desired_future_follower_id = (
+                self.get_destination_lane_follower_id())
 
     def receive_cooperation_request(self, other_id) -> None:
         if self._is_connected:
@@ -644,7 +682,7 @@ class BaseVehicle(ABC):
         df['id'] = self._id
         df['name'] = self._name
         BaseVehicle._set_surrounding_vehicles_ids_to_df(
-            df, 'orig_lane_leader_id', self._orig_leader_id)
+            df, 'orig_lane_leader_id', self._origin_leader_id)
         BaseVehicle._set_surrounding_vehicles_ids_to_df(
             df, 'dest_lane_leader_id', self._destination_leader_id)
         BaseVehicle._set_surrounding_vehicles_ids_to_df(
@@ -667,16 +705,14 @@ class BaseVehicle(ABC):
         :return:
         """
         self._n_states = len(self._state_names)
-        # self.state_names = state_names
         self._n_inputs = len(self._input_names)
-        # self.input_names = input_names
         self._state_idx = {self._state_names[i]: i for i
                            in range(self._n_states)}
         self._input_idx = {self._input_names[i]: i for i
                            in range(self._n_inputs)}
 
-    def follow_orig_lane_leader(self):
-        self._set_current_leader_id(self.get_orig_lane_leader_id())
+    def follow_origin_lane_leader(self):
+        self._set_current_leader_id(self.get_origin_lane_leader_id())
 
     @abstractmethod
     def get_vel(self):
@@ -716,7 +752,6 @@ class BaseVehicle(ABC):
         """
         pass
 
-    # @abstractmethod
     def _set_up_lane_change_control(self):
         pass
 
@@ -741,7 +776,6 @@ class BaseVehicle(ABC):
 # TODO: still must figure out a way to prevent so much repeated code between
 #  vehicles and their interfaces with the opc solver
 class BaseVehicleInterface(ABC):
-
     _state_names: list[str]
     n_states: int
     _input_names: list[str]
@@ -756,9 +790,11 @@ class BaseVehicleInterface(ABC):
         self.base_vehicle = vehicle
         self._time: float = 0.
 
-        self._origin_leader_id: int = vehicle.get_orig_lane_leader_id()
-        self._destination_leader_id: int = vehicle.get_dest_lane_leader_id()
-        self._destination_follower_id: int = vehicle.get_dest_lane_follower_id()
+        self._origin_leader_id: int = vehicle.get_origin_lane_leader_id()
+        self._destination_leader_id: int = (
+            vehicle.get_destination_lane_leader_id())
+        self._destination_follower_id: int = (
+            vehicle.get_destination_lane_follower_id())
         self._leader_id: int = vehicle.get_current_leader_id()
         self.target_lane: int = vehicle.get_target_lane()
         # The vehicle's current state is the starting point for the ocp
@@ -774,10 +810,7 @@ class BaseVehicleInterface(ABC):
         self.ocp_target_leader_sequence: list[int] = []
 
     def __repr__(self):
-        return self.__class__.__name__ + ' id=' + str(self.get_id())
-
-    def __str__(self):
-        return (self.__class__.__name__ + ": id=" + str(self.get_id())
+        return (self.__class__.__name__ + ': id=' + str(self.get_id())
                 + "V_f=" + str(self.get_free_flow_speed()))
 
     def _set_model(self):
@@ -844,19 +877,19 @@ class BaseVehicleInterface(ABC):
     def get_y0(self):
         return self.select_state_from_vector(self._initial_state, 'y')
 
-    def get_orig_lane_leader_id(self, time: float):
+    def get_origin_lane_leader_id(self, time: float):
         if len(self.ocp_origin_leader_sequence) == 0:
             return self._origin_leader_id
         self.set_time_interval(time)
         return self.ocp_origin_leader_sequence[self._interval_number]
 
-    def get_dest_lane_leader_id(self, time: float):
+    def get_destination_lane_leader_id(self, time: float):
         if len(self.ocp_destination_leader_sequence) == 0:
             return self._destination_leader_id
         self.set_time_interval(time)
         return self.ocp_destination_leader_sequence[self._interval_number]
 
-    def get_dest_lane_follower_id(self, time: float):
+    def get_destination_lane_follower_id(self, time: float):
         if len(self.ocp_destination_follower_sequence) == 0:
             return self._destination_follower_id
         self.set_time_interval(time)
@@ -873,14 +906,14 @@ class BaseVehicleInterface(ABC):
         self.set_time_interval(time)
         return self.ocp_target_leader_sequence[self._interval_number]
 
-    def has_orig_lane_leader(self, time: float) -> bool:
-        return self.get_orig_lane_leader_id(time) >= 0
+    def has_origin_lane_leader(self, time: float) -> bool:
+        return self.get_origin_lane_leader_id(time) >= 0
 
-    def has_dest_lane_leader(self, time: float) -> bool:
-        return self.get_dest_lane_leader_id(time) >= 0
+    def has_destination_lane_leader(self, time: float) -> bool:
+        return self.get_destination_lane_leader_id(time) >= 0
 
-    def has_dest_lane_follower(self, time: float) -> bool:
-        return self.get_dest_lane_follower_id(time) >= 0
+    def has_destination_lane_follower(self, time: float) -> bool:
+        return self.get_destination_lane_follower_id(time) >= 0
 
     def has_leader(self, time: float) -> bool:
         return self.get_current_leader_id(time) >= 0

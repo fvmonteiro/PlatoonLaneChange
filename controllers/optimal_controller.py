@@ -291,12 +291,12 @@ class VehicleOptimalController:
 
         time_points = self.get_time_points()
         if config.estimate_gradient:
+            self._cost_gradient = None
+        else:
             self._cost_gradient = occ.quadratic_cost_gradient(
                 self._ocp_interface.n_states, self._ocp_interface.n_inputs,
                 len(time_points), Q, R, Q_terminal, R_terminal,
                 self._desired_state, u_ref)
-        else:
-            self._cost_gradient = None
 
         self._cost_with_tracker = occ.OCPCostTracker(
             time_points, self._ocp_interface.n_states,
@@ -545,7 +545,8 @@ class VehicleOptimalController:
         chosen_strategy = -1
         best_cost = np.inf
         vehicle_groups = []
-        for lc_strategy in config.platoon_strategies:
+        for strategy_counter in range(len(config.platoon_strategies)):
+            lc_strategy = config.platoon_strategies[strategy_counter]
             # Simulate
             veh_group = vg.VehicleGroup()
             veh_group.set_platoon_lane_change_strategy(lc_strategy)
@@ -577,10 +578,10 @@ class VehicleOptimalController:
             # Store
             if success and r_cost + t_cost < best_cost:
                 best_cost = r_cost + t_cost
-                chosen_strategy = lc_strategy
+                chosen_strategy = strategy_counter
             vehicle_groups.append(veh_group)
 
-        print(f'Strategy {chosen_strategy} chosen.')
+        print(f'Strategy {config.platoon_strategies[chosen_strategy]} chosen.')
         if plot_result:
             data = vehicle_groups[chosen_strategy].to_dataframe()
             if len(self._controlled_veh_ids) <= 1:

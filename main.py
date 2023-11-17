@@ -5,8 +5,9 @@ import time
 
 import analysis
 import configuration
-import vehicle_models
+import graph_tools
 import scenarios
+import vehicle_models
 
 trajectory_file_name = 'trajectory_data.pickle'  # temp
 cost_file_name = 'cost_data.pickle'
@@ -146,6 +147,14 @@ def load_and_plot_latest_scenario():
                                      plot_separately=False)
 
 
+def graph_tests():
+    vsg = graph_tools.VehicleStatesGraph(3)
+    vsg.create_graph()
+    # data = vsg.vehicle_group.to_dataframe()
+    # analysis.plot_trajectory(data)
+    # analysis.plot_platoon_lane_change(data)
+
+
 def main():
 
     n_platoon = 2
@@ -157,18 +166,19 @@ def main():
         ftol=1.0e-3, estimate_gradient=True
     )
     configuration.Configuration.set_controller_parameters(
-        max_iter=3, time_horizon=20.0,
+        max_iter=3, time_horizon=5.0,
         has_terminal_lateral_constraints=False,
         has_lateral_safety_constraint=False,
-        # initial_input_guess=-1.5,
+        initial_input_guess='mode',
         jumpstart_next_solver_call=True, has_initial_mode_guess=True
     )
     base_speed = 20.
+    p_speed = base_speed * (1.2 if n_orig_ahead > 0 else 1.0)
     configuration.Configuration.set_scenario_parameters(
-        v_ref={'lo': base_speed, 'ld': base_speed, 'p': base_speed * 1.2,
+        v_ref={'lo': base_speed, 'ld': base_speed, 'p': p_speed,
                'fo': base_speed, 'fd': base_speed},
-        delta_x={'lo': 0., 'ld': 25., 'p': 0., 'fd': 0.},
-        platoon_strategies=[12], increase_lc_time_headway=False
+        delta_x={'lo': 0., 'ld': 0., 'p': 0., 'fd': 0.},
+        platoon_strategies=[0, 1, 11], increase_lc_time_headway=False
     )
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
@@ -177,9 +187,9 @@ def main():
     # run_cbf_lc_scenario(n_platoon, n_orig_ahead, n_orig_behind,
     #                     n_dest_ahead, n_dest_behind,
     #                     are_vehicles_cooperative)
-    run_brute_force_strategy_test(
-        n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead,
-        n_dest_behind, are_vehicles_cooperative)
+    # run_brute_force_strategy_test(
+    #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead,
+    #     n_dest_behind, are_vehicles_cooperative)
 
     # run_with_external_controller(
     #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
@@ -191,6 +201,9 @@ def main():
     #                  are_vehicles_cooperative
     #                  )
     # load_and_plot_latest_scenario()
+
+    graph_tests()
+
     end_time = time.time()
 
     exec_time = datetime.timedelta(seconds=end_time - start_time)

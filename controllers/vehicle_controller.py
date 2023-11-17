@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Mapping
+from collections.abc import Mapping
 import warnings
 
 import numpy as np
@@ -154,7 +154,7 @@ class OptimalControl(VehicleController):
             return -1
         else:
             # At all other times, we only look at the origin lane leader
-            return self._ego_vehicle.get_orig_lane_leader_id()
+            return self._ego_vehicle.get_origin_lane_leader_id()
 
 
 class ClosedLoopControl(VehicleController):

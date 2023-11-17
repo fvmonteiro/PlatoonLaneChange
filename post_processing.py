@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Iterable, Union
+from collections.abc import Iterable
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -31,13 +32,13 @@ def vehicle_to_dataframe(vehicle: base.BaseVehicle):
 
     _set_surrounding_vehicles_ids_to_df(
         veh_data, 'orig_lane_leader_id',
-        vehicle.get_orig_lane_leader_id_history())
+        vehicle.get_origin_lane_leader_id_history())
     _set_surrounding_vehicles_ids_to_df(
         veh_data, 'dest_lane_leader_id',
-        vehicle.get_dest_lane_leader_id_history())
+        vehicle.get_destination_lane_leader_id_history())
     _set_surrounding_vehicles_ids_to_df(
         veh_data, 'dest_lane_follower_id',
-        vehicle.get_dest_lane_follower_id_history())
+        vehicle.get_destination_lane_follower_id_history())
     return veh_data
 
 

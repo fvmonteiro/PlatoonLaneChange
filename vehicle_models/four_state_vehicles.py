@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC
-from typing import Mapping, Union, Iterable, Type
+from collections.abc import Mapping, Iterable
+from typing import Union
 
 import numpy as np
 
@@ -18,7 +19,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     States: [x, y, theta, v], inputs: [a, phi], centered at the C.G.
     """
 
-    _controller_type: Type[veh_ctrl.VehicleController]
+    _controller_type: type[veh_ctrl.VehicleController]
     _platoon: platoon.Platoon
 
     _state_names = ['x', 'y', 'theta', 'v']
@@ -74,9 +75,9 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             ret.append(self._inputs_history[self._input_idx[key]])
         return np.array(ret)
 
-    def get_desired_dest_lane_leader_id(self) -> int:
+    def get_desired_destination_lane_leader_id(self) -> int:
         if not self.is_in_a_platoon():
-            return self.get_dest_lane_leader_id()
+            return self.get_destination_lane_leader_id()
         return self.get_platoon().get_desired_dest_lane_leader_id(self.get_id())
 
     def get_is_lane_change_safe(self):
@@ -85,7 +86,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     def set_platoon(self, new_platoon: platoon.Platoon) -> None:
         self._platoon = new_platoon
 
-    def make_reset_copy(self, initial_state=None) -> base.V:
+    def make_reset_copy(self, initial_state: np.ndarray = None) -> base.V:
         """
         Creates copies of vehicles used in internal iterations of our optimal
         controller. For vehicles without optimal control, the method returns
@@ -104,7 +105,8 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         self.copy_attributes(new_vehicle, initial_state)
         return new_vehicle
 
-    def make_closed_loop_copy(self, initial_state=None) -> ClosedLoopVehicle:
+    def make_closed_loop_copy(self, initial_state: np.ndarray = None
+                              ) -> ClosedLoopVehicle:
         new_vehicle = ClosedLoopVehicle(
             self._can_change_lanes, False, self._is_connected)
         self.copy_attributes(new_vehicle, initial_state)
@@ -150,12 +152,12 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             return
 
         is_leader_in_a_platoon = (
-                self.has_orig_lane_leader()
-                and vehicles[self.get_orig_lane_leader_id()].is_in_a_platoon()
+                self.has_origin_lane_leader()
+                and vehicles[self.get_origin_lane_leader_id()].is_in_a_platoon()
         )
         if is_leader_in_a_platoon:
             leader_platoon: platoon.Platoon = vehicles[
-                self.get_orig_lane_leader_id()].get_platoon()
+                self.get_origin_lane_leader_id()].get_platoon()
             if not self.is_in_a_platoon() or self._platoon != leader_platoon:
                 leader_platoon.add_vehicle(self)
                 # opt_control = leader_platoon.get_optimal_controller()
@@ -185,22 +187,22 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     def check_is_lane_change_safe(self,
                                   vehicles: Mapping[int, base.BaseVehicle]):
         is_safe_to_orig_lane_leader = True
-        if self.has_orig_lane_leader():
-            orig_lane_leader = vehicles[self.get_orig_lane_leader_id()]
+        if self.has_origin_lane_leader():
+            orig_lane_leader = vehicles[self.get_origin_lane_leader_id()]
             is_safe_to_orig_lane_leader = (
                 ClosedLoopVehicle.is_gap_safe_for_lane_change(
                     orig_lane_leader, self))
 
         is_safe_to_dest_lane_leader = True
-        if self.has_dest_lane_leader():
-            dest_lane_leader = vehicles[self.get_dest_lane_leader_id()]
+        if self.has_destination_lane_leader():
+            dest_lane_leader = vehicles[self.get_destination_lane_leader_id()]
             is_safe_to_dest_lane_leader = (
                 ClosedLoopVehicle.is_gap_safe_for_lane_change(
                     dest_lane_leader, self))
 
         is_safe_to_dest_lane_follower = True
-        if self.has_dest_lane_follower():
-            dest_lane_follower = vehicles[self.get_dest_lane_follower_id()]
+        if self.has_destination_lane_follower():
+            dest_lane_follower = vehicles[self.get_destination_lane_follower_id()]
             is_safe_to_dest_lane_follower = (
                 ClosedLoopVehicle.is_gap_safe_for_lane_change(
                     self, dest_lane_follower))
@@ -289,7 +291,8 @@ class OptimalControlVehicle(FourStateVehicle):
         centralized_controller.add_controlled_vehicle_id(self.get_id())
         self._controller.set_opt_controller(centralized_controller)
 
-    def make_open_loop_copy(self, initial_state=None) -> OpenLoopVehicle:
+    def make_open_loop_copy(self, initial_state: np.ndarray = None
+                            ) -> OpenLoopVehicle:
         new_vehicle = OpenLoopVehicle(
             self._can_change_lanes, self._has_open_loop_acceleration,
             self._is_connected)
@@ -327,6 +330,7 @@ class OptimalControlVehicle(FourStateVehicle):
         self.get_opt_controller().find_trajectory(vehicles)
         return self.get_opt_controller().has_solution()
 
+    # Outdated. We're not considering the persistent scenario.
     def can_start_lane_change_with_checks(
             self, vehicles: Mapping[int, base.BaseVehicle]) -> bool:
         if self.get_opt_controller().has_solution():
@@ -365,12 +369,6 @@ class OptimalControlVehicle(FourStateVehicle):
                         strategy_parameters: tuple[list[int], list[int]] = None
                         ) -> platoon.OptimalPlatoon:
         return platoon.OptimalPlatoon(self, platoon_lane_change_strategy)
-
-    # def guess_mode_sequence(self, mode_sequence: som.ModeSequence):
-    #     if self.is_in_a_platoon():
-    #         self.get_platoon().guess_mode_sequence(mode_sequence)
-    #     else:
-    #         super().guess_mode_sequence(mode_sequence)
 
 
 class ClosedLoopVehicle(FourStateVehicle):
@@ -416,7 +414,6 @@ class ClosedLoopVehicle(FourStateVehicle):
 
     def _set_up_lane_change_control(self):
         self._controller.set_up_lane_change_control(self._lc_start_time)
-        # self.lc_controller.start(self._lc_start_time, self._lc_duration)
 
     @staticmethod
     def is_gap_safe_for_lane_change(leading_vehicle: base.BaseVehicle,
@@ -434,8 +431,42 @@ class ClosedLoopVehicle(FourStateVehicle):
                                          strategy_parameters)
 
 
+class ShortSimulationVehicle(ClosedLoopVehicle):
+    """
+    Class used when computing costs between nodes (which are defined as
+    quantized states)
+    """
+    def __init__(self, can_change_lanes: bool, is_connected: bool = False):
+        super().__init__(can_change_lanes, False, is_connected)
+        self._desired_dest_lane_leader_id = -1
+        self._fixed_incoming_vehicle_id = -1
+
+    def set_desired_dest_lane_leader_id(self, value):
+        self._desired_dest_lane_leader_id = value
+
+    def set_incoming_vehicle_id(self, value):
+        self._fixed_incoming_vehicle_id = value
+
+    def get_desired_destination_lane_leader_id(self) -> int:
+        return self._desired_dest_lane_leader_id
+
+    def find_cooperation_requests(self, vehicles: Iterable[base.BaseVehicle]
+                                  ) -> None:
+        self._incoming_vehicle_id[self._iter_counter] = (
+            self._fixed_incoming_vehicle_id
+        )
+
+    def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]
+                              ) -> bool:
+        is_safe = self.check_is_lane_change_safe(vehicles)
+        is_my_turn = (self.get_desired_destination_lane_leader_id()
+                      == self.get_destination_lane_leader_id())
+        return is_safe and is_my_turn
+
+
 class FourStateVehicleInterface(base.BaseVehicleInterface, ABC):
-    _state_names = ['x', 'y', 'theta', 'v']
+    # _state_names = ['x', 'y', 'theta', 'v']
+    _state_names = FourStateVehicle.get_state_names()
 
     def __init__(self, vehicle: FourStateVehicle):
         super().__init__(vehicle)

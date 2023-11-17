@@ -337,7 +337,7 @@ class VehicleGroupInterface:
 
             # w_eg = 1.  # gap error weight
             for i in range(len(vehs)):
-                leader_id = vehs[i].get_dest_lane_leader_id(t)
+                leader_id = vehs[i].get_destination_lane_leader_id(t)
                 if leader_id > -1:
                     leader_x = self.get_a_vehicle_state_by_id(leader_id, states,
                                                               'x')
@@ -368,7 +368,7 @@ class VehicleGroupInterface:
         def to_lo(states, inputs) -> float:
             t = self.get_time(states)
             gap_error = self.compute_gap_error(
-                    states, ego_id, ego_veh.get_orig_lane_leader_id(t),
+                    states, ego_id, ego_veh.get_origin_lane_leader_id(t),
                     False, is_follower_lane_changing=True)
             phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
             return min(gap_error + margin, 0) ** 2 * phi
@@ -376,7 +376,7 @@ class VehicleGroupInterface:
         def to_ld(states, inputs) -> float:
             t = self.get_time(states)
             gap_error = self.compute_gap_error(
-                    states, ego_id, ego_veh.get_dest_lane_leader_id(t),
+                    states, ego_id, ego_veh.get_destination_lane_leader_id(t),
                     False, is_follower_lane_changing=True)
             phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
             return min(gap_error + margin, 0) ** 2 * phi
@@ -384,7 +384,7 @@ class VehicleGroupInterface:
         def to_fd(states, inputs) -> float:
             t = self.get_time(states)
             gap_error = self.compute_gap_error(
-                    states, ego_id, ego_veh.get_dest_lane_follower_id(t),
+                    states, ego_id, ego_veh.get_destination_lane_follower_id(t),
                     True, is_follower_lane_changing=False)
             phi = self.get_a_vehicle_input_by_id(ego_id, inputs, 'phi')
             return min(gap_error + margin, 0) ** 2 * phi
@@ -418,9 +418,9 @@ class VehicleGroupInterface:
 
         def support(states, inputs) -> float:
             t = self.get_time(states)
-            if ego_veh.has_orig_lane_leader(t):
+            if ego_veh.has_origin_lane_leader(t):
                 gap_error = self.compute_gap_error(
-                    states, ego_id, ego_veh.get_orig_lane_leader_id(t), False,
+                    states, ego_id, ego_veh.get_origin_lane_leader_id(t), False,
                     is_follower_lane_changing=False)
                 return gap_error
             return 1.0e-3  # anything greater or equal to zero

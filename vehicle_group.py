@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping, Sequence, Type, TypeVar, Union
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, TypeVar, Union
 
 import numpy as np
 import pandas as pd
@@ -63,11 +64,15 @@ class VehicleGroup:
     def get_all_vehicles_in_order(self) -> list[base.BaseVehicle]:
         return [self.vehicles[veh_id] for veh_id in self.sorted_vehicle_ids]
 
+    def yield_vehicles_in_order(self) -> Iterable[base.BaseVehicle]:
+        for veh_id in self.sorted_vehicle_ids:
+            yield self.vehicles[veh_id]
+
     def get_current_state(self) -> np.ndarray:
         states = []
         for veh_id in self.sorted_vehicle_ids:
             states.append(self.vehicles[veh_id].get_states())
-        states.append(self.vehicles[0].get_current_time())
+        # states.append(self.vehicles[0].get_current_time())
         return np.hstack(states)
 
     def get_simulated_time(self) -> np.ndarray:
@@ -115,6 +120,9 @@ class VehicleGroup:
     def get_mode_sequence(self) -> som.ModeSequence:
         return self.mode_sequence
 
+    def get_vehicle_by_id(self, veh_id: int) -> base.BaseVehicle:
+        return self.vehicles[veh_id]
+
     def get_vehicle_id_by_name(self, name: str) -> int:
         """
         Returns the id of the vehicle with given name. Returns -1 if the name
@@ -128,7 +136,7 @@ class VehicleGroup:
     def get_optimal_control_vehicles(self) -> list[fsv.OptimalControlVehicle]:
         return self.get_vehicles_of_type(fsv.OptimalControlVehicle)
 
-    def get_vehicles_of_type(self, vehicle_type: Type[base.BaseVehicle]
+    def get_vehicles_of_type(self, vehicle_type: type[base.BaseVehicle]
                              ) -> list[V]:
         selected_vehicles: list[vehicle_type] = []
         for veh_id in self.sorted_vehicle_ids:
@@ -162,7 +170,7 @@ class VehicleGroup:
     def set_a_vehicle_free_flow_speed(self, veh_id, v_ff):
         self.vehicles[veh_id].set_free_flow_speed(v_ff)
 
-    def set_free_flow_speeds(self, values: Union[float, list, np.ndarray]):
+    def set_free_flow_speeds(self, values: Union[float, Sequence[float]]):
         if np.isscalar(values):
             values = [values] * self.get_n_vehicles()
         for veh_id in self.sorted_vehicle_ids:
@@ -173,11 +181,22 @@ class VehicleGroup:
         for vehicle in self.vehicles.values():
             vehicle.set_free_flow_speed(values[vehicle.get_name()])
 
-    def set_vehicles_initial_states(self, x0, y0, theta0, v0):
+    def set_vehicles_initial_states(
+            self, x0: Sequence[float], y0: Sequence[float],
+            theta0: Sequence[float], v0: Sequence[float]):
         for veh_id in self.sorted_vehicle_ids:
             vehicle = self.vehicles[veh_id]
             vehicle.set_initial_state(x0[veh_id], y0[veh_id],
                                       theta0[veh_id], v0[veh_id])
+
+    def set_vehicles_initial_states_from_array(
+            self, full_state: np.ndarray):
+        start = 0
+        for veh_id in self.sorted_vehicle_ids:
+            vehicle = self.vehicles[veh_id]
+            end = start + vehicle.get_n_states()
+            vehicle.set_initial_state(full_state=full_state[start:end])
+            start = end
 
     def set_vehicles_lane_change_direction(
             self, ids_or_names: Sequence[Union[int, str]],
@@ -211,14 +230,6 @@ class VehicleGroup:
         for vehicle in self.vehicles.values():
             vehicle.make_connected()
 
-    # def make_control_centralized(self):
-    #     """
-    #     The work-around to have a centralized controller is to add the
-    #     vehicles to the same platoon.
-    #     :return:
-    #     """
-    #     self._is_controller_centralized = True
-
     def map_values_to_names(self, values) -> dict[str, Any]:
         """
         Receives variables ordered in the same order as the vehicles were
@@ -240,7 +251,7 @@ class VehicleGroup:
             vehicle.prepare_to_start_simulation(n_samples)
 
     def create_vehicle_array_from_classes(
-            self, vehicle_classes: Iterable[Type[base.BaseVehicle]]):
+            self, vehicle_classes: Iterable[type[base.BaseVehicle]]):
         """
 
         Populates the list of vehicles following the given classes
@@ -263,20 +274,22 @@ class VehicleGroup:
 
     def populate_with_open_loop_copies(
             self, vehicles: Mapping[int, base.BaseVehicle],
-            controlled_vehicle_ids: set[int], initial_state_per_vehicle=None):
+            controlled_vehicle_ids: set[int],
+            initial_state_per_vehicle: Mapping[int, np.ndarray] = None):
         self.populate_with_copies(vehicles, controlled_vehicle_ids, True,
                                   initial_state_per_vehicle)
 
     def populate_with_closed_loop_copies(
             self, vehicles: Mapping[int, base.BaseVehicle],
-            controlled_vehicle_ids: set[int], initial_state_per_vehicle=None):
+            controlled_vehicle_ids: set[int],
+            initial_state_per_vehicle: Mapping[int, np.ndarray] = None):
         self.populate_with_copies(vehicles, controlled_vehicle_ids, False,
                                   initial_state_per_vehicle)
 
-    def populate_with_copies(self, vehicles: Mapping[int, base.BaseVehicle],
-                             controlled_vehicle_ids: set[int],
-                             are_copies_open_loop: bool,
-                             initial_state_per_vehicle=None):
+    def populate_with_copies(
+            self, vehicles: Mapping[int, base.BaseVehicle],
+            controlled_vehicle_ids: set[int], are_copies_open_loop: bool,
+            initial_state_per_vehicle: Mapping[int, np.ndarray] = None):
         """
         Creates copies of existing vehicles and groups them in this instance.
         This is useful for simulations that happen inside the optimal
@@ -287,7 +300,8 @@ class VehicleGroup:
         :param are_copies_open_loop: If true, we need to provide open loop
          controls to the controlled vehicles. If false, the controlled vehicles
          adopt feedback control laws
-        :param initial_state_per_vehicle:
+        :param initial_state_per_vehicle: Mapping from vehicle id to initial
+         state
         :return:
         """
         if self.get_n_vehicles() > 0:
@@ -389,7 +403,7 @@ class VehicleGroup:
 
     def check_lane_change_success(self) -> bool:
         for vehicle in self.vehicles.values():
-            if vehicle.get_target_lane() != vehicle.get_current_lane():
+            if vehicle.has_lane_change_intention():
                 if self._is_verbose:
                     print(
                         f'Vehicle {vehicle.get_name()} did not finish the lane '
@@ -397,6 +411,17 @@ class VehicleGroup:
                         f'current lane: {vehicle.get_current_lane()}.)')
                 return False
         return True
+
+    def truncate_simulation_history(self) -> None:
+        """
+        Truncates the matrices with state and inputs history so that their size
+        matches the simulation length. Useful when simulations may end before
+        the initially set final time.
+        :return:
+        """
+        for veh in self.vehicles.values():
+            veh.truncate_simulation_history()
+
 
     def centralize_control(self):
         centralized_controller = opt_ctrl.VehicleOptimalController()

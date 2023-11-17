@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Callable, Union
 
 import control.optimal as opt
@@ -454,6 +455,9 @@ def quadratic_cost_gradient(n_states: int, n_inputs: int, n_times: int, Q, R,
                             Q_terminal=None, R_terminal=None,
                             x0: Union[np.ndarray, float] = 0,
                             u0: Union[np.ndarray, float] = 0) -> Callable:
+
+    warnings.warn('Setting user defined gradient, which is not ready yet')
+
     # Process the input arguments
     Q, R = _process_matrix_sizes(n_states, n_inputs, Q, R, make_zero=True)
     Q_terminal, R_terminal = _process_matrix_sizes(n_states, n_inputs,

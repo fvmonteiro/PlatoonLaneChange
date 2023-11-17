@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-import copy
+from collections.abc import Iterable
 import warnings
 
 import vehicle_models.four_state_vehicles as fsv
@@ -17,7 +17,7 @@ class StrategyGenerator:
         self.counter = 0
 
     def get_all_orders(self, n_vehicles: int,
-                       starting_veh_positions: list[int]
+                       starting_veh_positions: Iterable[int]
                        ) -> tuple[list[list[int]], list[list[int]]]:
         """
         Generates all merging and cooperation orders given the number of
@@ -98,7 +98,7 @@ class LaneChangeStrategy(ABC):
                        cooperating_order: list[int] = None):
         pass
 
-    def get_desired_dest_lane_leader_id(self, ego_position) -> int:
+    def get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         """
         Defines sequence of leaders during a coordinated lane change maneuver.
         Only effective if platoon vehicles have a closed loop acceleration
@@ -113,7 +113,7 @@ class LaneChangeStrategy(ABC):
             return -1
         return self._get_desired_dest_lane_leader_id(ego_position)
 
-    def get_incoming_vehicle_id(self, ego_position) -> int:
+    def get_incoming_vehicle_id(self, ego_position: int) -> int:
         """
         Defines with which other platoon vehicle the ego vehicle cooperates
         after the ego has finished its lane change maneuver
@@ -138,7 +138,7 @@ class LaneChangeStrategy(ABC):
         pass
 
     @abstractmethod
-    def _get_incoming_vehicle_id(self, ego_position) -> int:
+    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         pass
 
 
@@ -148,14 +148,14 @@ class IndividualStrategy(LaneChangeStrategy):
     _id = 0
     _name = 'Individual strategy'
 
-    def can_start_lane_change(self, ego_position) -> bool:
+    def can_start_lane_change(self, ego_position: int) -> bool:
         return True
 
-    def _get_desired_dest_lane_leader_id(self, ego_position) -> int:
+    def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         ego_veh = self.platoon_vehicles[ego_position]
-        return ego_veh.get_dest_lane_leader_id()
+        return ego_veh.get_destination_lane_leader_id()
 
-    def _get_incoming_vehicle_id(self, ego_position) -> int:
+    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         return -1
 
 
@@ -177,7 +177,7 @@ class SynchronousStrategy(LaneChangeStrategy):
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         ego_veh = self.platoon_vehicles[ego_position]
         if ego_position == 0:
-            return ego_veh.get_dest_lane_leader_id()
+            return ego_veh.get_destination_lane_leader_id()
         return -1  # self.get_preceding_vehicle_id(ego_id)
 
     def _get_incoming_vehicle_id(self, ego_position: int) -> int:
@@ -230,8 +230,8 @@ class TemplateStrategy(LaneChangeStrategy):
                 self._last_dest_lane_vehicle_idx = next_in_line
             self._idx += 1
         return (is_my_turn and
-                (next_veh_to_maneuver.get_desired_dest_lane_leader_id()
-                 == next_veh_to_maneuver.get_dest_lane_leader_id()))
+                (next_veh_to_maneuver.get_desired_destination_lane_leader_id()
+                 == next_veh_to_maneuver.get_destination_lane_leader_id()))
 
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         # First check if it's our turn to change lanes
@@ -241,7 +241,7 @@ class TemplateStrategy(LaneChangeStrategy):
         # lane leader
         if self._idx == 0:
             return self.platoon_vehicles[self._lane_changing_order[
-                self._idx]].get_dest_lane_leader_id()
+                self._idx]].get_destination_lane_leader_id()
 
         coop_veh_id = self._cooperating_order[self._idx]
         if coop_veh_id == -1:
@@ -251,9 +251,9 @@ class TemplateStrategy(LaneChangeStrategy):
         else:
             # Get the vehicle ahead the vehicle which helps generate the gap
             return self.platoon_vehicles[self._cooperating_order[
-                self._idx]].get_orig_lane_leader_id()
+                self._idx]].get_origin_lane_leader_id()
 
-    def _get_incoming_vehicle_id(self, ego_position) -> int:
+    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         # We don't have to check whether the vehicle is already at the
         # destination lane because the cooperating order already takes care
         # of that
@@ -292,8 +292,8 @@ class TemplateRelaxedStrategy(TemplateStrategy):
             self._idx += 1
 
         return (is_my_turn and
-                (next_veh_to_maneuver.get_desired_dest_lane_leader_id()
-                 == next_veh_to_maneuver.get_dest_lane_leader_id()))
+                (next_veh_to_maneuver.get_desired_destination_lane_leader_id()
+                 == next_veh_to_maneuver.get_destination_lane_leader_id()))
 
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         # First check if it's our turn to change lanes
@@ -304,7 +304,7 @@ class TemplateRelaxedStrategy(TemplateStrategy):
         # lane leader
         if self._idx == 0:
             return self.platoon_vehicles[self._lane_changing_order[
-                self._idx]].get_dest_lane_leader_id()
+                self._idx]].get_destination_lane_leader_id()
 
         coop_veh_id = self._cooperating_order[self._idx]
         if coop_veh_id == -1:
@@ -314,9 +314,9 @@ class TemplateRelaxedStrategy(TemplateStrategy):
         else:
             # Get the vehicle ahead the vehicle which helps generate the gap
             return self.platoon_vehicles[self._cooperating_order[
-                self._idx]].get_orig_lane_leader_id()
+                self._idx]].get_origin_lane_leader_id()
 
-    def _get_incoming_vehicle_id(self, ego_position) -> int:
+    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         # We don't have to check whether the vehicle is already at the
         # destination lane because the cooperating order already takes care
         # of that
@@ -354,7 +354,7 @@ class LeaderFirstStrategy(TemplateStrategy):
             self.set_parameters()
         return super()._get_desired_dest_lane_leader_id(ego_position)
 
-    def _get_incoming_vehicle_id(self, ego_position) -> int:
+    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         if not self._is_initialized:
             self.set_parameters()
         return super()._get_incoming_vehicle_id(ego_position)
@@ -386,7 +386,7 @@ class LastFirstStrategy(TemplateStrategy):
             self.set_parameters()
         return super()._get_desired_dest_lane_leader_id(ego_position)
 
-    def _get_incoming_vehicle_id(self, ego_position) -> int:
+    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         if not self._is_initialized:
             self.set_parameters()
         return super()._get_incoming_vehicle_id(ego_position)
@@ -417,7 +417,7 @@ class LeaderFirstReverseStrategy(TemplateStrategy):
             self.set_parameters()
         return super()._get_desired_dest_lane_leader_id(ego_position)
 
-    def _get_incoming_vehicle_id(self, ego_position) -> int:
+    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         if not self._is_initialized:
             self.set_parameters()
         return super()._get_incoming_vehicle_id(ego_position)
@@ -441,7 +441,7 @@ class LeaderFirstStrategyHardCoded(LaneChangeStrategy):
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         if ego_position == 0:
             ego_veh = self.platoon_vehicles[ego_position]
-            return ego_veh.get_dest_lane_leader_id()
+            return ego_veh.get_destination_lane_leader_id()
         return self.platoon_vehicles[ego_position - 1].get_id()
 
     def _get_incoming_vehicle_id(self, ego_position: int) -> int:
@@ -464,7 +464,7 @@ class LastFirstStrategyHardCoded(LaneChangeStrategy):
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         if ego_position == len(self.platoon_vehicles) - 1:
             ego_veh = self.platoon_vehicles[ego_position]
-            return ego_veh.get_dest_lane_leader_id()
+            return ego_veh.get_destination_lane_leader_id()
         # If the follower has completed the lane change, then we want to
         # merge between the follower and the vehicle ahead of it (which
         # is the follower's current lane leader). Otherwise, we don't have
@@ -472,7 +472,7 @@ class LastFirstStrategyHardCoded(LaneChangeStrategy):
         follower = self.platoon_vehicles[ego_position + 1]
         if follower.has_lane_change_intention():
             return -1
-        follower_lo = follower.get_orig_lane_leader_id()
+        follower_lo = follower.get_origin_lane_leader_id()
         return follower_lo
 
     def _get_incoming_vehicle_id(self, ego_position: int) -> int:
@@ -493,13 +493,13 @@ class LeaderFirstReverseStrategyHardCoded(LaneChangeStrategy):
             return True
         # Check if we have overtaken the former preceding vehicle
         ego_veh = self.platoon_vehicles[ego_position]
-        return (ego_veh.get_dest_lane_follower_id()
+        return (ego_veh.get_destination_lane_follower_id()
                 == self.platoon_vehicles[ego_position - 1].get_id())
 
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         if ego_position == 0:
             ego_veh = self.platoon_vehicles[ego_position]
-            return ego_veh.get_dest_lane_leader_id()
+            return ego_veh.get_destination_lane_leader_id()
         # If the preceding veh has completed the lane change, then we want
         # to merge between the preceding veh and the vehicle ahead of it
         # (which is the preceding veh's current lane leader). Otherwise,
@@ -507,7 +507,7 @@ class LeaderFirstReverseStrategyHardCoded(LaneChangeStrategy):
         preceding = self.platoon_vehicles[ego_position - 1]
         if preceding.has_lane_change_intention():
             return -1
-        leader_lo = preceding.get_orig_lane_leader_id()
+        leader_lo = preceding.get_origin_lane_leader_id()
         return leader_lo
 
     def _get_incoming_vehicle_id(self, ego_position: int) -> int:

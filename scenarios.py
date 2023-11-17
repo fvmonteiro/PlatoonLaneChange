@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Mapping, Sequence
 import pickle
-from typing import Iterable, Mapping, Sequence, Type, Union
+from typing import Union
 
 import control as ct
 import numpy as np
@@ -60,14 +61,14 @@ class SimulationScenario(ABC):
 
     def create_uniform_vehicles(
             self, n_per_lane: Iterable[int],
-            vehicle_class: Type[base.BaseVehicle],
+            vehicle_class: type[base.BaseVehicle],
             free_flow_speed: float):
         array_2d = [[vehicle_class] * n for n in n_per_lane]
         self.create_vehicle_group(array_2d)
         self.vehicle_group.set_free_flow_speeds(free_flow_speed)
 
     def create_vehicle_group(
-            self, vehicle_classes: Sequence[Sequence[Type[base.BaseVehicle]]]):
+            self, vehicle_classes: Sequence[Sequence[type[base.BaseVehicle]]]):
         for i in range(len(vehicle_classes)):
             self.n_per_lane.append(len(vehicle_classes[i]))
         flat_vehicle_list = [item for sublist in vehicle_classes for
@@ -181,7 +182,6 @@ class SimulationScenario(ABC):
         :return:
         """
 
-        # Initial states
         ref_gaps = self.vehicle_group.get_initial_desired_gaps(v0)
         idx_p1 = n_orig_ahead  # platoon leader idx
         idx_p_last = idx_p1 + self._n_platoon - 1
@@ -202,7 +202,7 @@ class SimulationScenario(ABC):
                        self.n_per_lane[0] - 1, -1):  # ld_0 to ld_N
             x0_array[i] = leader_x0
             leader_x0 += ref_gaps[i]
-        # Behind the platoon in origin lane
+        # Behind the platoon in dest lane
         follower_x0 = x0_array[idx_p_last] + delta_x['fd']
         for i in range(self.n_per_lane[0] + n_dest_ahead,
                        sum(self.n_per_lane)):
