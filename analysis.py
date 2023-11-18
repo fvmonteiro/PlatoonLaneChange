@@ -19,7 +19,6 @@ def load_latest_simulated_scenario(pickle_file_name: str):
         data = pickle.load(f)
     return data
 
-
 def plot_costs_vs_iteration(running_costs, terminal_costs,
                             plot_separately: bool = False):
     """

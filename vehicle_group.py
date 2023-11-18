@@ -55,8 +55,8 @@ class VehicleGroup:
     def get_full_initial_state_vector(self) -> np.ndarray:
         initial_state = []
         for veh_id in self.sorted_vehicle_ids:
-            initial_state.extend(self.vehicles[veh_id].initial_state)
-        return np.ndarray(initial_state)
+            initial_state.extend(self.vehicles[veh_id].get_initial_state())
+        return np.array(initial_state)
 
     def get_all_vehicles(self) -> Iterable[base.BaseVehicle]:
         return self.vehicles.values()
@@ -72,11 +72,13 @@ class VehicleGroup:
         states = []
         for veh_id in self.sorted_vehicle_ids:
             states.append(self.vehicles[veh_id].get_states())
-        # states.append(self.vehicles[0].get_current_time())
         return np.hstack(states)
 
+    def get_current_time(self) -> float:
+        return self.vehicles[self.sorted_vehicle_ids[0]].get_current_time()
+
     def get_simulated_time(self) -> np.ndarray:
-        return self.vehicles[0].get_simulated_time()
+        return self.vehicles[self.sorted_vehicle_ids[0]].get_simulated_time()
 
     def get_all_states(self) -> np.ndarray:
         states = []
@@ -258,19 +260,29 @@ class VehicleGroup:
         :param vehicle_classes: Class of each vehicle instances
         :return:
         """
+        if self.get_n_vehicles() > 0:
+            raise AttributeError("Trying to create a vehicle array in a "
+                                 "vehicle group that was already initialized")
         self.vehicles = {}
         self.sorted_vehicle_ids = []
         for veh_class in vehicle_classes:
             vehicle = veh_class()
-            self.sorted_vehicle_ids.append(vehicle.get_id())
-            self.vehicles[vehicle.get_id()] = vehicle
+            self.add_vehicle(vehicle)
 
     def fill_vehicle_array(self, vehicles: Iterable[base.BaseVehicle]):
+        if self.get_n_vehicles() > 0:
+            raise AttributeError("Trying to create a vehicle array in a "
+                                 "vehicle group that was already initialized")
         self.vehicles = {}
         self.sorted_vehicle_ids = []
         for veh in vehicles:
-            self.sorted_vehicle_ids.append(veh.get_id())
-            self.vehicles[veh.get_id()] = veh
+            self.add_vehicle(veh)
+
+    def add_vehicle(self, new_vehicle: base.BaseVehicle):
+        veh_id = new_vehicle.get_id()
+        self.sorted_vehicle_ids.append(veh_id)
+        self.vehicles[veh_id] = new_vehicle
+        self.name_to_id[new_vehicle.get_name()] = veh_id
 
     def populate_with_open_loop_copies(
             self, vehicles: Mapping[int, base.BaseVehicle],

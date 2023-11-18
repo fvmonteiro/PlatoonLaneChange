@@ -16,7 +16,7 @@ import operating_modes.base_operating_modes as modes
 class BaseVehicle(ABC):
     _counter = 0
 
-    initial_state: np.ndarray
+    _initial_state: np.ndarray
     _free_flow_speed: float
     _target_lane: int
     _state_names: list[str]
@@ -122,6 +122,9 @@ class BaseVehicle(ABC):
 
     def get_free_flow_speed(self) -> float:
         return self._free_flow_speed
+
+    def get_initial_state(self) -> np.ndarray:
+        return self._initial_state
 
     @abstractmethod
     def get_has_open_loop_acceleration(self) -> bool:
@@ -348,10 +351,10 @@ class BaseVehicle(ABC):
         :return:
         """
         if full_state is None:
-            self.initial_state = self.create_state_vector(x, y, theta, v)
+            self._initial_state = self.create_state_vector(x, y, theta, v)
         else:
-            self.initial_state = full_state
-        self._states = self.initial_state
+            self._initial_state = full_state
+        self._states = self._initial_state
         self._target_lane = self.get_current_lane()
 
     def copy_initial_state(self, initial_state: np.ndarray) -> None:
@@ -359,8 +362,8 @@ class BaseVehicle(ABC):
             raise ValueError('Wrong size of initial state vector ({} instead'
                              'of {})'.format(len(initial_state),
                                              self._n_states))
-        self.initial_state = initial_state
-        self._states = self.initial_state
+        self._initial_state = initial_state
+        self._states = self._initial_state
         # self._target_lane = self.get_current_lane()
 
     def set_mode(self, mode: modes.VehicleMode) -> None:
@@ -408,7 +411,7 @@ class BaseVehicle(ABC):
 
         # Initial state
         self._time[self._iter_counter] = 0.0
-        self._states_history[:, self._iter_counter] = self.initial_state
+        self._states_history[:, self._iter_counter] = self._initial_state
 
     def initialize_simulation_logs(self, n_samples: int) -> None:
         self._iter_counter = 0

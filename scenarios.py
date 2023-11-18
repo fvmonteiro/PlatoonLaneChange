@@ -373,6 +373,11 @@ class LaneChangeScenario(SimulationScenario):
             self.vehicle_group.simulate_one_time_step(time[i + 1])
 
 
+# TODO:
+# class LaneChangeWithGraph(LaneChangeScenario):
+#
+#     def __init__(self):
+
 class AllLaneChangeStrategies(LaneChangeScenario):
 
     def __init__(self, n_platoon: int, n_orig_ahead: int, n_orig_behind: int,

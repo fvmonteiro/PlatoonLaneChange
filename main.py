@@ -3,6 +3,9 @@ from __future__ import annotations
 import datetime
 import time
 
+import matplotlib.pyplot as plt
+import networkx as nx
+
 import analysis
 import configuration
 import graph_tools
@@ -147,9 +150,12 @@ def load_and_plot_latest_scenario():
                                      plot_separately=False)
 
 
-def graph_tests():
-    vsg = graph_tools.VehicleStatesGraph(3)
+def graph_tests(n_platoon: int):
+    vsg = graph_tools.VehicleStatesGraph(n_platoon)
     vsg.create_graph()
+    nx.draw_circular(vsg.states_graph)
+    plt.show()
+    vsg.get_minimum_time_maneuver_order()
     # data = vsg.vehicle_group.to_dataframe()
     # analysis.plot_trajectory(data)
     # analysis.plot_platoon_lane_change(data)
@@ -157,7 +163,7 @@ def graph_tests():
 
 def main():
 
-    n_platoon = 2
+    n_platoon = 3
     n_orig_ahead, n_orig_behind = 1, 0
     n_dest_ahead, n_dest_behind = 1, 1
 
@@ -202,7 +208,7 @@ def main():
     #                  )
     # load_and_plot_latest_scenario()
 
-    graph_tests()
+    graph_tests(n_platoon)
 
     end_time = time.time()
 
