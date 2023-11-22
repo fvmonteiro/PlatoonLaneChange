@@ -83,7 +83,7 @@ def run_cbf_lc_scenario(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
     for strategy_number in configuration.Configuration.platoon_strategies:
         scenario = scenarios.LaneChangeScenario(n_platoon,
                                                 are_vehicles_cooperative)
-        scenario.platoon_full_feedback_lane_change(
+        scenario.set_up_platoon_full_feedback_lane_change(
             n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
             strategy_number)
         tf = configuration.Configuration.time_horizon
@@ -104,12 +104,24 @@ def run_brute_force_strategy_test(
                                    scenario.named_strategies_positions)
 
 
-def run_platoon_test(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
-                     n_dest_ahead: int, n_dest_behind: int,
-                     is_acceleration_optimal: bool,
-                     are_vehicles_cooperative: bool):
+def run_graph_based_scenario(
+        n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
+        n_dest_ahead: int, n_dest_behind: int, are_vehicles_cooperative: bool):
+    tf = configuration.Configuration.time_horizon
     scenario = scenarios.LaneChangeScenario(n_platoon, are_vehicles_cooperative)
-    scenario.optimal_platoon_lane_change(
+    vsg = graph_tools.VehicleStatesGraph(n_platoon)
+    vsg.create_graph()
+    scenario.platoon_graph_based_lane_change(n_orig_ahead, n_orig_behind,
+                                             n_dest_ahead, n_dest_behind, vsg)
+    run_save_and_plot(scenario, tf)
+
+
+def run_optimal_platoon_test(
+        n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
+        n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool,
+        are_vehicles_cooperative: bool):
+    scenario = scenarios.LaneChangeScenario(n_platoon, are_vehicles_cooperative)
+    scenario.set_up_optimal_platoon_lane_change(
         n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
         is_acceleration_optimal)
     tf = configuration.Configuration.time_horizon + 2
@@ -134,8 +146,6 @@ def run_save_and_plot(scenario: scenarios.SimulationScenario, tf: float,
         analysis.plot_costs_vs_iteration(running_cost, terminal_cost)
     except AttributeError:
         pass
-        # print('Trying to get cost of scenario without optimal control.'
-        #       '\nCommand ignored.')
 
 
 def load_and_plot_latest_scenario():
@@ -155,7 +165,7 @@ def graph_tests(n_platoon: int):
     vsg.create_graph()
     nx.draw_circular(vsg.states_graph)
     plt.show()
-    vsg.get_minimum_time_maneuver_order()
+    vsg.find_minimum_time_maneuver_order()
     # data = vsg.vehicle_group.to_dataframe()
     # analysis.plot_trajectory(data)
     # analysis.plot_platoon_lane_change(data)
@@ -172,7 +182,7 @@ def main():
         ftol=1.0e-3, estimate_gradient=True
     )
     configuration.Configuration.set_controller_parameters(
-        max_iter=3, time_horizon=5.0,
+        max_iter=3, time_horizon=20.0,
         has_terminal_lateral_constraints=False,
         has_lateral_safety_constraint=False,
         initial_input_guess='mode',
@@ -183,8 +193,8 @@ def main():
     configuration.Configuration.set_scenario_parameters(
         v_ref={'lo': base_speed, 'ld': base_speed, 'p': p_speed,
                'fo': base_speed, 'fd': base_speed},
-        delta_x={'lo': 0., 'ld': 0., 'p': 0., 'fd': 0.},
-        platoon_strategies=[0, 1, 11], increase_lc_time_headway=False
+        delta_x={'lo': 0., 'ld': 15., 'p': 0., 'fd': 15.},
+        platoon_strategies=[0, 13], increase_lc_time_headway=False
     )
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
@@ -196,6 +206,9 @@ def main():
     # run_brute_force_strategy_test(
     #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead,
     #     n_dest_behind, are_vehicles_cooperative)
+    run_graph_based_scenario(
+        n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
+        are_vehicles_cooperative)
 
     # run_with_external_controller(
     #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
@@ -208,7 +221,7 @@ def main():
     #                  )
     # load_and_plot_latest_scenario()
 
-    graph_tests(n_platoon)
+    # graph_tests(n_platoon)
 
     end_time = time.time()
 

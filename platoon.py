@@ -3,21 +3,22 @@ from __future__ import annotations
 # import bisect
 import numpy as np
 
-import controllers.optimal_controller as opt_ctrl
+import graph_tools
+# import controllers.optimal_controller as opt_ctrl
 import platoon_lane_change_strategies as lc_strategy
 import vehicle_models.four_state_vehicles as fsv
 
 
 class Platoon:
-    vehicles: list[fsv.FourStateVehicle]
+
     lane_change_strategy: lc_strategy.LaneChangeStrategy
     current_inputs: dict[int, float]
-
     _counter: int = 0
 
     def __init__(self):
         self._id: int = Platoon._counter
         Platoon._counter += 1
+        self.vehicles: list[fsv.FourStateVehicle] = []
         self._id_to_position_map: dict[int, int] = {}
 
     def get_platoon_leader(self) -> fsv.FourStateVehicle:
@@ -83,6 +84,19 @@ class Platoon:
         self.lane_change_strategy = lc_strategy.strategy_map[
             lane_change_strategy](self.vehicles)
 
+    def set_strategy_parameters(
+            self, strategy_parameters: tuple[list[int], list[int]] = None
+    ) -> None:
+        if strategy_parameters:
+            self.lane_change_strategy.set_lane_change_order(
+                strategy_parameters[0], strategy_parameters[1])
+        else:
+            self.lane_change_strategy.set_lane_change_order()
+
+    def set_strategy_states_graph(self,
+                                  state_graph: graph_tools.VehicleStatesGraph):
+        self.lane_change_strategy.set_states_graph(state_graph)
+
     def add_vehicle(self, new_vehicle: fsv.FourStateVehicle):
         """
         Adds the vehicle to the platoon. The new vehicle does not have to
@@ -121,7 +135,7 @@ class OptimalPlatoon(Platoon):
     def get_platoon_leader(self) -> fsv.OptimalControlVehicle:
         return self.vehicles[0]
 
-    def get_optimal_controller(self) -> opt_ctrl.VehicleOptimalController:
+    def get_optimal_controller(self):  # -> opt_ctrl.VehicleOptimalController:
         return self.get_platoon_leader().get_opt_controller()
 
     def add_vehicle(self, new_vehicle: fsv.OptimalControlVehicle):
@@ -135,16 +149,17 @@ class OptimalPlatoon(Platoon):
 class ClosedLoopPlatoon(Platoon):
     def __init__(self, first_vehicle: fsv.ClosedLoopVehicle,
                  lane_change_strategy: int,
-                 strategy_parameters: tuple[list[int], list[int]] = None):
+                 # lane_changing_order: tuple[list[int], list[int]] = None
+                 ):
         super().__init__()
 
         # Vehicles and their ids sorted by position (first is front-most)
         self.vehicles: list[fsv.ClosedLoopVehicle] = []
         self.add_vehicle(first_vehicle)
         self.set_strategy(lane_change_strategy)
-        if strategy_parameters:
-            self.lane_change_strategy.set_parameters(strategy_parameters[0],
-                                                     strategy_parameters[1])
+        # if lane_changing_order is not None:
+        #     self.lane_change_strategy.set_parameters(lane_changing_order[0],
+        #                                              lane_changing_order[1])
 
     # def get_platoon_leader(self) -> fsv.ClosedLoopVehicle:
     #     return self.vehicles[0]

@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 import controllers.optimal_controller as opt_ctrl
+import graph_tools
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
 from operating_modes import system_operating_mode as som
@@ -27,7 +28,8 @@ class VehicleGroup:
         # pairs.
         self.mode_sequence: som.ModeSequence = som.ModeSequence()
         self._platoon_lane_change_strategy = 0
-        self._strategy_parameters = ([], [])
+        self._maneuver_order = None
+        self._vehicle_states_graph = None
         self._is_verbose = True
 
     def get_n_vehicles(self):
@@ -158,11 +160,24 @@ class VehicleGroup:
                 self.vehicles[veh_id].compute_lane_keeping_desired_gap(v))
         return gaps
 
+    def get_lc_end_times(self) -> list[float]:
+        final_times = []
+        for veh_id in self.sorted_vehicle_ids:
+            final_times.append(self.vehicles[veh_id].get_lc_end_time())
+        return final_times
+
     def set_platoon_lane_change_strategy(
-            self, strategy_number: int,
-            strategy_parameters: tuple[list[int], list[int]] = None):
+            self, strategy_number: int):
         self._platoon_lane_change_strategy = strategy_number
-        self._strategy_parameters = strategy_parameters
+        # self._strategy_parameters = strategy_parameters
+
+    def set_predefined_lane_change_order(self, lane_change_order: list[int],
+                                         cooperation_order: list[int]):
+        self._maneuver_order = (lane_change_order, cooperation_order)
+
+    def set_vehicle_states_graph(self,
+                                 states_graph: graph_tools.VehicleStatesGraph):
+        self._vehicle_states_graph = states_graph
 
     def set_verbose(self, value: bool):
         self._is_verbose = value
@@ -356,37 +371,68 @@ class VehicleGroup:
                 x[veh_id], y[veh_id], theta[veh_id], v[veh_id]))
         return np.array(full_state)
 
+    def initialize_platoons(self):
+        """
+        Based on vehicles parameters and initial position, create platoons
+        of vehicles
+        :return:
+        """
+        # First, we must check which vehicles are physically close to each other
+        self.update_surrounding_vehicles()
+
+        # Then, we run their internal algorithms to form platoons
+        for veh_id, veh in self.vehicles.items():
+            veh.update_platoons(
+                self.vehicles, self._platoon_lane_change_strategy)
+
+        # Some strategy parameters depend on the number of vehicles in the
+        # platoon. So, we can only set them after forming the platoons
+        if self._maneuver_order is not None:
+            for veh in self.vehicles.values():
+                veh.set_platoon_strategy_order(self._maneuver_order)
+        if self._vehicle_states_graph is not None:
+            for veh in self.vehicles.values():
+                veh.set_platoon_strategy_states_graph(
+                    self._vehicle_states_graph)
+
     def simulate_one_time_step(
             self, new_time: float,
             open_loop_controls: Mapping[int, np.ndarray] = None):
         if open_loop_controls is None:
             open_loop_controls = {}
 
-        # First we must check which vehicles are physically close to each other
+        # The separate for loop ensure that all vehicles use information from
+        # the same time step
+
+        # We check which vehicles are physically close to each other
+        # and, given that, each vehicle decides who's its target leader and
+        # whether it is safe to perform a lane change
         self.update_surrounding_vehicles()
-        # Given that, each vehicle decides who's its target leader
         for veh in self.vehicles.values():
             veh.update_target_leader(self.vehicles)
-        # Only then can we check the new system mode
+            if veh.has_lane_change_intention():
+                veh.check_is_lane_change_safe(self.vehicles)
+
+        # Then, we check the new system mode
         new_mode = som.SystemMode(self.vehicles)
         if self.get_current_mode() != new_mode:
             time = self.vehicles[0].get_current_time()
-            if self._is_verbose:
-                if not self.mode_sequence.is_empty():
-                    print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
-                        time, self.get_current_mode(), new_mode))
+            if self._is_verbose and not self.mode_sequence.is_empty():
+                print("t={:.2f}. Mode update\nold: {}\nnew: {}".format(
+                    time, self.get_current_mode(), new_mode))
             self.mode_sequence.add_mode(time, new_mode)
-        # Next the dynamics and controls kick in
+
+        # Next, the dynamics and controls are computed
         for veh_id, veh in self.vehicles.items():
-            veh.analyze_platoons(
-                self.vehicles, self._platoon_lane_change_strategy,
-                self._strategy_parameters)
+            veh.update_platoons(
+                self.vehicles, self._platoon_lane_change_strategy)
             veh.update_mode(self.vehicles)
             veh.determine_inputs(open_loop_controls.get(veh_id, []),
                                  self.vehicles)
             veh.compute_derivatives()
             veh.update_states(new_time)
-        # Last, we move the internal iteration counters
+
+        # Last, we update the internal iteration counters
         for veh in self.vehicles.values():
             veh.update_iteration_counter()
 
@@ -434,7 +480,6 @@ class VehicleGroup:
         for veh in self.vehicles.values():
             veh.truncate_simulation_history()
 
-
     def centralize_control(self):
         centralized_controller = opt_ctrl.VehicleOptimalController()
         ocv = self.get_optimal_control_vehicles()
@@ -452,3 +497,17 @@ class VehicleGroup:
             data_per_vehicle.append(vehicle_df)
         all_data = pd.concat(data_per_vehicle).reset_index(drop=True)
         return all_data.fillna(0)
+
+
+class ShortSimulationVehicleGroup(VehicleGroup):
+    """
+    Contains only ShortSimulationVehicle instances; used for simulations
+    between nodes in a graph of quantized states
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.vehicles: dict[int, fsv.ShortSimulationVehicle] = {}
+
+    def get_vehicle_by_id(self, veh_id: int) -> fsv.ShortSimulationVehicle:
+        return self.vehicles[veh_id]

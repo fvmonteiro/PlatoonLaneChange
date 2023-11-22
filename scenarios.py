@@ -13,6 +13,7 @@ import analysis
 import controllers.optimal_controller as opt_ctrl
 import controllers.optimal_control_costs as occ
 import configuration
+import graph_tools
 import platoon_lane_change_strategies as lc_strategy
 import post_processing as pp
 from vehicle_group import VehicleGroup
@@ -295,7 +296,7 @@ class LaneChangeScenario(SimulationScenario):
         return (opc_vehicle.get_opt_controller().get_running_cost_history(),
                 opc_vehicle.get_opt_controller().get_terminal_cost_history())
 
-    def optimal_platoon_lane_change(
+    def set_up_optimal_platoon_lane_change(
             self, n_orig_ahead: int, n_orig_behind: int,
             n_dest_ahead: int, n_dest_behind: int,
             is_acceleration_optimal: bool):
@@ -303,16 +304,28 @@ class LaneChangeScenario(SimulationScenario):
             'optimal', n_orig_ahead, n_orig_behind, n_dest_ahead,
             n_dest_behind, is_acceleration_optimal)
 
-    def platoon_full_feedback_lane_change(
+    def set_up_platoon_full_feedback_lane_change(
             self, n_orig_ahead: int, n_orig_behind: int,
             n_dest_ahead: int, n_dest_behind: int,
-            platoon_strategy_number: int,
-            strategy_params: tuple[list[int], list[int]] = None):
+            platoon_strategy_number: int):
         self.create_test_scenario(
             'closed_loop', n_orig_ahead, n_orig_behind, n_dest_ahead,
             n_dest_behind, False)
         self.vehicle_group.set_platoon_lane_change_strategy(
-            platoon_strategy_number, strategy_params)
+            platoon_strategy_number)
+
+    def platoon_graph_based_lane_change(
+            self, n_orig_ahead: int, n_orig_behind: int,
+            n_dest_ahead: int, n_dest_behind: int,
+            states_graph: graph_tools.VehicleStatesGraph):
+        base.BaseVehicle.reset_vehicle_counter()
+        platoon_strategy_number = lc_strategy.GraphStrategy.get_id()
+        self.create_test_scenario(
+            'closed_loop', n_orig_ahead, n_orig_behind, n_dest_ahead,
+            n_dest_behind, False)
+        self.vehicle_group.set_platoon_lane_change_strategy(
+            platoon_strategy_number)
+        self.vehicle_group.set_vehicle_states_graph(states_graph)
 
     def create_full_lanes_initial_state(self):
         v_orig_leader = config.v_ref['lo']
@@ -363,6 +376,7 @@ class LaneChangeScenario(SimulationScenario):
         dt = 1.0e-2
         time = np.arange(0, final_time + dt, dt)
         self.vehicle_group.prepare_to_start_simulation(len(time))
+        self.vehicle_group.initialize_platoons()
         # analysis.plot_initial_state(self.response_to_dataframe())
         # self.make_control_centralized()
         for i in range(len(time) - 1):
@@ -398,7 +412,7 @@ class AllLaneChangeStrategies(LaneChangeScenario):
     def run(self, final_time):
         tf = final_time
         sg = lc_strategy.StrategyGenerator()
-        strategy_number = lc_strategy.TemplateRelaxedStrategy.get_id()
+        strategy_number = lc_strategy.TemplateStrategy.get_id()
         all_positions = [i for i in range(self._n_platoon)]
 
         ldf_lc_order = all_positions
@@ -440,7 +454,9 @@ class AllLaneChangeStrategies(LaneChangeScenario):
                     'closed_loop', self._noa, self._nob, self._nda, self._ndb,
                     False)
                 self.vehicle_group.set_platoon_lane_change_strategy(
-                    strategy_number, (merging_order, coop_order))
+                    strategy_number)
+                self.vehicle_group.set_predefined_lane_change_order(
+                    merging_order, coop_order)
                 self.vehicle_group.set_verbose(False)
                 LaneChangeScenario.run(self, tf)
 
@@ -506,17 +522,16 @@ class AllLaneChangeStrategies(LaneChangeScenario):
 
                 # ============= Other costs =============== #
                 self.completion_times.append(
-                    np.max(pp.find_maneuver_completion_time(
-                        self.vehicle_group.get_all_vehicles())))
+                    np.max(self.vehicle_group.get_lc_end_times()))
                 self.accel_costs.append(
                     sum(pp.compute_acceleration_costs(
-                        self.vehicle_group.get_all_vehicles()).values())
+                        self.vehicle_group.to_dataframe()).values())
                 )
 
         self.vehicle_group = best_result
         print(f'{sg.counter} strategies tested.\n'
               f'Success rate: {sum(success) / sg.counter * 100}%\n'
-              f'Best strategy: cost={best_cost}, '
+              f'Best strategy: cost={best_cost:.2f}, '
               f'merging order={self.best_strategy["merging_order"]}, '
               f'coop order={self.best_strategy["coop_order"]}')
 

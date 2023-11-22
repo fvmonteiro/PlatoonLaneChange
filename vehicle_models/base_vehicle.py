@@ -9,7 +9,8 @@ import pandas as pd
 
 import configuration as config
 from vehicle_models import dynamics
-from operating_modes import system_operating_mode as som
+import graph_tools
+import operating_modes.system_operating_mode as som
 import operating_modes.base_operating_modes as modes
 
 
@@ -39,10 +40,9 @@ class BaseVehicle(ABC):
     _derivatives: np.ndarray[float]
     _mode: modes.VehicleMode
     _ocp_interface: Type[BaseVehicleInterface]
-    # _ocp_non_controllable_interface: Type[BaseVehicleInterface]
     _desired_future_follower_id: int
-    # _long_adjust_start_time: float
     _lc_start_time: float
+    _lc_end_time: float
 
     # Used when we need to copy a vehicle
     static_attribute_names = {
@@ -77,6 +77,7 @@ class BaseVehicle(ABC):
         self.c = config.STANDSTILL_DISTANCE
 
         self._is_connected = is_connected
+        self._is_lane_change_safe = False
         self._is_verbose = True
 
     def __repr__(self):
@@ -277,6 +278,10 @@ class BaseVehicle(ABC):
             # have closed-loop acceleration control
             return self._origin_leader_id[self._iter_counter]
 
+    def get_lc_end_time(self) -> float:
+        return (self._lc_end_time if self._lc_end_time < np.inf
+                else self.get_current_time())
+
     def get_platoon(self):
         return None
 
@@ -406,8 +411,8 @@ class BaseVehicle(ABC):
         simulated again
         """
         self.initialize_simulation_logs(n_samples)
-        # self._long_adjust_start_time = -np.inf
         self._lc_start_time = -np.inf
+        self._lc_end_time = 0.
 
         # Initial state
         self._time[self._iter_counter] = 0.0
@@ -427,8 +432,10 @@ class BaseVehicle(ABC):
     def reset_simulation_logs(self) -> None:
         self.initialize_simulation_logs(0)
 
-    def reset_lane_change_start_time(self) -> None:
+    def set_lane_change_completion_time(self) -> None:
         self._lc_start_time = -np.inf
+        # we assume at most one lane change per simulation
+        self._lc_end_time = self.get_current_time()
 
     def truncate_simulation_history(self):
         """
@@ -560,10 +567,67 @@ class BaseVehicle(ABC):
                     incoming_veh_x = other_x
         self._incoming_vehicle_id[self._iter_counter] = new_incoming_vehicle_id
 
-    def analyze_platoons(
+    def check_is_lane_change_safe(
+            self, vehicles: Mapping[int, BaseVehicle]) -> bool:
+        is_safe_to_orig_lane_leader = True
+        if self.has_origin_lane_leader():
+            orig_lane_leader = vehicles[self.get_origin_lane_leader_id()]
+            is_safe_to_orig_lane_leader = (
+                BaseVehicle.is_gap_safe_for_lane_change(
+                    orig_lane_leader, self))
+
+        is_safe_to_dest_lane_leader = True
+        if self.has_destination_lane_leader():
+            dest_lane_leader = vehicles[self.get_destination_lane_leader_id()]
+            is_safe_to_dest_lane_leader = (
+                BaseVehicle.is_gap_safe_for_lane_change(
+                    dest_lane_leader, self))
+
+        is_safe_to_dest_lane_follower = True
+        if self.has_destination_lane_follower():
+            dest_lane_follower = vehicles[
+                self.get_destination_lane_follower_id()]
+            is_safe_to_dest_lane_follower = (
+                BaseVehicle.is_gap_safe_for_lane_change(
+                    self, dest_lane_follower))
+
+        self._is_lane_change_safe = (is_safe_to_orig_lane_leader
+                                     and is_safe_to_dest_lane_leader
+                                     and is_safe_to_dest_lane_follower)
+        return self._is_lane_change_safe
+
+    @staticmethod
+    def is_gap_safe_for_lane_change(leading_vehicle: BaseVehicle,
+                                    following_vehicle: BaseVehicle):
+        margin = 1e-2
+        gap = BaseVehicle.compute_a_gap(leading_vehicle, following_vehicle)
+        safe_gap = following_vehicle.compute_safe_lane_change_gap(
+            following_vehicle.get_vel())
+        return gap + margin >= safe_gap
+
+    def initialize_platoons(
             self, vehicles: Mapping[int, BaseVehicle],
             platoon_lane_change_strategy: int,
-            strategy_parameters: tuple[list[int], list[int]] = None):
+            # strategy_parameters: tuple[list[int], list[int]] = None
+    ) -> None:
+        # [Nov 20] not yet sure there'll be any difference between initializing
+        # and updating platoons
+        self.update_platoons(vehicles, platoon_lane_change_strategy)
+
+    def update_platoons(
+            self, vehicles: Mapping[int, BaseVehicle],
+            platoon_lane_change_strategy: int,
+            # strategy_parameters: tuple[list[int], list[int]] = None
+    ) -> None:
+        pass
+
+    def set_platoon_strategy_order(
+            self,
+            strategy_parameters: tuple[list[int], list[int]] = None) -> None:
+        pass
+
+    def set_platoon_strategy_states_graph(
+            self, states_graph: graph_tools.VehicleStatesGraph) -> None:
         pass
 
     def request_cooperation(self) -> None:
@@ -694,7 +758,7 @@ class BaseVehicle(ABC):
 
     def prepare_for_longitudinal_adjustments_start(self):
         self.request_cooperation()
-        # self._long_adjust_start_time = self.get_current_time()
+        self._lc_end_time = np.inf
         # self._set_up_longitudinal_adjustments_control(vehicles)
 
     def prepare_for_lane_change_start(self):

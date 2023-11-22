@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 import warnings
 
+import numpy as np
+
+import graph_tools
 import vehicle_models.four_state_vehicles as fsv
 
 
@@ -84,6 +87,8 @@ class LaneChangeStrategy(ABC):
     _name: str
 
     def __init__(self, platoon_vehicles: list[fsv.FourStateVehicle]):
+        # TODO: make the strategy have the platoon as a member. This will make
+        #  it clearer that the strategy has access to updated platoon info
         self.platoon_vehicles = platoon_vehicles
 
     @classmethod
@@ -94,9 +99,14 @@ class LaneChangeStrategy(ABC):
     def get_name(cls) -> str:
         return cls._name
 
-    def set_parameters(self, merging_order: list[int] = None,
-                       cooperating_order: list[int] = None):
-        pass
+    def set_lane_change_order(self, merging_order: Sequence[int] = None,
+                              cooperating_order: Sequence[int] = None):
+        raise AttributeError('Only instances of the TemplateStrategy class '
+                             'can have their lane change order set.')
+
+    def set_states_graph(self, states_graph: graph_tools.VehicleStatesGraph):
+        raise AttributeError('Only instances of the GraphStrategy class '
+                             'can have their states graph set.')
 
     def get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         """
@@ -195,24 +205,29 @@ class TemplateStrategy(LaneChangeStrategy):
     """
 
     _id = 2
-    _name = 'Brute Force strategy'
+    _name = 'Template strategy'
 
     _idx: int
     # Order in which platoon vehicles change lanes
-    _lane_changing_order: list[int]
+    _lane_changing_order: Sequence[int]
     # Defines which platoon vehicle cooperates with the lane changing platoon
     # vehicle at the same index
-    _cooperating_order: list[int]
+    _cooperating_order: Sequence[int]
     # Index of the last (further behind) platoon vehicle that is already
     # at the destination lane
     _last_dest_lane_vehicle_idx: int
 
-    def set_parameters(self, lane_changing_order: list[int] = None,
-                       cooperating_order: list[int] = None):
+    def __init__(self, platoon_vehicles: list[fsv.FourStateVehicle]):
+        super().__init__(platoon_vehicles)
+        self._is_initialized = False
+
+    def set_lane_change_order(self, lane_changing_order: Sequence[int] = None,
+                              cooperating_order: Sequence[int] = None):
         self._idx = 0
         self._lane_changing_order = lane_changing_order
         self._cooperating_order = cooperating_order
         self._last_dest_lane_vehicle_idx = self._lane_changing_order[0]
+        self._is_initialized = True
 
     def can_start_lane_change(self, ego_position: int) -> bool:
         if self._idx >= len(self._lane_changing_order):
@@ -329,98 +344,78 @@ class TemplateRelaxedStrategy(TemplateStrategy):
         return -1
 
 
-class LeaderFirstStrategy(TemplateStrategy):
-    _id = 11
-    _name = 'Leader First strategy'
+# TODO: poor naming
+class GraphStrategy(TemplateStrategy):
 
-    def __init__(self, platoon_vehicles: list[fsv.FourStateVehicle]):
-        super().__init__(platoon_vehicles)
-        self._is_initialized = False
+    _id = 4
+    _name = 'Graph strategy'
 
-    def set_parameters(self, lane_changing_order: list[int] = None,
-                       cooperating_order: list[int] = None):
-        lane_changing_order = [i for i in range(len(self.platoon_vehicles))]
-        cooperating_order = [-1] * len(self.platoon_vehicles)
-        super().set_parameters(lane_changing_order, cooperating_order)
-        self._is_initialized = True
+    _lane_change_graph: graph_tools.VehicleStatesGraph
+
+    def set_states_graph(self, states_graph: graph_tools.VehicleStatesGraph):
+        self._lane_change_graph = states_graph
 
     def can_start_lane_change(self, ego_position: int) -> bool:
         if not self._is_initialized:
-            self.set_parameters()
+            self._decide_lane_change_order(ego_position)
         return super().can_start_lane_change(ego_position)
 
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         if not self._is_initialized:
-            self.set_parameters()
+            return -1
         return super()._get_desired_dest_lane_leader_id(ego_position)
 
     def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         if not self._is_initialized:
-            self.set_parameters()
+            return -1
         return super()._get_incoming_vehicle_id(ego_position)
+
+    def _decide_lane_change_order(self, ego_position: int):
+        for veh_pos in range(len(self.platoon_vehicles)):
+            veh = self.platoon_vehicles[veh_pos]
+            if veh.get_is_lane_change_safe():
+                self._lane_change_graph.set_first_mover_cost(veh_pos, 0.)
+            else:
+                self._lane_change_graph.set_first_mover_cost(veh_pos, np.inf)
+
+        graph_path = self._lane_change_graph.find_minimum_time_maneuver_order()
+        self.set_lane_change_order(graph_path[0], graph_path[1])
+        self._is_initialized = True
+
+
+# =========================== KNOWN STRATEGIES =============================== #
+class LeaderFirstStrategy(TemplateStrategy):
+    _id = 11
+    _name = 'Leader First strategy'
+
+    def set_lane_change_order(self, lane_changing_order: Sequence[int] = None,
+                              cooperating_order: Sequence[int] = None):
+        lane_changing_order = [i for i in range(len(self.platoon_vehicles))]
+        cooperating_order = [-1] * len(self.platoon_vehicles)
+        super().set_lane_change_order(lane_changing_order, cooperating_order)
 
 
 class LastFirstStrategy(TemplateStrategy):
     _id = 12
     _name = 'Last First strategy'
 
-    def __init__(self, platoon_vehicles: list[fsv.FourStateVehicle]):
-        super().__init__(platoon_vehicles)
-        self._is_initialized = False
-
-    def set_parameters(self, lane_changing_order: list[int] = None,
-                       cooperating_order: list[int] = None):
+    def set_lane_change_order(self, lane_changing_order: Sequence[int] = None,
+                              cooperating_order: Sequence[int] = None):
         lane_changing_order = [i for i in range(len(self.platoon_vehicles))]
         lane_changing_order.reverse()
         cooperating_order = [-1] + lane_changing_order[:-1]
-        super().set_parameters(lane_changing_order, cooperating_order)
-        self._is_initialized = True
-
-    def can_start_lane_change(self, ego_position: int) -> bool:
-        if not self._is_initialized:
-            self.set_parameters()
-        return super().can_start_lane_change(ego_position)
-
-    def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
-        if not self._is_initialized:
-            self.set_parameters()
-        return super()._get_desired_dest_lane_leader_id(ego_position)
-
-    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
-        if not self._is_initialized:
-            self.set_parameters()
-        return super()._get_incoming_vehicle_id(ego_position)
+        super().set_lane_change_order(lane_changing_order, cooperating_order)
 
 
 class LeaderFirstReverseStrategy(TemplateStrategy):
     _id = 13
     _name = 'Leader First Reverse strategy'
 
-    def __init__(self, platoon_vehicles: list[fsv.FourStateVehicle]):
-        super().__init__(platoon_vehicles)
-        self._is_initialized = False
-
-    def set_parameters(self, lane_changing_order: list[int] = None,
-                       cooperating_order: list[int] = None):
+    def set_lane_change_order(self, lane_changing_order: Sequence[int] = None,
+                              cooperating_order: Sequence[int] = None):
         lane_changing_order = [i for i in range(len(self.platoon_vehicles))]
         cooperating_order = [-1] + lane_changing_order[:-1]
-        super().set_parameters(lane_changing_order, cooperating_order)
-        self._is_initialized = True
-
-    def can_start_lane_change(self, ego_position: int) -> bool:
-        if not self._is_initialized:
-            self.set_parameters()
-        return super().can_start_lane_change(ego_position)
-
-    def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
-        if not self._is_initialized:
-            self.set_parameters()
-        return super()._get_desired_dest_lane_leader_id(ego_position)
-
-    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
-        if not self._is_initialized:
-            self.set_parameters()
-        return super()._get_incoming_vehicle_id(ego_position)
+        super().set_lane_change_order(lane_changing_order, cooperating_order)
 
 
 # =========================== OLD ============================ #
@@ -526,6 +521,7 @@ strategy_map = {
     SynchronousStrategy.get_id(): SynchronousStrategy,
     TemplateStrategy.get_id(): TemplateStrategy,
     TemplateRelaxedStrategy.get_id(): TemplateRelaxedStrategy,
+    GraphStrategy.get_id(): GraphStrategy,
     LeaderFirstStrategy.get_id(): LeaderFirstStrategy,
     LastFirstStrategy.get_id(): LastFirstStrategy,
     LeaderFirstReverseStrategy.get_id(): LeaderFirstReverseStrategy,
