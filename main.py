@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import pickle
 import time
 
 import matplotlib.pyplot as plt
@@ -106,11 +107,16 @@ def run_brute_force_strategy_test(
 
 def run_graph_based_scenario(
         n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
-        n_dest_ahead: int, n_dest_behind: int, are_vehicles_cooperative: bool):
+        n_dest_ahead: int, n_dest_behind: int, are_vehicles_cooperative: bool,
+        load_from_file: bool = False):
     tf = configuration.Configuration.time_horizon
     scenario = scenarios.LaneChangeScenario(n_platoon, are_vehicles_cooperative)
-    vsg = graph_tools.VehicleStatesGraph(n_platoon)
-    vsg.create_graph()
+    if load_from_file:
+        with open(f'graph_{n_platoon}_vehicles', 'rb') as f:
+            vsg = pickle.load(f)
+    else:
+        vsg = graph_tools.VehicleStatesGraph(n_platoon)
+        vsg.create_graph()
     scenario.platoon_graph_based_lane_change(n_orig_ahead, n_orig_behind,
                                              n_dest_ahead, n_dest_behind, vsg)
     run_save_and_plot(scenario, tf)
@@ -160,12 +166,14 @@ def load_and_plot_latest_scenario():
                                      plot_separately=False)
 
 
-def graph_tests(n_platoon: int):
+def create_graph(n_platoon: int):
     vsg = graph_tools.VehicleStatesGraph(n_platoon)
     vsg.create_graph()
     nx.draw_circular(vsg.states_graph)
     plt.show()
-    vsg.find_minimum_time_maneuver_order()
+    # vsg.find_minimum_time_maneuver_order()
+
+    vsg.save_to_file(f'graph_{n_platoon}_vehicles')
     # data = vsg.vehicle_group.to_dataframe()
     # analysis.plot_trajectory(data)
     # analysis.plot_platoon_lane_change(data)
@@ -206,9 +214,6 @@ def main():
     # run_brute_force_strategy_test(
     #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead,
     #     n_dest_behind, are_vehicles_cooperative)
-    run_graph_based_scenario(
-        n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
-        are_vehicles_cooperative)
 
     # run_with_external_controller(
     #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
@@ -221,7 +226,10 @@ def main():
     #                  )
     # load_and_plot_latest_scenario()
 
-    # graph_tests(n_platoon)
+    create_graph(n_platoon)
+    run_graph_based_scenario(
+        n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
+        are_vehicles_cooperative, load_from_file=True)
 
     end_time = time.time()
 

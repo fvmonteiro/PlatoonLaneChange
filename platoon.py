@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 # import bisect
 import numpy as np
 
@@ -166,6 +167,29 @@ class ClosedLoopPlatoon(Platoon):
 
     def add_vehicle(self, new_vehicle: fsv.ClosedLoopVehicle):
         super().add_vehicle(new_vehicle)
+
+    def set_maneuver_initial_state(
+            self, ego_id: int, lo_states: Sequence[float],
+            ld_states: Sequence[float]):
+        ego_position = self._id_to_position_map[ego_id]
+        # We center all around the leader TODO: avoid hard coding array indices
+        leader_x = self.get_platoon_leader().get_x()
+        leader_y = self.get_platoon_leader().get_y()
+
+        platoon_states = []
+        for veh in self.vehicles:
+            veh_states = veh.get_states()
+            veh_states[0] -= leader_x
+            veh_states[1] -= leader_y
+            platoon_states.extend(veh_states)
+        if lo_states is not None:
+            lo_states[0] -= leader_x
+            lo_states[1] -= leader_y
+        if ld_states is not None:
+            ld_states[0] -= leader_x
+            ld_states[1] -= leader_y
+        self.lane_change_strategy.set_maneuver_initial_state(
+            ego_position, lo_states, platoon_states, ld_states)
 
     def can_start_lane_change(self, ego_id: int) -> bool:
         ego_position = self._id_to_position_map[ego_id]

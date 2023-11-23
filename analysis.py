@@ -19,6 +19,7 @@ def load_latest_simulated_scenario(pickle_file_name: str):
         data = pickle.load(f)
     return data
 
+
 def plot_costs_vs_iteration(running_costs, terminal_costs,
                             plot_separately: bool = False):
     """
@@ -222,6 +223,23 @@ def plot_initial_state(data: pd.DataFrame, axis=None):
     if axis is None:
         fig.tight_layout()
         fig.show()
+
+
+def plot_initial_state_vector(state: Iterable[float]):
+    state = np.array(state).reshape(-1, 4).transpose()
+    x = state[0, :]
+    y = state[1, :]
+
+    fig, ax = plt.subplots()
+    ax.scatter(x, y, marker='>')
+    ax.axhline(y=config.LANE_WIDTH / 2, linestyle='--', color='black')
+    ax.set(xlabel=_get_variable_with_unit('x'),
+           ylabel=_get_variable_with_unit('y'),
+           ylim=(np.min(y) - 2, np.max(y) + 2))
+    ax.set_aspect('equal', adjustable='box')
+
+    fig.tight_layout()
+    fig.show()
 
 
 def plot_lane_change(data: pd.DataFrame):

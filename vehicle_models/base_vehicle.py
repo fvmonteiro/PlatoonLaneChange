@@ -169,7 +169,7 @@ class BaseVehicle(ABC):
         try:
             return self._states_history[:, self._iter_counter]
         except AttributeError:  # lazy coding
-            return self._states
+            return self._initial_state
 
     def get_x_history(self) -> np.ndarray:
         return self.get_a_state_history('x')
@@ -399,7 +399,7 @@ class BaseVehicle(ABC):
         self._iter_counter += 1
         self._time[self._iter_counter] = time
         self._states = states
-        self._states_history[:, self._iter_counter] = self._states
+        self._states_history[:, self._iter_counter] = states
         self._inputs = np.zeros(self._n_inputs)
         if len(optimal_inputs) > 0:
             self._write_optimal_inputs(optimal_inputs)
@@ -756,10 +756,10 @@ class BaseVehicle(ABC):
             df, 'dest_lane_follower_id', self._destination_follower_id)
         return df
 
-    def prepare_for_longitudinal_adjustments_start(self):
+    def prepare_for_longitudinal_adjustments_start(
+            self, vehicles: Mapping[int, BaseVehicle]):
         self.request_cooperation()
         self._lc_end_time = np.inf
-        # self._set_up_longitudinal_adjustments_control(vehicles)
 
     def prepare_for_lane_change_start(self):
         self._lc_start_time = self.get_current_time()

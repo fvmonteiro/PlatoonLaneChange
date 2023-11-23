@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
 import warnings
 
+import networkx as nx
 import numpy as np
 
 import graph_tools
@@ -138,9 +139,14 @@ class LaneChangeStrategy(ABC):
     @abstractmethod
     def can_start_lane_change(self, ego_position: int) -> bool:
         """
-        Unrelated to safety. This is just about if the vehicle is
+        Unrelated to safety. This method checks if the vehicle is
         authorized by the strategy to start its maneuver
         """
+        pass
+
+    def set_maneuver_initial_state(
+            self, ego_position_in_platoon: int, lo_states: Iterable[float],
+            platoon_states: Iterable[float], ld_states: Iterable[float]):
         pass
 
     @abstractmethod
@@ -346,7 +352,6 @@ class TemplateRelaxedStrategy(TemplateStrategy):
 
 # TODO: poor naming
 class GraphStrategy(TemplateStrategy):
-
     _id = 4
     _name = 'Graph strategy'
 
@@ -355,9 +360,17 @@ class GraphStrategy(TemplateStrategy):
     def set_states_graph(self, states_graph: graph_tools.VehicleStatesGraph):
         self._lane_change_graph = states_graph
 
+    def set_maneuver_initial_state(
+            self, ego_position_in_platoon: int, lo_states: Iterable[float],
+            platoon_states: Iterable[float], ld_states: Iterable[float]):
+        self._lane_change_graph.set_maneuver_initial_state(
+            ego_position_in_platoon, lo_states, platoon_states, ld_states)
+
     def can_start_lane_change(self, ego_position: int) -> bool:
         if not self._is_initialized:
             self._decide_lane_change_order(ego_position)
+        if not self._is_initialized:
+            return False
         return super().can_start_lane_change(ego_position)
 
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
@@ -378,12 +391,17 @@ class GraphStrategy(TemplateStrategy):
             else:
                 self._lane_change_graph.set_first_mover_cost(veh_pos, np.inf)
 
-        graph_path = self._lane_change_graph.find_minimum_time_maneuver_order()
+        try:
+            graph_path = (
+                self._lane_change_graph.find_minimum_time_maneuver_order(
+                    ego_position))
+        except nx.NetworkXNoPath:
+            return
         self.set_lane_change_order(graph_path[0], graph_path[1])
         self._is_initialized = True
 
 
-# =========================== KNOWN STRATEGIES =============================== #
+# ========================= Heuristic STRATEGIES ============================= #
 class LeaderFirstStrategy(TemplateStrategy):
     _id = 11
     _name = 'Leader First strategy'
