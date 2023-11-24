@@ -384,21 +384,27 @@ class GraphStrategy(TemplateStrategy):
         return super()._get_incoming_vehicle_id(ego_position)
 
     def _decide_lane_change_order(self, ego_position: int):
+        opt_path = None
+        opt_cost = np.inf
         for veh_pos in range(len(self.platoon_vehicles)):
             veh = self.platoon_vehicles[veh_pos]
             if veh.get_is_lane_change_safe():
                 self._lane_change_graph.set_first_mover_cost(veh_pos, 0.)
             else:
                 self._lane_change_graph.set_first_mover_cost(veh_pos, np.inf)
+            try:
+                path, cost = (
+                    self._lane_change_graph.find_minimum_time_maneuver_order(
+                        veh_pos))
+                if cost < opt_cost:
+                    opt_path = path
+            except nx.NetworkXNoPath:
+                continue
 
-        try:
-            graph_path = (
-                self._lane_change_graph.find_minimum_time_maneuver_order(
-                    ego_position))
-        except nx.NetworkXNoPath:
-            return
-        self.set_lane_change_order(graph_path[0], graph_path[1])
+        self.set_lane_change_order(opt_path[0], opt_path[1])
         self._is_initialized = True
+
+        print(f'Path chosen from graph: {opt_path[0]}, {opt_path[1]}')
 
 
 # ========================= Heuristic STRATEGIES ============================= #

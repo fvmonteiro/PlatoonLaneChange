@@ -25,6 +25,11 @@ class FourStateVehicle(base.BaseVehicle, ABC):
 
     _state_names = ['x', 'y', 'theta', 'v']
     _input_names = ['a', 'phi']
+    _is_model_defined: bool = False
+    # _n_states = len(_state_names)
+    # _n_inputs = len(_input_names)
+    # _state_idx = {_state_names[i]: i for i in range(_n_states)}
+    # _input_idx = {_input_names[i]: i for i in range(_n_inputs)}
 
     static_attribute_names = base.BaseVehicle.static_attribute_names.union(
         {'brake_max', 'accel_max'}
@@ -34,7 +39,10 @@ class FourStateVehicle(base.BaseVehicle, ABC):
                  has_open_loop_acceleration: bool,
                  is_connected: bool):
         super().__init__(is_connected)
-        self._ocp_interface = FourStateVehicleInterface
+        if not FourStateVehicle._is_model_defined:
+            FourStateVehicle._set_model()
+            FourStateVehicle._is_model_defined = True
+            FourStateVehicle._ocp_interface_type = FourStateVehicleInterface
 
         self._can_change_lanes = can_change_lanes
         self._has_open_loop_acceleration = has_open_loop_acceleration
@@ -45,8 +53,6 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         if self._can_change_lanes:
             self._external_input_idx['phi'] = (
                     self._external_input_idx.get('a', -1) + 1)
-
-        self._set_model()
 
         self._controller = self._controller_type(
             self, self._can_change_lanes, self._has_open_loop_acceleration)
@@ -203,8 +209,9 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         self._inputs[self._input_idx['a']] = accel
         self._inputs[self._input_idx['phi']] = phi
 
-    def _set_speed(self, v0, state):
-        state[self._state_idx['v']] = v0
+    @classmethod
+    def _set_speed(cls, v0, state):
+        state[cls._state_idx['v']] = v0
 
     def _compute_derivatives(self, vel, theta, phi):
         # TODO: can we avoid the if here? maybe 'save' which function is called
@@ -219,8 +226,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             self._inputs[self._input_idx[i_name]] = optimal_inputs[i_idx]
 
     def _create_platoon(
-            self, platoon_lane_change_strategy: int,
-            # strategy_parameters: tuple[list[int], list[int]] = None
+            self, platoon_lane_change_strategy: int
     ) -> platoon.Platoon:
         pass
 

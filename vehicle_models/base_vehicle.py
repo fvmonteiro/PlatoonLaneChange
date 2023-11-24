@@ -39,7 +39,7 @@ class BaseVehicle(ABC):
     _leader_id: np.ndarray[int]  # vehicle used to determine current accel
     _derivatives: np.ndarray[float]
     _mode: modes.VehicleMode
-    _ocp_interface: Type[BaseVehicleInterface]
+    _ocp_interface_type: Type[BaseVehicleInterface]
     _desired_future_follower_id: int
     _lc_start_time: float
     _lc_end_time: float
@@ -119,7 +119,7 @@ class BaseVehicle(ABC):
         return cls._input_names
 
     def get_ocp_interface(self) -> BaseVehicleInterface:
-        return self._ocp_interface(self)
+        return self._ocp_interface_type(self)
 
     def get_free_flow_speed(self) -> float:
         return self._free_flow_speed
@@ -740,6 +740,16 @@ class BaseVehicle(ABC):
         self._set_speed(v, state_vector)
         return state_vector
 
+    @classmethod
+    def create_state_vector_2(cls, x: float, y: float, theta: float,
+                            v: float = None):
+        state_vector = np.zeros(cls._n_states)
+        state_vector[cls._state_idx['x']] = x
+        state_vector[cls._state_idx['y']] = y
+        state_vector[cls._state_idx['theta']] = theta
+        cls._set_speed(v, state_vector)
+        return state_vector
+
     def to_dataframe(self) -> pd.DataFrame:
         data = np.concatenate([self._time.reshape(1, -1),
                                self._states_history, self._inputs_history])
@@ -765,18 +775,19 @@ class BaseVehicle(ABC):
         self._lc_start_time = self.get_current_time()
         self._set_up_lane_change_control()
 
-    def _set_model(self):
+    @classmethod
+    def _set_model(cls):
         """
         Must be called in the constructor of every derived class to set the
         variables that define which vehicle model is implemented.
         :return:
         """
-        self._n_states = len(self._state_names)
-        self._n_inputs = len(self._input_names)
-        self._state_idx = {self._state_names[i]: i for i
-                           in range(self._n_states)}
-        self._input_idx = {self._input_names[i]: i for i
-                           in range(self._n_inputs)}
+        cls._n_states = len(cls._state_names)
+        cls._n_inputs = len(cls._input_names)
+        cls._state_idx = {cls._state_names[i]: i for i
+                          in range(cls._n_states)}
+        cls._input_idx = {cls._input_names[i]: i for i
+                          in range(cls._n_inputs)}
 
     def follow_origin_lane_leader(self):
         self._set_current_leader_id(self.get_origin_lane_leader_id())
@@ -792,8 +803,9 @@ class BaseVehicle(ABC):
         else:
             df[col_name] = col_value
 
+    @classmethod
     @abstractmethod
-    def _set_speed(self, v0, state):
+    def _set_speed(cls, v0, state):
         """
         Sets the proper element in array state equal to v0
         :param v0: speed to write

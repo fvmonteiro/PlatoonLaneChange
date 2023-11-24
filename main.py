@@ -117,8 +117,9 @@ def run_graph_based_scenario(
     else:
         vsg = graph_tools.VehicleStatesGraph(n_platoon)
         vsg.create_graph()
-    scenario.platoon_graph_based_lane_change(n_orig_ahead, n_orig_behind,
-                                             n_dest_ahead, n_dest_behind, vsg)
+    scenario.set_up_platoon_graph_based_lane_change(n_orig_ahead, n_orig_behind,
+                                                    n_dest_ahead, n_dest_behind, vsg)
+    scenario.vehicle_group.set_verbose(False)
     run_save_and_plot(scenario, tf)
 
 
@@ -201,7 +202,7 @@ def main():
     configuration.Configuration.set_scenario_parameters(
         v_ref={'lo': base_speed, 'ld': base_speed, 'p': p_speed,
                'fo': base_speed, 'fd': base_speed},
-        delta_x={'lo': 0., 'ld': 15., 'p': 0., 'fd': 15.},
+        delta_x={'lo': 0., 'ld': 0., 'p': 0., 'fd': 0.},
         platoon_strategies=[0, 13], increase_lc_time_headway=False
     )
     is_acceleration_optimal = True

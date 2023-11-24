@@ -66,7 +66,6 @@ class PlatoonLCTracker:
 
 class VehicleStatesGraph:
 
-
     def __init__(self, n_platoon: int):
         n_vehs = n_platoon + 2
         self.state_quantizer = StateQuantizer(n_vehs, dx=10, dv=2)
@@ -118,11 +117,11 @@ class VehicleStatesGraph:
 
             # Create and add the initial states nodes (before any lane
             # change)
-            initial_states = self._create_initial_states(v0_lo, v0_platoon,
+            initial_states = self._create_initial_states(v0_lo, v0_lo,
                                                          v0_ld, delta_x_lo)
             for x0 in initial_states:
                 nodes.appendleft((PlatoonLCTracker(self.n_platoon), x0))
-                # print(x0)
+                print(x0)
 
             # Next, add all the first mover nodes
             # self._add_all_first_mover_nodes(nodes, platoon_veh_ids, v0_ld,
@@ -161,7 +160,7 @@ class VehicleStatesGraph:
 
     def find_minimum_time_maneuver_order(
             self, first_mover_platoon_position: int
-    ) -> tuple[list[int], list[int]]:
+    ) -> tuple[tuple[list[int], list[int]], float]:
         dag: nx.DiGraph = self.states_graph
         initial_state = self._initial_state_per_vehicle[
             first_mover_platoon_position]
@@ -196,7 +195,7 @@ class VehicleStatesGraph:
                         opt_path = paths[-1]
                 except nx.exception.NetworkXNoPath:
                     continue
-        return opt_path
+        return opt_path, opt_cost
 
     def save_to_file(self, file_name: str):
         with open(file_name, 'wb') as f:
@@ -236,7 +235,7 @@ class VehicleStatesGraph:
         return {'lo': values[0], 'platoon': values[1:-1], 'ld': values[-1]}
 
     def _create_initial_states(
-            self, v0_lo: float, v0_platoon: Sequence[float], v0_ld: float,
+            self, v0_lo: float, v0_platoon: float, v0_ld: float,
             delta_x_lo: float
     ) -> list[tuple]:
         """
@@ -253,24 +252,25 @@ class VehicleStatesGraph:
         p1 = vehicle_group.get_vehicle_by_name('p1')
 
         # Origin lane leader (convention: x0_p1 = 0)
-        x0_lo_min = p1.compute_lane_keeping_desired_gap(v0_platoon[0])
+        x0_lo_min = p1.compute_lane_keeping_desired_gap(v0_platoon)
         x0_lo = x0_lo_min + delta_x_lo
         lo = vehicle_group.get_vehicle_by_name('lo')
         lo.set_initial_state(x0_lo, 0., 0., v0_lo)
 
-        # Platoon vehicles and possible locations of the dest lane leader
-        possible_ld_x = []  # safe distance from each platoon vehicle
+        # Platoon vehicles
         x0_platoon_vehicle = x0_lo_min
         for i in range(self.n_platoon):
-            possible_ld_x.append(x0_platoon_vehicle)
             p_i = vehicle_group.get_vehicle_by_name('p' + str(i+1))
-            v0_pi = v0_platoon[i]
-            x0_platoon_vehicle -= p_i.compute_lane_keeping_desired_gap(v0_pi)
-            p_i.set_initial_state(x0_platoon_vehicle, 0., 0., v0_pi)
+            x0_platoon_vehicle -= p_i.compute_lane_keeping_desired_gap(
+                v0_platoon)
+            p_i.set_initial_state(x0_platoon_vehicle, 0., 0., v0_platoon)
 
         # Dest lane leader
-        quantized_initial_states = []
         ld = vehicle_group.get_vehicle_by_name('ld')
+        pN = vehicle_group.get_vehicle_by_name('p'+str(self.n_platoon))
+        dx = self.state_quantizer.dx
+        possible_ld_x = np.arange(pN.get_x(), lo.get_x() + 2*dx, dx)
+        quantized_initial_states = []
         for ld_x in possible_ld_x:
             ld.set_initial_state(ld_x, configuration.LANE_WIDTH, 0., v0_ld)
             initial_state = vehicle_group.get_full_initial_state_vector()
@@ -523,26 +523,28 @@ class StateQuantizer:
             dtheta: float = None, veh_type: type[base.BaseVehicle] = None):
         if veh_type is None:
             veh_type = fsv.FourStateVehicle
+        self.dx, self.dv, self.dy, self.dtheta = dx, dv, dy, dtheta
         intervals = []
-        min_value = []
+        shift = []
+        # veh_type.create_state_vector()
         for state in veh_type.get_state_names():
             if state == 'x':
                 intervals.append(dx)
-                min_value.append(0.)
+                shift.append(0.)
             elif state == 'y':
                 intervals.append(dy)
-                min_value.append(-2.)
+                shift.append(-2.)
             elif state == 'theta':
                 intervals.append(dtheta if dtheta is not None else np.inf)
-                min_value.append(-np.pi / 2)
+                shift.append(-np.pi / 2)
             elif state == 'v':
                 intervals.append(dv)
-                min_value.append(0.)
+                shift.append(0.)
             else:
                 raise ValueError(f'Vehicle type {veh_type} has an unknown'
                                  f' state: {state}.')
         self._intervals = np.tile(intervals, n_vehicles)
-        self._min_value = np.tile(min_value, n_vehicles)
+        self._shift = np.tile(shift, n_vehicles)
         self._zero_idx = np.isinf(self._intervals)
 
     def quantize_state(self, full_system_state: Sequence[float]) -> tuple[int]:
@@ -552,16 +554,8 @@ class StateQuantizer:
         :param full_system_state:
         :return:
         """
-        # i = 0
-        # n = len(full_system_state)
-        # qx = np.zeros(n, dtype=int)
-        # while i < n:
-        #     for j in range(len(self._intervals)):
-        #         qx[i] = ((full_system_state[i] - self._min_value[j])
-        #                  // self._intervals[j])
-        #         i += 1
         full_system_state = np.array(full_system_state)
-        qx = (full_system_state - self._min_value) // self._intervals
+        qx = (full_system_state - self._shift) // self._intervals
         return tuple(qx.astype(int))
 
     def dequantize_state(self, full_quantized_state: Sequence[float],
@@ -583,19 +577,8 @@ class StateQuantizer:
         else:
             raise ValueError('Parameter mode must be "min", "mean", or "max"')
 
-        # i = 0
-        # n = len(full_quantized_state)  # time is the last state
-        # x = np.zeros(n)
-        # while i < n:
-        #     for j in range(len(self._intervals)):
-        #         if self._intervals[j] == np.inf:
-        #             x[i] = 0.
-        #         else:
-        #             x[i] = ((full_quantized_state[i] + delta)
-        #                     * self._intervals[j] + self._min_value[j])
-        #         i += 1
         full_quantized_state = np.array(full_quantized_state)
-        x = (full_quantized_state + delta) * self._intervals + self._min_value
+        x = (full_quantized_state + delta) * self._intervals + self._shift
         x[self._zero_idx] = 0.
         return x
 

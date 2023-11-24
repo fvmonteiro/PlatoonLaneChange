@@ -25,6 +25,11 @@ config = configuration.Configuration
 
 class SimulationScenario(ABC):
 
+    _str_to_vehicle_type = {
+        'optimal': fsv.OptimalControlVehicle,
+        'closed_loop': fsv.ClosedLoopVehicle,
+        'open_loop': fsv.OpenLoopVehicle
+    }
     _n_platoon: int
 
     def __init__(self):
@@ -87,18 +92,8 @@ class SimulationScenario(ABC):
         between platoon vehicles, use delta_x from Configurations
         :return:
         """
+        lc_veh_type = SimulationScenario._str_to_vehicle_type[lc_veh_class_name]
 
-        if lc_veh_class_name == 'optimal':
-            lc_veh_type = fsv.OptimalControlVehicle
-        elif lc_veh_class_name == 'closed_loop':
-            lc_veh_type = fsv.ClosedLoopVehicle
-        elif lc_veh_class_name == 'open_loop':
-            lc_veh_type = fsv.OpenLoopVehicle
-        else:
-            raise ValueError('Unknown vehicle class name for lane changing '
-                             'vehicles.\n'
-                             'Accepted values are: optimal, closed_loop, '
-                             'open_loop')
         coop = self._are_vehicles_cooperative
         vehicles_ahead = [
             fsv.ClosedLoopVehicle(can_change_lanes=False,
@@ -314,7 +309,7 @@ class LaneChangeScenario(SimulationScenario):
         self.vehicle_group.set_platoon_lane_change_strategy(
             platoon_strategy_number)
 
-    def platoon_graph_based_lane_change(
+    def set_up_platoon_graph_based_lane_change(
             self, n_orig_ahead: int, n_orig_behind: int,
             n_dest_ahead: int, n_dest_behind: int,
             states_graph: graph_tools.VehicleStatesGraph):
@@ -346,7 +341,45 @@ class LaneChangeScenario(SimulationScenario):
         self.vehicle_group.set_vehicles_initial_states(x0, y0_array,
                                                        theta0_array, v0)
 
-    def create_full_lane_x0(self, v0: Sequence[float]) -> np.ndarray:
+    def place_origin_lane_vehicles(self, v0_lo: float, v0_platoon: float,
+                                   delta_x_lo: float = 0):
+        # TODO: vehicle type, and is_acceleration_optimal should be params
+        # TODO: missing free-flow velocities
+        is_accel_optimal = False
+        are_others_coop = False
+        lc_veh_type = SimulationScenario._str_to_vehicle_type['closed_loop']
+
+        # Origin lane leader (convention: x0_p1 = 0)
+        lo = lc_veh_type(False, False, are_others_coop)
+        lo.set_name('lo')
+        # assuming similar vehicles, lo's safe gap is equal to p1's safe gap
+        x0_lo_min = lo.compute_lane_keeping_desired_gap(v0_platoon)
+        x0_lo = x0_lo_min + delta_x_lo
+        lo.set_initial_state(x0_lo, 0., 0., v0_lo)
+        self.vehicle_group.add_vehicle(lo)
+
+        # Platoon vehicles
+        x0_pi = x0_lo_min
+        for i in range(self._n_platoon):
+            p_i = lc_veh_type(True, is_accel_optimal, True)
+            p_i.set_name('p' + str(i+1))
+            x0_pi -= p_i.compute_lane_keeping_desired_gap(
+                v0_platoon)
+            p_i.set_initial_state(x0_pi, 0., 0., v0_platoon)
+            self.vehicle_group.add_vehicle(p_i)
+
+    def place_dest_lane_vehicles(self, v0_d: float):
+        p1 = self.vehicle_group.get_vehicle_by_name('p1')
+        pN = self.vehicle_group.get_vehicle_by_name('p' + str(self._n_platoon))
+        platoon_safe_gap = p1.compute_lane_keeping_desired_gap()
+        x0 = p1.get_x() + 2 * platoon_safe_gap
+        while x0 > pN.get_x() - 2 * platoon_safe_gap:
+            veh = fsv.ClosedLoopVehicle(False, False, False)
+            veh.set_initial_state(x0, configuration.LANE_WIDTH, 0., v0_d)
+            self.vehicle_group.add_vehicle(veh)
+            x0 -= veh.compute_lane_keeping_desired_gap(v0_d)
+
+    def create_full_lane_x0_old(self, v0: Sequence[float]) -> np.ndarray:
         # TODO: we must change the parts populating the veh group too
         # The goal here is to make the platoon see a full destination lane,
         # that is, no large gaps anywhere, while including the minimum number

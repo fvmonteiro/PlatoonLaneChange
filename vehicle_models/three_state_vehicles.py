@@ -45,7 +45,8 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
             # trying to read vehicle's speed before any input is computed
             return self._free_flow_speed
 
-    def _set_speed(self, v0, state):
+    @classmethod
+    def _set_speed(cls, v0, state):
         # Does nothing because velocity is an input for this model
         pass
 
