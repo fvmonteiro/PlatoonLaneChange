@@ -10,6 +10,7 @@ import networkx as nx
 import analysis
 import configuration
 import graph_tools
+import platoon_lane_change_strategies as lc_strategy
 import scenarios
 import vehicle_models
 
@@ -84,11 +85,27 @@ def run_cbf_lc_scenario(n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
     for strategy_number in configuration.Configuration.platoon_strategies:
         scenario = scenarios.LaneChangeScenario(n_platoon,
                                                 are_vehicles_cooperative)
-        scenario.set_up_platoon_full_feedback_lane_change(
-            n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
-            strategy_number)
+        scenario.set_control_type('closed_loop', is_acceleration_optimal=False)
+        scenario.create_test_scenario(
+            n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind)
+        scenario.vehicle_group.set_verbose(False)
+        scenario.set_lane_change_strategy(strategy_number)
         tf = configuration.Configuration.time_horizon
         run_save_and_plot(scenario, tf)
+
+
+def test_full_lane_scenario(n_platoon: int, are_vehicles_cooperative: bool):
+    tf = configuration.Configuration.time_horizon
+    for strategy_number in configuration.Configuration.platoon_strategies:
+        for i in range(0, n_platoon + 2):
+            scenario = scenarios.LaneChangeScenario(n_platoon,
+                                                    are_vehicles_cooperative)
+            scenario.set_control_type('closed_loop',
+                                      is_acceleration_optimal=False)
+            scenario.vehicle_group.set_verbose(False)
+            scenario.create_single_gap_initial_state(i)
+            scenario.set_lane_change_strategy(strategy_number)
+            # run_save_and_plot(scenario, tf)
 
 
 def run_brute_force_strategy_test(
@@ -110,17 +127,22 @@ def run_graph_based_scenario(
         n_dest_ahead: int, n_dest_behind: int, are_vehicles_cooperative: bool,
         load_from_file: bool = False):
     tf = configuration.Configuration.time_horizon
-    scenario = scenarios.LaneChangeScenario(n_platoon, are_vehicles_cooperative)
+
     if load_from_file:
         with open(f'graph_{n_platoon}_vehicles', 'rb') as f:
             vsg = pickle.load(f)
     else:
         vsg = graph_tools.VehicleStatesGraph(n_platoon)
         vsg.create_graph()
-    scenario.set_up_platoon_graph_based_lane_change(n_orig_ahead, n_orig_behind,
-                                                    n_dest_ahead, n_dest_behind, vsg)
-    scenario.vehicle_group.set_verbose(False)
-    run_save_and_plot(scenario, tf)
+    for i in range(2, n_platoon + 2):
+        scenario = scenarios.LaneChangeScenario(n_platoon,
+                                                are_vehicles_cooperative)
+        scenario.set_control_type('closed_loop', is_acceleration_optimal=False)
+        scenario.create_single_gap_initial_state(i)
+        scenario.set_lane_change_strategy(lc_strategy.GraphStrategy.get_id())
+        scenario.set_lane_change_states_graph(vsg)
+        scenario.vehicle_group.set_verbose(False)
+        run_save_and_plot(scenario, tf)
 
 
 def run_optimal_platoon_test(
@@ -128,9 +150,11 @@ def run_optimal_platoon_test(
         n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool,
         are_vehicles_cooperative: bool):
     scenario = scenarios.LaneChangeScenario(n_platoon, are_vehicles_cooperative)
-    scenario.set_up_optimal_platoon_lane_change(
-        n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
-        is_acceleration_optimal)
+    scenario.set_control_type('optimal', is_acceleration_optimal)
+    scenario.create_test_scenario(n_orig_ahead, n_orig_behind, n_dest_ahead,
+                                  n_dest_behind)
+    # scenario.create_optimal_control_test_scenario(
+    #     n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind)
     tf = configuration.Configuration.time_horizon + 2
     run_save_and_plot(scenario, tf)
 
@@ -162,9 +186,13 @@ def load_and_plot_latest_scenario():
     analysis.plot_constrained_lane_change(trajectory_data, 'p1')
     analysis.plot_platoon_lane_change(trajectory_data)
 
-    cost_data = analysis.load_latest_simulated_scenario(cost_file_name)
-    analysis.plot_costs_vs_iteration(cost_data[0], cost_data[1],
-                                     plot_separately=False)
+    try:
+        cost_data = analysis.load_latest_simulated_scenario(cost_file_name)
+        analysis.plot_costs_vs_iteration(cost_data[0], cost_data[1],
+                                         plot_separately=False)
+    except EOFError:
+        # no cost data
+        pass
 
 
 def create_graph(n_platoon: int):
@@ -182,7 +210,7 @@ def create_graph(n_platoon: int):
 
 def main():
 
-    n_platoon = 3
+    n_platoon = 2
     n_orig_ahead, n_orig_behind = 1, 0
     n_dest_ahead, n_dest_behind = 1, 1
 
@@ -191,19 +219,19 @@ def main():
         ftol=1.0e-3, estimate_gradient=True
     )
     configuration.Configuration.set_controller_parameters(
-        max_iter=3, time_horizon=20.0,
+        max_iter=3, time_horizon=8.0,
         has_terminal_lateral_constraints=False,
         has_lateral_safety_constraint=False,
         initial_input_guess='mode',
         jumpstart_next_solver_call=True, has_initial_mode_guess=True
     )
     base_speed = 20.
-    p_speed = base_speed * (1.2 if n_orig_ahead > 0 else 1.0)
+    p_speed = base_speed * (1.25 if n_orig_ahead > 0 else 1.0)
     configuration.Configuration.set_scenario_parameters(
-        v_ref={'lo': base_speed, 'ld': base_speed, 'p': p_speed,
+        v_ref={'lo': base_speed, 'ld': base_speed / 1.25, 'p': p_speed,
                'fo': base_speed, 'fd': base_speed},
         delta_x={'lo': 0., 'ld': 0., 'p': 0., 'fd': 0.},
-        platoon_strategies=[0, 13], increase_lc_time_headway=False
+        platoon_strategies=[13], increase_lc_time_headway=False
     )
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
@@ -212,6 +240,7 @@ def main():
     # run_cbf_lc_scenario(n_platoon, n_orig_ahead, n_orig_behind,
     #                     n_dest_ahead, n_dest_behind,
     #                     are_vehicles_cooperative)
+    test_full_lane_scenario(n_platoon, are_vehicles_cooperative)
     # run_brute_force_strategy_test(
     #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead,
     #     n_dest_behind, are_vehicles_cooperative)
@@ -227,10 +256,9 @@ def main():
     #                  )
     # load_and_plot_latest_scenario()
 
-    create_graph(n_platoon)
-    run_graph_based_scenario(
-        n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
-        are_vehicles_cooperative, load_from_file=True)
+    # run_graph_based_scenario(
+    #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
+    #     are_vehicles_cooperative, load_from_file=True)
 
     end_time = time.time()
 

@@ -35,7 +35,7 @@ class BaseVehicle(ABC):
     _origin_leader_id: np.ndarray[int]
     _destination_leader_id: np.ndarray[int]
     _destination_follower_id: np.ndarray[int]
-    _incoming_vehicle_id: np.ndarray[int]
+    _aided_vehicle_id: np.ndarray[int]
     _leader_id: np.ndarray[int]  # vehicle used to determine current accel
     _derivatives: np.ndarray[float]
     _mode: modes.VehicleMode
@@ -71,9 +71,9 @@ class BaseVehicle(ABC):
         # Note: safe time headway values are used to linearly overestimate
         # the nonlinear safe gaps
         self.h_safe_lk = config.TIME_HEADWAY
-        self.h_ref_lk = self.h_safe_lk + 0.1
+        self.h_ref_lk = self.h_safe_lk + 0.2
         self.h_safe_lc = config.get_lane_changing_time_headway()
-        self.h_ref_lc = self.h_safe_lc + 0.1
+        self.h_ref_lc = self.h_safe_lc + 0.2
         self.c = config.STANDSTILL_DISTANCE
 
         self._is_connected = is_connected
@@ -216,7 +216,7 @@ class BaseVehicle(ABC):
         return self._destination_follower_id
 
     def get_incoming_vehicle_id_history(self) -> np.ndarray:
-        return self._incoming_vehicle_id
+        return self._aided_vehicle_id
 
     def get_origin_lane_leader_id(self) -> int:
         return self._origin_leader_id[self._iter_counter]
@@ -227,8 +227,8 @@ class BaseVehicle(ABC):
     def get_destination_lane_follower_id(self) -> int:
         return self._destination_follower_id[self._iter_counter]
 
-    def get_incoming_vehicle_id(self) -> int:
-        return self._incoming_vehicle_id[self._iter_counter]
+    def get_aided_vehicle_id(self) -> int:
+        return self._aided_vehicle_id[self._iter_counter]
 
     def get_relevant_surrounding_vehicle_ids(self) -> dict[str, int]:
         """
@@ -255,7 +255,7 @@ class BaseVehicle(ABC):
             # A vehicle that needs our cooperation to merge in front of us. The
             # value can be determined by a cooperation request or by a platoon
             # lane changing strategy
-            self.get_incoming_vehicle_id()
+            self.get_aided_vehicle_id()
         ]
         return candidates
 
@@ -426,7 +426,7 @@ class BaseVehicle(ABC):
         self._origin_leader_id = -np.ones(n_samples, dtype=int)
         self._destination_leader_id = -np.ones(n_samples, dtype=int)
         self._destination_follower_id = -np.ones(n_samples, dtype=int)
-        self._incoming_vehicle_id = -np.ones(n_samples, dtype=int)
+        self._aided_vehicle_id = -np.ones(n_samples, dtype=int)
         self._leader_id = -np.ones(n_samples, dtype=int)
 
     def reset_simulation_logs(self) -> None:
@@ -451,13 +451,13 @@ class BaseVehicle(ABC):
             self._inputs_history = self._inputs_history[
                                    :, :self._iter_counter + 1]
             self._origin_leader_id = self._origin_leader_id[
-                                   :self._iter_counter + 1]
+                                     :self._iter_counter + 1]
             self._destination_leader_id = self._destination_leader_id[
                                           :self._iter_counter + 1]
             self._destination_follower_id = self._destination_follower_id[
                                             :self._iter_counter + 1]
-            self._incoming_vehicle_id = self._incoming_vehicle_id[
-                                        :self._iter_counter + 1]
+            self._aided_vehicle_id = self._aided_vehicle_id[
+                                     :self._iter_counter + 1]
             self._leader_id = self._leader_id[:self._iter_counter + 1]
         except IndexError:
             # The matrices already have the right size
@@ -488,7 +488,7 @@ class BaseVehicle(ABC):
             return False
 
     def is_cooperating(self) -> bool:
-        return self.get_incoming_vehicle_id() >= 0
+        return self.get_aided_vehicle_id() >= 0
 
     def has_leader(self) -> bool:
         return self.get_current_leader_id() >= 0
@@ -518,7 +518,6 @@ class BaseVehicle(ABC):
         self.find_origin_lane_leader(vehicles.values())
         self.find_destination_lane_vehicles(vehicles.values())
         self.find_cooperation_requests(vehicles.values())
-        # self.update_target_leader(vehicles)
 
     def find_origin_lane_leader(self, vehicles: Iterable[BaseVehicle]) -> None:
         ego_x = self.get_x()
@@ -526,11 +525,19 @@ class BaseVehicle(ABC):
         new_orig_leader_id = -1
         for other_vehicle in vehicles:
             other_x = other_vehicle.get_x()
-            if (self.get_current_lane() == other_vehicle.get_current_lane()
+            if ((self.get_current_lane() == other_vehicle.get_current_lane()
+                    or self.is_other_cutting_in(other_vehicle))
                     and ego_x < other_x < orig_lane_leader_x):
                 orig_lane_leader_x = other_x
                 new_orig_leader_id = other_vehicle._id
         self._origin_leader_id[self._iter_counter] = new_orig_leader_id
+
+    def is_other_cutting_in(self, other_vehicle: BaseVehicle):
+        if (other_vehicle.has_lane_change_intention()
+                and other_vehicle.get_target_lane() == self.get_current_lane()
+                and np.abs(other_vehicle.get_an_input_by_name('phi') > 1e-3)):
+            return True
+        return False
 
     def find_destination_lane_vehicles(self, vehicles: Iterable[BaseVehicle]
                                        ) -> None:
@@ -565,7 +572,7 @@ class BaseVehicle(ABC):
                 if other_request == self._id and other_x < incoming_veh_x:
                     new_incoming_vehicle_id = other_vehicle._id
                     incoming_veh_x = other_x
-        self._incoming_vehicle_id[self._iter_counter] = new_incoming_vehicle_id
+        self._aided_vehicle_id[self._iter_counter] = new_incoming_vehicle_id
 
     def check_is_lane_change_safe(
             self, vehicles: Mapping[int, BaseVehicle]) -> bool:
@@ -637,7 +644,7 @@ class BaseVehicle(ABC):
 
     def receive_cooperation_request(self, other_id) -> None:
         if self._is_connected:
-            self._incoming_vehicle_id = other_id
+            self._aided_vehicle_id = other_id
 
     @abstractmethod
     def update_target_leader(self, vehicles: Mapping[int, BaseVehicle]) -> None:
@@ -742,7 +749,7 @@ class BaseVehicle(ABC):
 
     @classmethod
     def create_state_vector_2(cls, x: float, y: float, theta: float,
-                            v: float = None):
+                              v: float = None):
         state_vector = np.zeros(cls._n_states)
         state_vector[cls._state_idx['x']] = x
         state_vector[cls._state_idx['y']] = y

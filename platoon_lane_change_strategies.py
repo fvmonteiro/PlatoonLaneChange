@@ -262,7 +262,7 @@ class TemplateStrategy(LaneChangeStrategy):
         # lane leader
         if self._idx == 0:
             return self.platoon_vehicles[self._lane_changing_order[
-                self._idx]].get_destination_lane_leader_id()
+                self._idx]].get_suitable_destination_lane_leader_id()
 
         coop_veh_id = self._cooperating_order[self._idx]
         if coop_veh_id == -1:
@@ -389,17 +389,17 @@ class GraphStrategy(TemplateStrategy):
         for veh_pos in range(len(self.platoon_vehicles)):
             veh = self.platoon_vehicles[veh_pos]
             if veh.get_is_lane_change_safe():
-                self._lane_change_graph.set_first_mover_cost(veh_pos, 0.)
-            else:
-                self._lane_change_graph.set_first_mover_cost(veh_pos, np.inf)
-            try:
-                path, cost = (
-                    self._lane_change_graph.find_minimum_time_maneuver_order(
-                        veh_pos))
-                if cost < opt_cost:
-                    opt_path = path
-            except nx.NetworkXNoPath:
-                continue
+            #     self._lane_change_graph.set_first_mover_cost(veh_pos, 0.)
+            # else:
+            #     self._lane_change_graph.set_first_mover_cost(veh_pos, np.inf)
+                try:
+                    path, cost = (
+                        self._lane_change_graph.
+                        find_minimum_time_maneuver_order(veh_pos))
+                    if cost < opt_cost:
+                        opt_path = path
+                except nx.NetworkXNoPath:
+                    continue
 
         self.set_lane_change_order(opt_path[0], opt_path[1])
         self._is_initialized = True

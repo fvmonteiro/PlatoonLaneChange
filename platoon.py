@@ -77,7 +77,7 @@ class Platoon:
         return self.lane_change_strategy.get_desired_dest_lane_leader_id(
             ego_position)
 
-    def get_incoming_vehicle_id(self, ego_id) -> int:
+    def get_aided_vehicle_id(self, ego_id) -> int:
         ego_position = self._id_to_position_map[ego_id]
         return self.lane_change_strategy.get_incoming_vehicle_id(ego_position)
 

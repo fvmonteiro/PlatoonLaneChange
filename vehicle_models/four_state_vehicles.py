@@ -81,13 +81,24 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             ret.append(self._inputs_history[self._input_idx[key]])
         return np.array(ret)
 
-    def get_desired_destination_lane_leader_id(self) -> int:
-        if not self.is_in_a_platoon():
-            return self.get_destination_lane_leader_id()
-        return self.get_platoon().get_desired_dest_lane_leader_id(self.get_id())
-
     def get_is_lane_change_safe(self):
         return self._is_lane_change_safe
+
+    def get_desired_destination_lane_leader_id(self) -> int:
+        if not self.is_in_a_platoon():
+            return self.get_suitable_destination_lane_leader_id()
+        return self.get_platoon().get_desired_dest_lane_leader_id(self.get_id())
+
+    def get_suitable_destination_lane_leader_id(self) -> int:
+        """
+        Returns the current destination lane leader if the space behind the
+        destination lane leader is safe for a lane change
+        :return:
+        """
+        if self.get_is_lane_change_safe():
+            return self.get_destination_lane_leader_id()
+        else:
+            return -1
 
     def set_platoon(self, new_platoon: platoon.Platoon) -> None:
         self._platoon = new_platoon
@@ -128,9 +139,9 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         if not self.is_in_a_platoon():
             super().find_cooperation_requests(vehicles)
         else:
-            incoming_vehicle_id = self.get_platoon().get_incoming_vehicle_id(
+            aided_vehicle_id = self.get_platoon().get_aided_vehicle_id(
                 self.get_id())
-            self._incoming_vehicle_id[self._iter_counter] = incoming_vehicle_id
+            self._aided_vehicle_id[self._iter_counter] = aided_vehicle_id
 
     def update_target_leader(self, vehicles: Mapping[int, FourStateVehicle]
                              ) -> None:
@@ -192,10 +203,10 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         #             self.set_platoon(leader_platoon)
 
     def set_platoon_strategy_order(
-            self, strategy_parameters: tuple[list[int], list[int]] = None
+            self, strategy_order: tuple[list[int], list[int]] = None
     ) -> None:
         if self.is_in_a_platoon():
-            self.get_platoon().set_strategy_parameters(strategy_parameters)
+            self.get_platoon().set_strategy_parameters(strategy_order)
 
     def set_platoon_strategy_states_graph(
             self, states_graph: graph_tools.VehicleStatesGraph) -> None:
@@ -458,7 +469,7 @@ class ShortSimulationVehicle(ClosedLoopVehicle):
 
     def find_cooperation_requests(self, vehicles: Iterable[base.BaseVehicle]
                                   ) -> None:
-        self._incoming_vehicle_id[self._iter_counter] = (
+        self._aided_vehicle_id[self._iter_counter] = (
             self._fixed_incoming_vehicle_id
         )
 

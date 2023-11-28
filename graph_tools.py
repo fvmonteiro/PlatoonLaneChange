@@ -114,21 +114,15 @@ class VehicleStatesGraph:
                                                   v0_ld)
 
             nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque()
-
             # Create and add the initial states nodes (before any lane
             # change)
             initial_states = self._create_initial_states(v0_lo, v0_lo,
                                                          v0_ld, delta_x_lo)
             for x0 in initial_states:
                 nodes.appendleft((PlatoonLCTracker(self.n_platoon), x0))
-                print(x0)
+                # print(x0)
 
-            # Next, add all the first mover nodes
-            # self._add_all_first_mover_nodes(nodes, platoon_veh_ids, v0_ld,
-            #                                 delta_x['ld'])
-            # print('All first mover nodes created.')
-
-            # Then, explore the children of each node in BFS mode
+            # Explore the children of each initial state node in BFS mode
             self._explore_until_maneuver_completion(
                 nodes, visited_states, platoon_veh_ids, free_flow_speeds)
 

@@ -303,13 +303,13 @@ def plot_gap_errors(
         fig, ax = plt.subplots()
 
     for ego_identifier, others in vehicle_pairs.items():
-        ego_data = get_veh_data(data, ego_identifier)
+        ego_data = _get_veh_data(data, ego_identifier)
         if ego_data.empty:
             warnings.warn(f'No data for vehicle {ego_identifier}')
             continue
         ego_name = ego_data['name'].iloc[0]
         for other_identifier in others:
-            other_data = get_veh_data(data, other_identifier)
+            other_data = _get_veh_data(data, other_identifier)
             if not other_data.empty:
                 if other_data['x'].iloc[0] < ego_data['x'].iloc[0]:
                     follower_data = other_data
@@ -344,7 +344,7 @@ def plot_single_vehicle_lane_change_gap_errors(
     if ax is None:
         fig, ax = plt.subplots()
 
-    lc_vehicle_data = get_veh_data(data, veh_id_or_name)
+    lc_vehicle_data = _get_veh_data(data, veh_id_or_name)
     veh_name = lc_vehicle_data['name'].iloc[0]
     ego_safe_gap = pp.compute_default_safe_gap(lc_vehicle_data['v'].to_numpy())
 
@@ -412,11 +412,14 @@ def plot_scenario_results(x_axes: list[str], y_axes: list[str],
         fig = None
         ax = axs
 
+    relevant_ids = get_relevant_vehicle_ids(data)
+    data_to_plot = data.loc[data['id'].isin(relevant_ids)]
+
     for i, (x, y) in enumerate(zip(x_axes, y_axes)):
-        final_x = data[x].max()
+        final_x = data_to_plot[x].max()
         show_legend = True if i == len(x_axes) - 1 else False
-        sns.lineplot(data, x=x, y=y, hue='name', ax=ax[i], palette='tab10',
-                     legend=show_legend)
+        sns.lineplot(data_to_plot, x=x, y=y, hue='name', ax=ax[i],
+                     palette='tab10', legend=show_legend)
         low, high = ax[i].get_ylim()
         if y == 'v' and high - low < 1:
             low, high = np.floor(low - 0.5), np.ceil(high + 0.5)
@@ -449,8 +452,21 @@ def compare_desired_and_actual_final_states(desired_data, simulated_data):
     fig.show()
 
 
-def get_veh_data(data: pd.DataFrame, id_or_name: Union[int, str]
-                 ) -> pd.DataFrame:
+def get_relevant_vehicle_ids(data: pd.DataFrame) -> np.ndarray:
+    platoon_ids = data[data['name'].str.startswith('p')]['id'].unique()
+    ld_id = pd.unique(data.loc[
+                          (data['id'].isin(platoon_ids)) & (
+                                      data['y'] > 2), 'orig_lane_leader_id'
+                      ].values.ravel('K'))
+    fd_id = pd.unique(data.loc[
+                          (data['orig_lane_leader_id'].isin(platoon_ids) & (
+                                      data['y'] > 2), 'id')
+                      ].values.ravel('K'))
+    return np.unique(np.concatenate((platoon_ids, ld_id, fd_id)))
+
+
+def _get_veh_data(data: pd.DataFrame, id_or_name: Union[int, str]
+                  ) -> pd.DataFrame:
     if isinstance(id_or_name, str):
         ego_data = data[data['name'] == id_or_name]
     else:

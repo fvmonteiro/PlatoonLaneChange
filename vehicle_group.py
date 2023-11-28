@@ -216,13 +216,15 @@ class VehicleGroup:
             start = end
 
     def set_vehicles_lane_change_direction(
-            self, ids_or_names: Sequence[Union[int, str]],
-            lc_direction: Union[int, Sequence[int]]):
+            self, lc_direction: Union[int, Sequence[int]],
+            ids_or_names: Sequence[Union[int, str]] = None):
+        if ids_or_names is None or len(ids_or_names) == 0:
+            ids_or_names = [veh_id for veh_id, veh in self.vehicles.items()
+                            if veh.get_name()[0] == 'p']
         if np.isscalar(lc_direction):
             lc_direction = [lc_direction] * len(ids_or_names)
         for i in range(len(ids_or_names)):
-            veh_id = ids_or_names[i]
-            self.set_single_vehicle_lane_change_direction(veh_id,
+            self.set_single_vehicle_lane_change_direction(ids_or_names[i],
                                                           lc_direction[i])
 
     def set_single_vehicle_lane_change_direction(
@@ -387,7 +389,7 @@ class VehicleGroup:
 
         # Some strategy parameters depend on the number of vehicles in the
         # platoon. So, we can only set them after forming the platoons
-        if self._maneuver_order is not None:
+        if self._vehicle_states_graph is None:
             for veh in self.vehicles.values():
                 veh.set_platoon_strategy_order(self._maneuver_order)
         if self._vehicle_states_graph is not None:
@@ -450,6 +452,15 @@ class VehicleGroup:
         for veh_id in self.sorted_vehicle_ids:
             self.vehicles[veh_id].write_state_and_input(
                 time, state_vectors[veh_id], optimal_inputs[veh_id])
+
+    # def set_initial_surrounding_vehicles(self):
+    #     """
+    #     For when we need to know vehicles relative positions to each other
+    #     before running a simulation
+    #     :return:
+    #     """
+    #     self.prepare_to_start_simulation(1)
+    #     self.update_surrounding_vehicles()
 
     def update_surrounding_vehicles(self):
         for ego_vehicle in self.vehicles.values():
