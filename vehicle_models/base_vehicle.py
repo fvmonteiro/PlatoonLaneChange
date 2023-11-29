@@ -78,6 +78,7 @@ class BaseVehicle(ABC):
 
         self._is_connected = is_connected
         self._is_lane_change_safe = False
+        self._is_lane_change_gap_suitable = False
         self._is_verbose = True
 
     def __repr__(self):
@@ -154,7 +155,8 @@ class BaseVehicle(ABC):
         return self.get_states()[self._state_idx[state_name]]
 
     def get_an_input_by_name(self, input_name) -> float:
-        return self._inputs[self._input_idx[input_name]]
+        return self._inputs_history[self._input_idx[input_name],
+                                    self._iter_counter]
 
     def get_current_lane(self) -> int:
         return round(self.get_y() / config.LANE_WIDTH)
@@ -229,6 +231,18 @@ class BaseVehicle(ABC):
 
     def get_aided_vehicle_id(self) -> int:
         return self._aided_vehicle_id[self._iter_counter]
+
+    def get_is_lane_change_safe(self) -> bool:
+        return self._is_lane_change_safe
+
+    def get_is_lane_change_gap_suitable(self) -> bool:
+        """
+        True if the gap between destination lane follower and leader is
+        greater than the sum of the destination lane follower safe gap and the
+        ego vehicle's safe gap
+        :return:
+        """
+        return self._is_lane_change_gap_suitable
 
     def get_relevant_surrounding_vehicle_ids(self) -> dict[str, int]:
         """
@@ -574,34 +588,44 @@ class BaseVehicle(ABC):
                     incoming_veh_x = other_x
         self._aided_vehicle_id[self._iter_counter] = new_incoming_vehicle_id
 
-    def check_is_lane_change_safe(
-            self, vehicles: Mapping[int, BaseVehicle]) -> bool:
-        is_safe_to_orig_lane_leader = True
+    def check_surrounding_gaps_safety(
+            self, vehicles: Mapping[int, BaseVehicle]): # -> bool:
+        margin = 1e-2
+
+        ego_safe_gap = self.compute_safe_lane_change_gap()
+        # is_safe_to_orig_lane_leader = True
         if self.has_origin_lane_leader():
             orig_lane_leader = vehicles[self.get_origin_lane_leader_id()]
-            is_safe_to_orig_lane_leader = (
-                BaseVehicle.is_gap_safe_for_lane_change(
-                    orig_lane_leader, self))
+            gap_to_lo = BaseVehicle.compute_a_gap(orig_lane_leader, self)
+        else:
+            gap_to_lo = np.inf
+        is_safe_to_orig_lane_leader = gap_to_lo + margin >= ego_safe_gap
 
-        is_safe_to_dest_lane_leader = True
+        # is_safe_to_dest_lane_leader = True
         if self.has_destination_lane_leader():
             dest_lane_leader = vehicles[self.get_destination_lane_leader_id()]
-            is_safe_to_dest_lane_leader = (
-                BaseVehicle.is_gap_safe_for_lane_change(
-                    dest_lane_leader, self))
+            gap_to_ld = BaseVehicle.compute_a_gap(dest_lane_leader, self)
+        else:
+            gap_to_ld = np.inf
+        is_safe_to_dest_lane_leader = gap_to_ld + margin >= ego_safe_gap
 
-        is_safe_to_dest_lane_follower = True
+        # is_safe_to_dest_lane_follower = True
         if self.has_destination_lane_follower():
             dest_lane_follower = vehicles[
                 self.get_destination_lane_follower_id()]
-            is_safe_to_dest_lane_follower = (
-                BaseVehicle.is_gap_safe_for_lane_change(
-                    self, dest_lane_follower))
+            gap_from_fd = BaseVehicle.compute_a_gap(self, dest_lane_follower)
+            fo_safe_gap = dest_lane_follower.compute_safe_lane_change_gap()
+        else:
+            gap_from_fd = np.inf
+            fo_safe_gap = 0.
+        is_safe_to_dest_lane_follower = gap_from_fd + margin >= fo_safe_gap
 
+        self._is_lane_change_gap_suitable = (gap_to_ld + gap_from_fd + margin
+                                             >= fo_safe_gap + ego_safe_gap)
         self._is_lane_change_safe = (is_safe_to_orig_lane_leader
                                      and is_safe_to_dest_lane_leader
                                      and is_safe_to_dest_lane_follower)
-        return self._is_lane_change_safe
+        # return self._is_lane_change_safe
 
     @staticmethod
     def is_gap_safe_for_lane_change(leading_vehicle: BaseVehicle,

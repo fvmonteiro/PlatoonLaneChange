@@ -97,34 +97,34 @@ class VehicleStatesGraph:
 
         # Still missing: loops for speeds and distances
         delta_x_lo = 0
-        possible_vel = [10, 20]
+        possible_vel = [20]
 
         self.n_nodes_per_root *= (len(possible_vel) * self.n_platoon)
-        print(f'Creating graph with approx. {self.n_nodes_per_root} nodes')
+        # print(f'Creating graph with approx. {self.n_nodes_per_root} nodes')
+        print(f'Creating graph')
 
         visited_states = set()
         # Desired speeds
         for v0_lo in possible_vel:
-            # for v0_ld in possible_vel:
-                # for v0_p in possible_vel:
-            v0_ld = v0_lo
-            v0_platoon = [v0_lo] * self.n_platoon
-            v_ff_platoon = v0_lo * 1.2
-            free_flow_speeds = self._order_values(v0_lo, v_ff_platoon,
-                                                  v0_ld)
+            for v0_diff in [0, -5, 5]:
+                v0_ld = v0_lo + v0_diff
+                v_ff_platoon = v0_lo * 1.2
+                free_flow_speeds = self._order_values(v0_lo, v_ff_platoon,
+                                                      v0_ld)
 
-            nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque()
-            # Create and add the initial states nodes (before any lane
-            # change)
-            initial_states = self._create_initial_states(v0_lo, v0_lo,
-                                                         v0_ld, delta_x_lo)
-            for x0 in initial_states:
-                nodes.appendleft((PlatoonLCTracker(self.n_platoon), x0))
-                # print(x0)
+                nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque()
+                # Create and add the initial states nodes (before any lane
+                # change)
+                initial_states = self._create_initial_states(v0_lo, v0_lo,
+                                                             v0_ld, delta_x_lo)
+                for x0 in initial_states:
+                    self.states_graph.add_node(x0)
+                    nodes.appendleft((PlatoonLCTracker(self.n_platoon), x0))
+                    print(x0)
 
-            # Explore the children of each initial state node in BFS mode
-            self._explore_until_maneuver_completion(
-                nodes, visited_states, platoon_veh_ids, free_flow_speeds)
+                # Explore the children of each initial state node in BFS mode
+                self._explore_until_maneuver_completion(
+                    nodes, visited_states, platoon_veh_ids, free_flow_speeds)
 
     def set_maneuver_initial_state(
             self, ego_position_in_platoon: int, lo_states: Iterable[float],
@@ -132,7 +132,7 @@ class VehicleStatesGraph:
         states = self._order_values(lo_states, platoon_states, ld_states)
         quantized_states = self.state_quantizer.quantize_state(states)
         if quantized_states not in set(self.states_graph.nodes):
-            raise KeyError('Initial state not in graph')
+            raise KeyError(f'State {quantized_states} not in graph')
         self._initial_state_per_vehicle[ego_position_in_platoon] = (
             quantized_states
         )
@@ -456,9 +456,11 @@ class VehicleStatesGraph:
         #     dest_tracker.get_maneuver_order(), weight=weight)
 
         n_nodes = self.states_graph.number_of_nodes()
-        percentage = n_nodes * 100 / self.n_nodes_per_root
-        if percentage % 10 < 0.5:
-            print(f'{percentage:.1f}% done')
+        if n_nodes % 20 == 0:
+            print(f'{n_nodes} nodes created')
+        # percentage = n_nodes * 100 / self.n_nodes_per_root
+        # if percentage % 10 < 0.5:
+        #     print(f'{percentage:.1f}% done')
 
     def _create_first_mover_node_from_scratch(
             self, vehicle_group: vg.VehicleGroup, v0_lo: float,

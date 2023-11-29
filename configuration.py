@@ -64,7 +64,7 @@ class Configuration:
         Configuration.estimate_gradient = estimate_gradient
 
     @staticmethod
-    def set_controller_parameters(
+    def set_optimal_controller_parameters(
             max_iter: int = None, time_horizon: float = None,
             has_terminal_lateral_constraints: bool = False,
             has_lateral_safety_constraint: bool = False,

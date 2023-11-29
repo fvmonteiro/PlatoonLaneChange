@@ -413,7 +413,7 @@ class VehicleGroup:
         for veh in self.vehicles.values():
             veh.update_target_leader(self.vehicles)
             if veh.has_lane_change_intention():
-                veh.check_is_lane_change_safe(self.vehicles)
+                veh.check_surrounding_gaps_safety(self.vehicles)
 
         # Then, we check the new system mode
         new_mode = som.SystemMode(self.vehicles)

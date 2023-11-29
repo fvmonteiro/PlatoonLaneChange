@@ -225,7 +225,7 @@ def plot_initial_state(data: pd.DataFrame, axis=None):
         fig.show()
 
 
-def plot_initial_state_vector(state: Iterable[float]):
+def plot_state_vector(state: Iterable[float]):
     state = np.array(state).reshape(-1, 4).transpose()
     x = state[0, :]
     y = state[1, :]

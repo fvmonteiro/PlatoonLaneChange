@@ -81,10 +81,9 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             ret.append(self._inputs_history[self._input_idx[key]])
         return np.array(ret)
 
-    def get_is_lane_change_safe(self):
-        return self._is_lane_change_safe
-
     def get_desired_destination_lane_leader_id(self) -> int:
+        if not self.has_lane_change_intention():
+            return -1
         if not self.is_in_a_platoon():
             return self.get_suitable_destination_lane_leader_id()
         return self.get_platoon().get_desired_dest_lane_leader_id(self.get_id())
@@ -95,10 +94,12 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         destination lane leader is safe for a lane change
         :return:
         """
-        if self.get_is_lane_change_safe():
+        if self.get_is_lane_change_gap_suitable():
             return self.get_destination_lane_leader_id()
         else:
             return -1
+
+    # def check_is_gap_suitable(self) -> bool:
 
     def set_platoon(self, new_platoon: platoon.Platoon) -> None:
         self._platoon = new_platoon
@@ -426,7 +427,8 @@ class ClosedLoopVehicle(FourStateVehicle):
                               ) -> bool:
         # We can't short-circuit any of the evaluation because these methods
         # also update internal values.
-        is_safe = self.check_is_lane_change_safe(vehicles)
+        # is_safe = self.check_is_lane_change_safe(vehicles)
+        is_safe = self.get_is_lane_change_safe()
         is_my_turn = (
                 not self.is_in_a_platoon()
                 or self.get_platoon().can_start_lane_change(self.get_id())
@@ -475,7 +477,8 @@ class ShortSimulationVehicle(ClosedLoopVehicle):
 
     def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]
                               ) -> bool:
-        is_safe = self.check_is_lane_change_safe(vehicles)
+        # is_safe = self.check_is_lane_change_safe(vehicles)
+        is_safe = self.get_is_lane_change_safe()
         is_my_turn = (self.get_desired_destination_lane_leader_id()
                       == self.get_destination_lane_leader_id())
         return is_safe and is_my_turn

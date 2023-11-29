@@ -401,10 +401,11 @@ class GraphStrategy(TemplateStrategy):
                 except nx.NetworkXNoPath:
                     continue
 
-        self.set_lane_change_order(opt_path[0], opt_path[1])
-        self._is_initialized = True
+        if opt_path is not None:
+            self.set_lane_change_order(opt_path[0], opt_path[1])
+            self._is_initialized = True
 
-        print(f'Path chosen from graph: {opt_path[0]}, {opt_path[1]}')
+            print(f'Path chosen from graph: {opt_path[0]}, {opt_path[1]}')
 
 
 # ========================= Heuristic STRATEGIES ============================= #

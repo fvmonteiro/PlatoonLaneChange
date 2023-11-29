@@ -178,14 +178,16 @@ class ClosedLoopPlatoon(Platoon):
 
         platoon_states = []
         for veh in self.vehicles:
-            veh_states = veh.get_states()
+            veh_states = veh.get_states().copy()
             veh_states[0] -= leader_x
             veh_states[1] -= leader_y
             platoon_states.extend(veh_states)
         if lo_states is not None:
+            lo_states = np.copy(lo_states)
             lo_states[0] -= leader_x
             lo_states[1] -= leader_y
         if ld_states is not None:
+            ld_states = np.copy(ld_states)
             ld_states[0] -= leader_x
             ld_states[1] -= leader_y
         self.lane_change_strategy.set_maneuver_initial_state(
