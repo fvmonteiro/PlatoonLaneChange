@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 # import bisect
 import numpy as np
 
+import configuration
 import graph_tools
 # import controllers.optimal_controller as opt_ctrl
-import platoon_lane_change_strategies as lc_strategy
+import platoon_lane_change_strategies as lc_strategies
+import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
 
 
 class Platoon:
 
-    lane_change_strategy: lc_strategy.LaneChangeStrategy
+    lane_change_strategy: lc_strategies.LaneChangeStrategy
     current_inputs: dict[int, float]
     _counter: int = 0
 
@@ -21,6 +23,7 @@ class Platoon:
         Platoon._counter += 1
         self.vehicles: list[fsv.FourStateVehicle] = []
         self._id_to_position_map: dict[int, int] = {}
+        self._lc_start_time = np.inf
 
     def get_platoon_leader(self) -> fsv.FourStateVehicle:
         """
@@ -81,18 +84,24 @@ class Platoon:
         ego_position = self._id_to_position_map[ego_id]
         return self.lane_change_strategy.get_incoming_vehicle_id(ego_position)
 
+    def get_strategy(self) -> lc_strategies.LaneChangeStrategy:
+        return self.lane_change_strategy
+
+    def set_lc_start_time(self, time: float):
+        self._lc_start_time = time
+
     def set_strategy(self, lane_change_strategy: int):
-        self.lane_change_strategy = lc_strategy.strategy_map[
+        self.lane_change_strategy = lc_strategies.strategy_map[
             lane_change_strategy](self.vehicles)
 
     def set_strategy_parameters(
             self, strategy_parameters: tuple[list[int], list[int]] = None
     ) -> None:
         if strategy_parameters:
-            self.lane_change_strategy.set_lane_change_order(
+            self.lane_change_strategy.set_maneuver_order(
                 strategy_parameters[0], strategy_parameters[1])
         else:
-            self.lane_change_strategy.set_lane_change_order()
+            self.lane_change_strategy.set_maneuver_order()
 
     def set_strategy_states_graph(self,
                                   state_graph: graph_tools.VehicleStatesGraph):
@@ -120,6 +129,9 @@ class Platoon:
                              + self.vehicles[idx:])
             for i, veh in enumerate(self.vehicles):
                 self._id_to_position_map[veh.get_id()] = i
+
+    def has_lane_change_started(self):
+        return self._lc_start_time < np.inf
 
 
 class OptimalPlatoon(Platoon):
@@ -168,6 +180,31 @@ class ClosedLoopPlatoon(Platoon):
     def add_vehicle(self, new_vehicle: fsv.ClosedLoopVehicle):
         super().add_vehicle(new_vehicle)
 
+    def set_maneuver_initial_state_for_all_vehicles(
+            self, all_vehicles: Mapping[int, base.BaseVehicle]):
+
+        if self.has_lane_change_started():
+            return
+
+        platoon_leader = self.get_platoon_leader()
+        if platoon_leader.has_origin_lane_leader():
+            lo = all_vehicles[platoon_leader.get_origin_lane_leader_id()]
+            lo_states = lo.get_states()
+        else:
+            lo_states = None
+
+        for veh in self.vehicles:
+            # TODO: tests [nov 29]
+            # if veh.get_is_lane_change_safe():
+            if veh.get_is_lane_change_gap_suitable():
+                if veh.has_destination_lane_leader():
+                    ld = all_vehicles[veh.get_destination_lane_leader_id()]
+                    ld_states = ld.get_states()
+                else:
+                    ld_states = None
+                self.set_maneuver_initial_state(veh.get_id(),
+                                                lo_states, ld_states)
+
     def set_maneuver_initial_state(
             self, ego_id: int, lo_states: Sequence[float],
             ld_states: Sequence[float]):
@@ -190,6 +227,11 @@ class ClosedLoopPlatoon(Platoon):
             ld_states = np.copy(ld_states)
             ld_states[0] -= leader_x
             ld_states[1] -= leader_y
+        else:
+            # TODO: lazy workaround. We need to include the no dest lane
+            #  leader possibility in the graph
+            ld_states = lo_states.copy()
+            ld_states[1] = configuration.LANE_WIDTH
         self.lane_change_strategy.set_maneuver_initial_state(
             ego_position, lo_states, platoon_states, ld_states)
 

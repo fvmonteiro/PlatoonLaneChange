@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Mapping, Union
 
 import numpy as np
@@ -15,6 +16,11 @@ COLORS = {'gray': (0.5, 0.5, 0.5), 'red': (1.0, 0.0, 0.0),
           'green': (0.0, 1.0, 0.0), 'blue': (0.0, 0.0, 1.0),
           'purple': (0.5, 0.0, 0.5), 'orange': (1.0, 0.5, 0.0),
           'dark_blue': (0, 0.0, 0.5)}
+
+# TODO: make dependent on current machine
+# DATA_FOLDER_PATH = 'C:\\Users\\fvall\\Documents\\Research\\data'
+DATA_FOLDER_PATH = os.path.join('c:', os.sep, 'Users', 'fvall', 'Documents',
+                                'Research', 'data')
 
 
 class Configuration:

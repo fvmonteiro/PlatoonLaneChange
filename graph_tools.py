@@ -4,6 +4,7 @@ import copy
 import pickle
 from collections.abc import Iterable, Mapping, Sequence
 from collections import deque
+import os
 from typing import Any
 
 import networkx as nx
@@ -87,6 +88,16 @@ class VehicleStatesGraph:
             nodes_per_level.append(nodes_per_level[-1] * n)
         self.n_nodes_per_root = sum(nodes_per_level)
 
+    @staticmethod
+    def load_from_file(n_platoon: int) -> VehicleStatesGraph:
+        file_name = f'graph_{n_platoon}_vehicles'
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 'vehicle_state_graphs',
+                                 file_name + '.pickle')
+        with open(file_path, 'rb') as f:
+            vsg: VehicleStatesGraph = pickle.load(f)
+        return vsg
+
     def create_graph(self):
 
         sample_vehicle_group = self._create_vehicle_group()
@@ -106,7 +117,7 @@ class VehicleStatesGraph:
         visited_states = set()
         # Desired speeds
         for v0_lo in possible_vel:
-            for v0_diff in [0, -5, 5]:
+            for v0_diff in [-5, 0, 5]:
                 v0_ld = v0_lo + v0_diff
                 v_ff_platoon = v0_lo * 1.2
                 free_flow_speeds = self._order_values(v0_lo, v_ff_platoon,
@@ -129,7 +140,8 @@ class VehicleStatesGraph:
     def set_maneuver_initial_state(
             self, ego_position_in_platoon: int, lo_states: Iterable[float],
             platoon_states: Iterable[float], ld_states: Iterable[float]):
-        states = self._order_values(lo_states, platoon_states, ld_states)
+        states = np.round(
+            self._order_values(lo_states, platoon_states, ld_states))
         quantized_states = self.state_quantizer.quantize_state(states)
         if quantized_states not in set(self.states_graph.nodes):
             raise KeyError(f'State {quantized_states} not in graph')
@@ -191,8 +203,12 @@ class VehicleStatesGraph:
                     continue
         return opt_path, opt_cost
 
-    def save_to_file(self, file_name: str):
-        with open(file_name, 'wb') as f:
+    def save_to_file(self):
+        file_name = f'graph_{self.n_platoon}_vehicles'
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 'vehicle_state_graphs',
+                                 file_name + '.pickle')
+        with open(file_path, 'wb') as f:
             pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
 
     def _create_vehicle_group(self, include_ld: bool = True
@@ -395,7 +411,7 @@ class VehicleStatesGraph:
                     #     print(f'# Transition from '
                     #           f'{tracker.get_maneuver_order()} to '
                     #           f'{next_tracker.get_maneuver_order()} failed #')
-        print('done')
+        print('\tdone expanding one initial state')
 
     def simulate_till_lane_change(
             self, vehicle_group: vg.ShortSimulationVehicleGroup,
@@ -457,7 +473,7 @@ class VehicleStatesGraph:
 
         n_nodes = self.states_graph.number_of_nodes()
         if n_nodes % 20 == 0:
-            print(f'{n_nodes} nodes created')
+            print(f'\t{n_nodes} nodes created')
         # percentage = n_nodes * 100 / self.n_nodes_per_root
         # if percentage % 10 < 0.5:
         #     print(f'{percentage:.1f}% done')

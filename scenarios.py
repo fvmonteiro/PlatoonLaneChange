@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
+import os
 import pickle
 from typing import Union
 
@@ -31,11 +32,20 @@ class LaneChangeScenarioManager:
     delta_x: Mapping[str, float]
     n_platoon: int
     are_vehicles_cooperative: bool
+    _lane_change_graph: graph_tools.VehicleStatesGraph
 
     def __init__(self):
         # TODO: names should depend on the scenario
         self.trajectory_file_name = 'trajectory_data.pickle'
         self.cost_file_name = 'cost_data.pickle'
+        self.results: dict[str, list] = {
+            'n_platoon': [], 'vo': [], 'vd': [], 'strategy': [],
+            'lane_change_order': [], 'cooperation_order': [],
+            'success': [], 'completion_time': [], 'accel_cost': []
+        }
+
+    def get_results(self) -> pd.DataFrame:
+        return pd.DataFrame(self.results)
 
     def set_parameters(self, n_platoon: int, are_vehicles_cooperative: bool,
                        v_ref: Mapping[str, float],
@@ -49,7 +59,7 @@ class LaneChangeScenarioManager:
 
     def set_lane_change_graph(
             self, lane_change_graph: graph_tools.VehicleStatesGraph):
-        self.lane_change_graph = lane_change_graph
+        self._lane_change_graph = lane_change_graph
 
     def run_strategy_comparison_on_test_scenario(
             self, n_orig_ahead: int, n_orig_behind: int, n_dest_ahead: int,
@@ -78,13 +88,12 @@ class LaneChangeScenarioManager:
             scenario_name += ' vo < vd'
         else:
             scenario_name += ' vo = vd'
-        scenario_name += lc_strategy.strategy_map[strategy_number].get_name()
-        for gap_position in range(first_gap, last_gap + 1):
+        for gap_position in range(last_gap, last_gap + 1):
+            print(f'      gap position={gap_position}')
             scenario = self.initialize_closed_loop_scenario(strategy_number)
             self.set_single_gap_initial_state(scenario, gap_position)
             self.run_save_and_plot(scenario, tf,
                                    scenario_name + f' gap at {gap_position}')
-            # TODO: return costs scenario.vehicle_group.get_lc_end_times()
 
     def initialize_closed_loop_scenario(self, strategy_number: int
                                         ) -> LaneChangeScenario:
@@ -92,10 +101,9 @@ class LaneChangeScenarioManager:
                                       self.are_vehicles_cooperative)
         scenario.set_control_type('closed_loop',
                                   is_acceleration_optimal=False)
-        scenario.vehicle_group.set_verbose(False)
         scenario.set_lane_change_strategy(strategy_number)
         if strategy_number == lc_strategy.GraphStrategy.get_id():
-            scenario.set_lane_change_states_graph(self.lane_change_graph)
+            scenario.set_lane_change_states_graph(self._lane_change_graph)
         return scenario
 
     def initialize_optimal_control_scenario(self, is_acceleration_optimal: bool
@@ -138,15 +146,19 @@ class LaneChangeScenarioManager:
             n_dest_ahead: int, n_dest_behind: int,
             is_acceleration_optimal: bool):
         tf = configuration.Configuration.time_horizon + 2
-        scenario = self.initialize_optimal_control_scenario(is_acceleration_optimal)
+        scenario = self.initialize_optimal_control_scenario(
+            is_acceleration_optimal)
         self.set_test_scenario_initial_state(
             scenario, n_dest_ahead, n_dest_behind, n_orig_ahead, n_orig_behind)
         return scenario
 
     def run_save_and_plot(self, scenario: LaneChangeScenario, tf: float,
                           scenario_name: str = None):
+
+        scenario.vehicle_group.set_verbose(False)
         scenario.run(tf)
 
+        self.store_results(scenario)
         scenario.save_response_data(self.trajectory_file_name)
         data = scenario.response_to_dataframe()
         analysis.plot_trajectory(data, scenario_name)
@@ -161,6 +173,49 @@ class LaneChangeScenarioManager:
             analysis.plot_costs_vs_iteration(running_cost, terminal_cost)
         except AttributeError:
             pass
+
+    def store_results(self, scenario: LaneChangeScenario):
+        strategy = scenario.vehicle_group.get_platoon_lane_change_strategy()
+        if strategy is not None:
+            strategy_name = strategy.get_name()
+            lane_change_order = strategy.get_lane_change_order()
+            cooperation_order = strategy.get_cooperation_order()
+        else:
+            print('### Dealing with a scenario without strategy ###\n'
+                  '### Might have to rethink this part ###')
+            strategy_name = 'none'
+            lane_change_order = []
+            cooperation_order = []
+        completion_time = np.max(scenario.vehicle_group.get_lc_end_times())
+        accel_cost = scenario.vehicle_group.compute_acceleration_cost()
+
+        result = {
+            'n_platoon': scenario.get_n_platoon(),
+            'vo': self.v_ref['lo'], 'vd': self.v_ref['ld'],
+            'strategy': strategy_name,
+            'lane_change_order': lane_change_order,
+            'cooperation_order': cooperation_order,
+            'success': scenario.vehicle_group.check_lane_change_success(),
+            'completion_time': completion_time, 'accel_cost': accel_cost
+        }
+        for key, value in result.items():
+            self.results[key].append(value)
+
+    def append_results_to_csv(self):
+        file_name = 'result_summary.csv'
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 'platoon_strategy_results', file_name)
+        try:
+            results_history = pd.read_csv(file_path)
+            experiment_counter = results_history['experiment_counter'].max() + 1
+            write_header = False
+        except FileNotFoundError:
+            experiment_counter = 0
+            write_header = True
+        current_results = self.get_results()
+        current_results['experiment_counter'] = experiment_counter
+        current_results.to_csv(file_path, mode='a', index=False,
+                               header=write_header)
 
 
 class SimulationScenario(ABC):
@@ -560,8 +615,8 @@ class LaneChangeScenario(SimulationScenario):
         self.place_dest_lane_vehicles_with_single_gap(
             v_dest_leader, gap_position, self._is_acceleration_optimal,
             delta_x_ld)
-        analysis.plot_state_vector(
-            self.vehicle_group.get_full_initial_state_vector())
+        # analysis.plot_state_vector(
+        #     self.vehicle_group.get_full_initial_state_vector())
 
     def place_dest_lane_vehicles_with_single_gap(
             self, v_ff: float, gap_position: int,

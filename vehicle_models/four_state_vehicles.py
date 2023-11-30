@@ -404,35 +404,65 @@ class ClosedLoopVehicle(FourStateVehicle):
         else:
             self._mode.handle_lane_keeping_intention(vehicles)
 
-    def prepare_for_longitudinal_adjustments_start(
-            self, vehicles: Mapping[int, base.BaseVehicle]):
-        super().prepare_for_longitudinal_adjustments_start(vehicles)
+    # def prepare_for_longitudinal_adjustments_start(
+    #         self, vehicles: Mapping[int, base.BaseVehicle]):
+    #     super().prepare_for_longitudinal_adjustments_start(vehicles)
+    #     if self.is_in_a_platoon():
+    #         my_platoon = self.get_platoon()
+    #         platoon_leader = my_platoon.get_platoon_leader()
+    #         if platoon_leader.has_origin_lane_leader():
+    #             lo = vehicles[platoon_leader.get_origin_lane_leader_id()]
+    #             lo_states = lo.get_states()
+    #         else:
+    #             lo_states = []
+    #         if self.has_destination_lane_leader():
+    #             ld = vehicles[self.get_destination_lane_leader_id()]
+    #             ld_states = ld.get_states()
+    #         else:
+    #             ld_states = []
+    #         my_platoon.set_maneuver_initial_state(self.get_id(),
+    #                                               lo_states, ld_states)
+
+    def prepare_for_lane_change_start(self):
+        super().prepare_for_lane_change_start()
         if self.is_in_a_platoon():
-            my_platoon = self.get_platoon()
-            platoon_leader = my_platoon.get_platoon_leader()
-            if platoon_leader.has_origin_lane_leader():
-                lo = vehicles[platoon_leader.get_origin_lane_leader_id()]
-                lo_states = lo.get_states()
-            else:
-                lo_states = []
-            if self.has_destination_lane_leader():
-                ld = vehicles[self.get_destination_lane_leader_id()]
-                ld_states = ld.get_states()
-            else:
-                ld_states = []
-            my_platoon.set_maneuver_initial_state(self.get_id(),
-                                                  lo_states, ld_states)
+            self._platoon.set_lc_start_time(self._lc_start_time)
 
     def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]
                               ) -> bool:
         # We can't short-circuit any of the evaluation because these methods
         # also update internal values.
-        # is_safe = self.check_is_lane_change_safe(vehicles)
+        # TODO: check again. Maybe evaluate is_my_turn only if safe
         is_safe = self.get_is_lane_change_safe()
-        is_my_turn = (
-                not self.is_in_a_platoon()
-                or self.get_platoon().can_start_lane_change(self.get_id())
-        )
+        if self.is_in_a_platoon():
+            if self.is_platoon_leader():
+                self._platoon.set_maneuver_initial_state_for_all_vehicles(
+                    vehicles)
+            is_my_turn = self._platoon.can_start_lane_change(self.get_id())
+        else:
+            is_my_turn = True
+
+        # if is_safe:
+        #     if self.is_in_a_platoon():
+        #         my_platoon = self.get_platoon()
+        #         platoon_leader = my_platoon.get_platoon_leader()
+        #         if platoon_leader.has_origin_lane_leader():
+        #             lo = vehicles[platoon_leader.get_origin_lane_leader_id()]
+        #             lo_states = lo.get_states()
+        #         else:
+        #             lo_states = []
+        #         if self.has_destination_lane_leader():
+        #             ld = vehicles[self.get_destination_lane_leader_id()]
+        #             ld_states = ld.get_states()
+        #         else:
+        #             ld_states = []
+        #         my_platoon.set_maneuver_initial_state(self.get_id(),
+        #                                               lo_states, ld_states)
+
+        # is_my_turn = (
+        #         not self.is_in_a_platoon()
+        #         or self.get_platoon().can_start_lane_change(self.get_id())
+        # )
         return is_safe and is_my_turn
 
     def is_lane_change_complete(self):

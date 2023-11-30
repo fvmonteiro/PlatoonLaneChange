@@ -8,6 +8,7 @@ import pandas as pd
 
 import controllers.optimal_controller as opt_ctrl
 import graph_tools
+import platoon_lane_change_strategies as lc_strategies
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
 from operating_modes import system_operating_mode as som
@@ -140,6 +141,9 @@ class VehicleGroup:
     def get_optimal_control_vehicles(self) -> list[fsv.OptimalControlVehicle]:
         return self.get_vehicles_of_type(fsv.OptimalControlVehicle)
 
+    def get_closed_loop_control_vehicles(self) -> list[fsv.ClosedLoopVehicle]:
+        return self.get_vehicles_of_type(fsv.ClosedLoopVehicle)
+
     def get_vehicles_of_type(self, vehicle_type: type[base.BaseVehicle]
                              ) -> list[V]:
         selected_vehicles: list[vehicle_type] = []
@@ -148,6 +152,18 @@ class VehicleGroup:
             if isinstance(veh, vehicle_type):
                 selected_vehicles.append(veh)
         return selected_vehicles
+
+    def get_platoon_lane_change_strategy(
+            self) -> Union[lc_strategies.LaneChangeStrategy, None]:
+        # TODO: messy. Probably should create a vehicle group class that only
+        #  has four state vehicles
+        cl_vehicles = self.get_closed_loop_control_vehicles()
+
+        for veh in cl_vehicles:
+            platoon = veh.get_platoon()
+            if platoon is not None:
+                return platoon.get_strategy()
+        return None
 
     def get_initial_desired_gaps(self, v_ref: Sequence[float] = None):
         gaps = []
@@ -453,15 +469,6 @@ class VehicleGroup:
             self.vehicles[veh_id].write_state_and_input(
                 time, state_vectors[veh_id], optimal_inputs[veh_id])
 
-    # def set_initial_surrounding_vehicles(self):
-    #     """
-    #     For when we need to know vehicles relative positions to each other
-    #     before running a simulation
-    #     :return:
-    #     """
-    #     self.prepare_to_start_simulation(1)
-    #     self.update_surrounding_vehicles()
-
     def update_surrounding_vehicles(self):
         for ego_vehicle in self.vehicles.values():
             ego_vehicle.update_surrounding_vehicles(self.vehicles)
@@ -496,6 +503,28 @@ class VehicleGroup:
         ocv = self.get_optimal_control_vehicles()
         for vehicle in ocv:
             vehicle.set_centralized_controller(centralized_controller)
+
+    def compute_acceleration_cost(self):
+        """
+        Returns the sum of the acceleration costs (integral of squared
+        acceleration) of platoon vehicles and immediate followers at the
+        origin and destination lanes
+        :return:
+        """
+        platoon_ids = {veh_id for veh_id, veh in self.vehicles.items()
+                       if veh.get_name().startswith('p')}
+        # Get all vehicles that, at any point, followed one of the platoon
+        # vehicles. This should return fo, fd and most of the platoon vehicles.
+        follower_ids = {veh_id for veh_id, veh in self.vehicles.items()
+                        if not platoon_ids.isdisjoint(
+                set(veh.get_origin_lane_leader_id_history()))}
+        relevant_ids = platoon_ids | follower_ids
+        accel_cost = 0
+        for veh_id in relevant_ids:
+            time = self.vehicles[veh_id].get_simulated_time()
+            accel = self.vehicles[veh_id].get_an_input_history('a')
+            accel_cost += np.trapz(np.square(accel), time)
+        return accel_cost
 
     def to_dataframe(self) -> pd.DataFrame:
         """

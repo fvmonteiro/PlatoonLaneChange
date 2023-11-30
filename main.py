@@ -2,16 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import datetime
-import pickle
 import time
-
-import matplotlib.pyplot as plt
-import networkx as nx
 
 import analysis
 import configuration
 import graph_tools
-import platoon_lane_change_strategies as lc_strategy
 import scenarios
 import vehicle_models
 
@@ -97,38 +92,14 @@ def run_brute_force_strategy_test(
                                    scenario.named_strategies_positions)
 
 
-def run_graph_based_scenario(
-        n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
-        n_dest_ahead: int, n_dest_behind: int, are_vehicles_cooperative: bool,
-        load_from_file: bool = False):
-    tf = configuration.Configuration.time_horizon
-
-    if load_from_file:
-        with open(f'graph_{n_platoon}_vehicles', 'rb') as f:
-            vsg = pickle.load(f)
-    else:
-        vsg = graph_tools.VehicleStatesGraph(n_platoon)
-        vsg.create_graph()
-    for i in range(2, n_platoon + 2):
-        scenario = scenarios.LaneChangeScenario(n_platoon,
-                                                are_vehicles_cooperative)
-        scenario.set_control_type('closed_loop', is_acceleration_optimal=False)
-        scenario.set_single_gap_initial_state(i)
-        scenario.set_lane_change_strategy(lc_strategy.GraphStrategy.get_id())
-        scenario.set_lane_change_states_graph(vsg)
-        scenario.vehicle_group.set_verbose(False)
-        run_save_and_plot(scenario, tf)
-
-
 def run_scenarios_for_comparison(n_platoon: int,
                                  are_vehicles_cooperative: bool):
     try:
-        with open(f'graph_{n_platoon}_vehicles', 'rb') as f:
-            vsg = pickle.load(f)
+        vsg = graph_tools.VehicleStatesGraph.load_from_file(n_platoon)
     except FileNotFoundError:
         vsg = graph_tools.VehicleStatesGraph(n_platoon)
         vsg.create_graph()
-        vsg.save_to_file(f'graph_{n_platoon}_vehicles')
+        vsg.save_to_file()
 
     scenario_manager = scenarios.LaneChangeScenarioManager()
     scenario_manager.set_lane_change_graph(vsg)
@@ -137,13 +108,20 @@ def run_scenarios_for_comparison(n_platoon: int,
     v_ref = {'lo': v_base, 'p': p_speed,
              'fo': v_base, 'fd': v_base}
     strategies = [4]
-    for v_diff in [-5, 5]:
+    print('Starting multiple runs')
+    for v_diff in [-5]:
+        print(f'  delta_v={v_diff}')
         v_ref['ld'] = v_base + v_diff
         scenario_manager.set_parameters(n_platoon, are_vehicles_cooperative,
                                         v_ref)
-        scenario_manager.run_strategy_comparison_on_single_gap_scenario(
-            strategies)
-        # scenario_manager.run_all_single_gap_cases(strategies)
+        for s in strategies:
+            print(f'    strategy number={s}')
+            scenario_manager.run_all_single_gap_cases(s)
+    result = scenario_manager.get_results()
+    print(result.groupby('strategy')[
+              ['success', 'completion_time', 'accel_cost']].mean())
+    result.to_csv('results_temp_name.csv', index=False)
+    scenario_manager.append_results_to_csv()
 
 
 # def run_optimal_platoon_test(
@@ -201,11 +179,11 @@ def load_and_plot_latest_scenario():
 def create_graph(n_platoon: int):
     vsg = graph_tools.VehicleStatesGraph(n_platoon)
     vsg.create_graph()
-    nx.draw_circular(vsg.states_graph)
+    # nx.draw_circular(vsg.states_graph)
     # plt.show()
     # vsg.find_minimum_time_maneuver_order()
 
-    vsg.save_to_file(f'graph_{n_platoon}_vehicles')
+    vsg.save_to_file()
     # data = vsg.vehicle_group.to_dataframe()
     # analysis.plot_trajectory(data)
     # analysis.plot_platoon_lane_change(data)
@@ -213,7 +191,7 @@ def create_graph(n_platoon: int):
 
 def main():
 
-    n_platoon = 2
+    n_platoon = 3
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
 
