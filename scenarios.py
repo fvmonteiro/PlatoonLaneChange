@@ -43,6 +43,7 @@ class LaneChangeScenarioManager:
             'lane_change_order': [], 'cooperation_order': [],
             'success': [], 'completion_time': [], 'accel_cost': []
         }
+        self._has_plots = True
 
     def get_results(self) -> pd.DataFrame:
         return pd.DataFrame(self.results)
@@ -61,14 +62,18 @@ class LaneChangeScenarioManager:
             self, lane_change_graph: graph_tools.VehicleStatesGraph):
         self._lane_change_graph = lane_change_graph
 
+    def set_plotting(self, value: bool):
+        self._has_plots = value
+
     def run_strategy_comparison_on_test_scenario(
             self, n_orig_ahead: int, n_orig_behind: int, n_dest_ahead: int,
             n_dest_behind: int, strategy_numbers: Iterable[int]):
         tf = configuration.Configuration.time_horizon
         for sn in strategy_numbers:
+            scenario_name = self._create_scenario_name(sn)
             scenario = self.create_closed_loop_test_scenario(
                 n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind, sn)
-            self.run_save_and_plot(scenario, tf)
+            self.run_save_and_plot(scenario, tf, scenario_name)
 
     def run_strategy_comparison_on_single_gap_scenario(
             self, strategy_numbers: Iterable[int]):
@@ -77,18 +82,14 @@ class LaneChangeScenarioManager:
 
     def run_all_single_gap_cases(self, strategy_number: int):
         tf = configuration.Configuration.time_horizon
-        scenario_name = lc_strategy.strategy_map[strategy_number].get_name()
         first_gap = 1
         last_gap = self.n_platoon
         if self.v_ref['lo'] > self.v_ref['ld']:
             first_gap = 0
-            scenario_name += ' vo > vd'
         elif self.v_ref['lo'] < self.v_ref['ld']:
             last_gap = self.n_platoon + 1
-            scenario_name += ' vo < vd'
-        else:
-            scenario_name += ' vo = vd'
-        for gap_position in range(last_gap, last_gap + 1):
+        scenario_name = self._create_scenario_name(strategy_number)
+        for gap_position in range(first_gap, last_gap + 1):
             print(f'      gap position={gap_position}')
             scenario = self.initialize_closed_loop_scenario(strategy_number)
             self.set_single_gap_initial_state(scenario, gap_position)
@@ -160,19 +161,21 @@ class LaneChangeScenarioManager:
 
         self.store_results(scenario)
         scenario.save_response_data(self.trajectory_file_name)
-        data = scenario.response_to_dataframe()
-        analysis.plot_trajectory(data, scenario_name)
-        if scenario.get_n_platoon() < 1:
-            analysis.plot_constrained_lane_change(data, 'p1')
-        else:
-            analysis.plot_platoon_lane_change(data)
 
-        try:
-            scenario.save_cost_data(self.cost_file_name)
-            running_cost, terminal_cost = scenario.get_opc_cost_history()
-            analysis.plot_costs_vs_iteration(running_cost, terminal_cost)
-        except AttributeError:
-            pass
+        if self._has_plots:
+            data = scenario.response_to_dataframe()
+            analysis.plot_trajectory(data, scenario_name)
+            if scenario.get_n_platoon() < 1:
+                analysis.plot_constrained_lane_change(data, 'p1')
+            else:
+                analysis.plot_platoon_lane_change(data)
+
+            try:
+                scenario.save_cost_data(self.cost_file_name)
+                running_cost, terminal_cost = scenario.get_opc_cost_history()
+                analysis.plot_costs_vs_iteration(running_cost, terminal_cost)
+            except AttributeError:
+                pass
 
     def store_results(self, scenario: LaneChangeScenario):
         strategy = scenario.vehicle_group.get_platoon_lane_change_strategy()
@@ -216,6 +219,16 @@ class LaneChangeScenarioManager:
         current_results['experiment_counter'] = experiment_counter
         current_results.to_csv(file_path, mode='a', index=False,
                                header=write_header)
+
+    def _create_scenario_name(self, strategy_number: int):
+        scenario_name = lc_strategy.strategy_map[strategy_number].get_name()
+        if self.v_ref['lo'] > self.v_ref['ld']:
+            scenario_name += ' vo > vd'
+        elif self.v_ref['lo'] < self.v_ref['ld']:
+            scenario_name += ' vo < vd'
+        else:
+            scenario_name += ' vo = vd'
+        return scenario_name
 
 
 class SimulationScenario(ABC):
@@ -706,9 +719,8 @@ class LaneChangeScenario(SimulationScenario):
             if np.abs(time[i] - self._lc_intention_time) < dt / 10:
                 self.vehicle_group.set_vehicles_lane_change_direction(
                     1, self.lc_vehicle_names)
-                # analysis.plot_initial_state_vector(
+                # analysis.plot_state_vector(
                 #     self.vehicle_group.get_current_state())
-                # break
             self.vehicle_group.simulate_one_time_step(time[i + 1])
 
 

@@ -112,6 +112,7 @@ def plot_cost_vs_ordering(cost: Iterable[float],
 
 def plot_trajectory(data: pd.DataFrame, plot_title: str = None,
                     n_plots: int = 8):
+    sns.set_style('white')
     # min_y, max_y = data['y'].min(), data['y'].max()
     min_x, max_x = data['x'].min(), data['x'].max()
     tf = data['t'].max()
@@ -276,12 +277,12 @@ def plot_platoon_lane_change(data: pd.DataFrame):
 
     n_platoon = np.max([int(name[1]) for name in data['name'].unique()
                         if name[0] == 'p'])
-    vehicle_pairs = {'p1': ['ld1', 'lo1']}
+    vehicle_pairs = {'p1': ['ld0', 'lo0']}
     for i in range(2, n_platoon + 1):
         vehicle_pairs['p' + str(i)] = ['p' + str(i - 1)]
-    vehicle_pairs['p' + str(n_platoon)].append('fd1')
+    vehicle_pairs['p' + str(n_platoon)].append('fd0')
     if n_platoon > 1:
-        vehicle_pairs['p' + str(n_platoon)].append('ld1')
+        vehicle_pairs['p' + str(n_platoon)].append('ld0')
 
     sns.set_style('whitegrid')
     x_axes = ['t', 't', 't', 't']

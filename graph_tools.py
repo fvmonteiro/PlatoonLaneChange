@@ -131,7 +131,7 @@ class VehicleStatesGraph:
                 for x0 in initial_states:
                     self.states_graph.add_node(x0)
                     nodes.appendleft((PlatoonLCTracker(self.n_platoon), x0))
-                    print(x0)
+                    # print(x0)
 
                 # Explore the children of each initial state node in BFS mode
                 self._explore_until_maneuver_completion(
@@ -170,37 +170,38 @@ class VehicleStatesGraph:
         dag: nx.DiGraph = self.states_graph
         initial_state = self._initial_state_per_vehicle[
             first_mover_platoon_position]
-        root = None
+        first_move_state = None
         for node in dag.successors(initial_state):
             if (dag[initial_state][node]['lc_vehicle']
                     == first_mover_platoon_position):
-                root = node
+                first_move_state = node
                 break
-        if root is None:
+        if first_move_state is None:
             raise nx.NetworkXNoPath
 
         costs = []
         paths = []
         opt_cost = np.inf
         opt_path = None
-        for node in dag.nodes:
-            if dag.out_degree(node) == 0:  # pycharm is tripping
+        for node in nx.descendants(dag, first_move_state):
+            # TODO: proper check on whether it is a terminal mode
+            if dag.nodes[node].get('is_terminal', False):
+            # if dag.out_degree(node) == 0:  # pycharm is tripping
                 lc_order = [first_mover_platoon_position]
                 coop_order = [-1]
-                try:
-                    c, p = nx.single_source_dijkstra(dag, root, node)
-                    costs.append(c)
-                    # Get the lc and coop sequences in the path
-                    for source_node, target_node in nx.utils.pairwise(p):
-                        edge = dag[source_node][target_node]
-                        lc_order.append(edge['lc_vehicle'])
-                        coop_order.append(edge['coop_vehicle'])
-                    paths.append((lc_order, coop_order))
-                    if c < opt_cost:
-                        opt_cost = c
-                        opt_path = paths[-1]
-                except nx.exception.NetworkXNoPath:
-                    continue
+                c, p = nx.single_source_dijkstra(dag, first_move_state,
+                                                 node)
+                costs.append(c)
+                # Get the lc and coop sequences in the path
+                for source_node, target_node in nx.utils.pairwise(p):
+                    edge = dag[source_node][target_node]
+                    lc_order.append(edge['lc_vehicle'])
+                    coop_order.append(edge['coop_vehicle'])
+                paths.append((lc_order, coop_order))
+                if c < opt_cost:
+                    opt_cost = c
+                    opt_path = paths[-1]
+
         return opt_path, opt_cost
 
     def save_to_file(self):
@@ -367,6 +368,7 @@ class VehicleStatesGraph:
             if quantized_state in visited_states:
                 continue
             if len(remaining_vehicles) == 0:
+                self.mark_terminal_node(quantized_state)
                 continue
             visited_states.add(quantized_state)
             initial_state = self.state_quantizer.dequantize_state(
@@ -394,23 +396,19 @@ class VehicleStatesGraph:
                     # data = vehicle_group.to_dataframe()
                     # analysis.plot_trajectory(data)
                     # analysis.plot_platoon_lane_change(data)
-                    next_tracker = copy.deepcopy(tracker)
-                    next_tracker.move_vehicle(next_pos_to_move,
-                                              next_pos_to_coop)
                     if success:
+                        next_tracker = copy.deepcopy(tracker)
+                        next_tracker.move_vehicle(next_pos_to_move,
+                                                  next_pos_to_coop)
                         next_quantized_state = (
                             self.state_quantizer.quantize_state(
                                 vehicle_group.get_current_state())
                         )
-                        nodes.appendleft((next_tracker, next_quantized_state))
                         transition_time = vehicle_group.get_current_time()
                         self._update_graphs(
                             quantized_state, next_quantized_state,
                             transition_time, next_pos_to_move, next_pos_to_coop)
-                    # else:
-                    #     print(f'# Transition from '
-                    #           f'{tracker.get_maneuver_order()} to '
-                    #           f'{next_tracker.get_maneuver_order()} failed #')
+                        nodes.appendleft((next_tracker, next_quantized_state))
         print('\tdone expanding one initial state')
 
     def simulate_till_lane_change(
@@ -459,7 +457,6 @@ class VehicleStatesGraph:
 
     def _update_graphs(
             self, source_state: tuple[int], dest_state: tuple[int],
-            # source_tracker: PlatoonLCTracker, dest_tracker: PlatoonLCTracker,
             weight: float, lc_vehicle: int, coop_vehicle: int):
         """
         Updates all tracking graphs with the same weight
@@ -467,9 +464,6 @@ class VehicleStatesGraph:
         self.states_graph.add_edge(source_state, dest_state, weight=weight,
                                    lc_vehicle=lc_vehicle,
                                    coop_vehicle=coop_vehicle)
-        # self.maneuver_order_graph.add_edge(
-        #     source_tracker.get_maneuver_order(),
-        #     dest_tracker.get_maneuver_order(), weight=weight)
 
         n_nodes = self.states_graph.number_of_nodes()
         if n_nodes % 20 == 0:
@@ -477,6 +471,9 @@ class VehicleStatesGraph:
         # percentage = n_nodes * 100 / self.n_nodes_per_root
         # if percentage % 10 < 0.5:
         #     print(f'{percentage:.1f}% done')
+
+    def mark_terminal_node(self, node):
+        self.states_graph.nodes[node]['is_terminal'] = True
 
     def _create_first_mover_node_from_scratch(
             self, vehicle_group: vg.VehicleGroup, v0_lo: float,

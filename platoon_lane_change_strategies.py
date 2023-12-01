@@ -7,6 +7,7 @@ import warnings
 import networkx as nx
 import numpy as np
 
+import configuration
 import graph_tools
 import vehicle_models.four_state_vehicles as fsv
 
@@ -108,8 +109,9 @@ class LaneChangeStrategy(ABC):
         raise AttributeError('Only instances of the TemplateStrategy class '
                              'have a given cooperation order.')
 
-    def set_maneuver_order(self, merging_order: Sequence[int] = None,
-                           cooperating_order: Sequence[int] = None):
+    def set_maneuver_order(
+            self, lane_changing_order: Sequence[Sequence[int]] = None,
+            cooperating_order: Sequence[Sequence[int]] = None):
         raise AttributeError('Only instances of the TemplateStrategy class '
                              'can have their lane change order set.')
 
@@ -178,7 +180,7 @@ class TemplateStrategy(LaneChangeStrategy):
 
     _idx: int
     # Order in which platoon vehicles change lanes
-    _lane_changing_order: np.ndarray
+    _lane_changing_order: list[set[int]]
     # Defines which platoon vehicle cooperates with the lane changing platoon
     # vehicle at the same index
     _cooperating_order: np.ndarray
@@ -190,18 +192,20 @@ class TemplateStrategy(LaneChangeStrategy):
         super().__init__(platoon_vehicles)
         self._is_initialized = False
 
-    def get_lane_change_order(self) -> np.ndarray:
+    def get_lane_change_order(self) -> list[set[int]]:
         return self._lane_changing_order
 
     def get_cooperation_order(self) -> np.ndarray:
         return self._cooperating_order
 
-    def set_maneuver_order(self, lane_changing_order: Sequence[int] = None,
-                           cooperating_order: Sequence[int] = None):
+    def set_maneuver_order(
+            self, lane_changing_order: list[set[int]] = None,
+            cooperating_order: Sequence[int] = None):
         self._idx = 0
-        self._lane_changing_order = np.array(lane_changing_order, dtype=int)
+        self._lane_changing_order = lane_changing_order
         self._cooperating_order = np.array(cooperating_order, dtype=int)
-        self._last_dest_lane_vehicle_idx = self._lane_changing_order[0]
+        self._last_dest_lane_vehicle_idx = (
+            self._get_rearmost_lane_changing_vehicle_position())
         self._is_initialized = True
 
     def can_start_lane_change(self, ego_position: int) -> bool:
@@ -210,29 +214,40 @@ class TemplateStrategy(LaneChangeStrategy):
                           'Come check')
             return False
         next_in_line = self._lane_changing_order[self._idx]
-        next_veh_to_maneuver = self.platoon_vehicles[next_in_line]
-        is_my_turn = ego_position == next_in_line
+        next_vehs_to_maneuver = [self.platoon_vehicles[i] for i in next_in_line]
+        is_my_turn = ego_position in next_in_line
         # Check if next_in_line has finished its lane change
-        if not next_veh_to_maneuver.has_lane_change_intention():
+        are_done = [not veh.has_lane_change_intention() for veh
+                    in next_vehs_to_maneuver]
+        if np.all(are_done):
             if self._cooperating_order[self._idx] == -1:
                 # If the vehicle completed a maneuver behind all others (no
                 # coop), it is now the last vehicle
-                self._last_dest_lane_vehicle_idx = next_in_line
+                # self._last_dest_lane_vehicle_idx = next_in_line[-1]
+                self._last_dest_lane_vehicle_idx = (
+                    self._get_rearmost_lane_changing_vehicle_position()
+                )
             self._idx += 1
 
-        return (is_my_turn and
-                (next_veh_to_maneuver.get_desired_destination_lane_leader_id()
-                 == next_veh_to_maneuver.get_destination_lane_leader_id()))
+        are_on_the_right_gap = [
+            (veh.get_desired_destination_lane_leader_id()
+             == veh.get_destination_lane_leader_id()) for veh
+            in next_vehs_to_maneuver
+        ]
+        return is_my_turn and np.all(are_on_the_right_gap)
 
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         # First check if it's our turn to change lanes
-        if ego_position != self._lane_changing_order[self._idx]:
+        if ego_position not in self._lane_changing_order[self._idx]:
             return -1
-        # The first vehicle to change lanes does so behind its destination
-        # lane leader
+        # The first vehicles to simultaneously change lanes do so behind the
+        # destination lane leader of the front-most vehicle (same thing for
+        # single vehicle lane change)
         if self._idx == 0:
-            return self.platoon_vehicles[self._lane_changing_order[
-                self._idx]].get_suitable_destination_lane_leader_id()
+            front_most_veh = max([self.platoon_vehicles[i]
+                                  for i in self._lane_changing_order[0]],
+                                 key=lambda x: x.get_x())
+            return front_most_veh.get_suitable_destination_lane_leader_id()
 
         coop_veh_id = self._cooperating_order[self._idx]
         if coop_veh_id == -1:
@@ -249,9 +264,27 @@ class TemplateStrategy(LaneChangeStrategy):
         # destination lane because the cooperating order already takes care
         # of that
         if ego_position == self._cooperating_order[self._idx]:
-            return self.platoon_vehicles[
-                self._lane_changing_order[self._idx]].get_id()
+            rear_most_pos = self._get_rearmost_lane_changing_vehicle_position()
+            return self.platoon_vehicles[rear_most_pos].get_id()
         return -1
+
+    def _get_rearmost_lane_changing_vehicle_position(self):
+        """
+
+        :return:
+        """
+        min_x = np.inf
+        rear_most_vehicle_position_in_platoon = 0
+        for i in self._lane_changing_order[self._idx]:
+            veh = self.platoon_vehicles[i]
+            if veh.get_x() < min_x:
+                min_x = veh.get_x()
+                rear_most_vehicle_position_in_platoon = i
+        return rear_most_vehicle_position_in_platoon
+
+    @staticmethod
+    def _to_list_of_sets(value: Sequence[int]) -> list[set[int]]:
+        return [{i} for i in value]
 
 
 class TemplateRelaxedStrategy(TemplateStrategy):
@@ -359,31 +392,39 @@ class GraphStrategy(TemplateStrategy):
         opt_cost = np.inf
         for veh_pos in range(len(self.platoon_vehicles)):
             veh = self.platoon_vehicles[veh_pos]
-            # TODO: tests [nov 29]
             # if veh.get_is_lane_change_safe():
             if veh.get_is_lane_change_gap_suitable():
-                #     self._lane_change_graph.set_first_mover_cost(veh_pos, 0.)
-                # else:
-                #     self._lane_change_graph.set_first_mover_cost(veh_pos, np.inf)
+                # TODO: change once graph states include dest lane follower.
+                #  Then, the cost will include any necessary adjustment
+                # The condition here is tricky. We don't want to check
+                # for safety (more constrained) because the vehicle might
+                # need to brake to adjust to the gap. At the same time,
+                # checking only for gap suitable ignores the fact that some
+                # vehicles may be ready to move right now while others
+                # still need to adjust, and may never reach the gap.
                 try:
                     path, cost = (
                         self._lane_change_graph.
                         find_minimum_time_maneuver_order(veh_pos))
+                    if not veh.get_is_lane_change_safe():
+                        cost += configuration.Configuration.time_horizon
                     if cost < opt_cost:
+                        opt_cost = cost
                         opt_path = path
                 except nx.NetworkXNoPath:
                     continue
 
         if opt_path is not None:
-            self.set_maneuver_order(opt_path[0], opt_path[1])
+            self.set_maneuver_order(
+                TemplateStrategy._to_list_of_sets(opt_path[0]),
+                opt_path[1])
             self._is_initialized = True
-
             print(f'Path chosen from graph: {opt_path[0]}, {opt_path[1]}')
 
 
 # ========================= Heuristic Strategies ============================= #
 
-class IndividualStrategy(LaneChangeStrategy):
+class IndividualStrategy(TemplateStrategy):
     """"Vehicles behave without platoon coordination"""
 
     _id = 9
@@ -392,19 +433,13 @@ class IndividualStrategy(LaneChangeStrategy):
     def set_maneuver_order(self, lane_changing_order: Sequence[int] = None,
                            cooperating_order: Sequence[int] = None):
         # lc and coop order are not used by this strategy
-        lane_changing_order = [-1] * len(self.platoon_vehicles)
+        lane_changing_order = [{i for i in range(len(self.platoon_vehicles))}]
         cooperating_order = [-1] * len(self.platoon_vehicles)
         super().set_maneuver_order(lane_changing_order, cooperating_order)
-
-    def can_start_lane_change(self, ego_position: int) -> bool:
-        return True
 
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         ego_veh = self.platoon_vehicles[ego_position]
         return ego_veh.get_destination_lane_leader_id()
-
-    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
-        return -1
 
 
 class SynchronousStrategy(TemplateStrategy):
@@ -414,7 +449,7 @@ class SynchronousStrategy(TemplateStrategy):
     def set_maneuver_order(self, lane_changing_order: Sequence[int] = None,
                            cooperating_order: Sequence[int] = None):
         # lc and coop order are not used by this strategy
-        lane_changing_order = [-1] * len(self.platoon_vehicles)
+        lane_changing_order = [{i for i in range(len(self.platoon_vehicles))}]
         cooperating_order = [-1] * len(self.platoon_vehicles)
         super().set_maneuver_order(lane_changing_order, cooperating_order)
 
@@ -425,18 +460,6 @@ class SynchronousStrategy(TemplateStrategy):
                 return False
         return True
 
-    def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
-        ego_veh = self.platoon_vehicles[ego_position]
-        if ego_position == 0:
-            return ego_veh.get_destination_lane_leader_id()
-        return -1  # self.get_preceding_vehicle_id(ego_id)
-
-    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
-        # ego_veh = self.vehicles[ego_position]
-        if ego_position == 0:
-            return -1
-        return -1  # self.get_preceding_vehicle_id(ego_id)
-
 
 class LeaderFirstStrategy(TemplateStrategy):
     _id = 11
@@ -446,7 +469,9 @@ class LeaderFirstStrategy(TemplateStrategy):
                            cooperating_order: Sequence[int] = None):
         lane_changing_order = [i for i in range(len(self.platoon_vehicles))]
         cooperating_order = [-1] * len(self.platoon_vehicles)
-        super().set_maneuver_order(lane_changing_order, cooperating_order)
+        super().set_maneuver_order(
+            TemplateStrategy._to_list_of_sets(lane_changing_order),
+            cooperating_order)
 
 
 class LastFirstStrategy(TemplateStrategy):
@@ -458,7 +483,9 @@ class LastFirstStrategy(TemplateStrategy):
         lane_changing_order = [i for i in range(len(self.platoon_vehicles))]
         lane_changing_order.reverse()
         cooperating_order = [-1] + lane_changing_order[:-1]
-        super().set_maneuver_order(lane_changing_order, cooperating_order)
+        super().set_maneuver_order(
+            TemplateStrategy._to_list_of_sets(lane_changing_order),
+            cooperating_order)
 
 
 class LeaderFirstReverseStrategy(TemplateStrategy):
@@ -469,7 +496,9 @@ class LeaderFirstReverseStrategy(TemplateStrategy):
                            cooperating_order: Sequence[int] = None):
         lane_changing_order = [i for i in range(len(self.platoon_vehicles))]
         cooperating_order = [-1] + lane_changing_order[:-1]
-        super().set_maneuver_order(lane_changing_order, cooperating_order)
+        super().set_maneuver_order(
+            TemplateStrategy._to_list_of_sets(lane_changing_order),
+            cooperating_order)
 
 
 # =========================== OLD ============================ #

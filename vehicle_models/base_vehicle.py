@@ -155,8 +155,7 @@ class BaseVehicle(ABC):
         return self.get_states()[self._state_idx[state_name]]
 
     def get_an_input_by_name(self, input_name) -> float:
-        return self._inputs_history[self._input_idx[input_name],
-                                    self._iter_counter]
+        return self.get_inputs()[self._input_idx[input_name]]
 
     def get_current_lane(self) -> int:
         return round(self.get_y() / config.LANE_WIDTH)
@@ -189,7 +188,7 @@ class BaseVehicle(ABC):
         return self._states_history
 
     def get_inputs(self) -> np.ndarray:
-        return self._inputs.copy()
+        return self._inputs
 
     def get_an_input_history(self, input_name: str) -> np.ndarray:
         return self.get_input_history()[self._input_idx[input_name], :]
@@ -547,11 +546,12 @@ class BaseVehicle(ABC):
         self._origin_leader_id[self._iter_counter] = new_orig_leader_id
 
     def is_other_cutting_in(self, other_vehicle: BaseVehicle):
-        if (other_vehicle.has_lane_change_intention()
+        # return False
+        return (other_vehicle.has_lane_change_intention()
                 and other_vehicle.get_target_lane() == self.get_current_lane()
-                and np.abs(other_vehicle.get_an_input_by_name('phi') > 1e-3)):
-            return True
-        return False
+                and (other_vehicle.get_id()
+                     != self._aided_vehicle_id[self._iter_counter-1])
+                and np.abs(other_vehicle.get_an_input_by_name('phi') > 1e-3))
 
     def find_destination_lane_vehicles(self, vehicles: Iterable[BaseVehicle]
                                        ) -> None:

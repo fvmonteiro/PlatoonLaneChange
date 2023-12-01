@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 import datetime
 import time
 
@@ -92,54 +92,6 @@ def run_brute_force_strategy_test(
                                    scenario.named_strategies_positions)
 
 
-def run_scenarios_for_comparison(n_platoon: int,
-                                 are_vehicles_cooperative: bool):
-    try:
-        vsg = graph_tools.VehicleStatesGraph.load_from_file(n_platoon)
-    except FileNotFoundError:
-        vsg = graph_tools.VehicleStatesGraph(n_platoon)
-        vsg.create_graph()
-        vsg.save_to_file()
-
-    scenario_manager = scenarios.LaneChangeScenarioManager()
-    scenario_manager.set_lane_change_graph(vsg)
-    v_base = 20.
-    p_speed = v_base * 1.25
-    v_ref = {'lo': v_base, 'p': p_speed,
-             'fo': v_base, 'fd': v_base}
-    strategies = [4]
-    print('Starting multiple runs')
-    for v_diff in [-5]:
-        print(f'  delta_v={v_diff}')
-        v_ref['ld'] = v_base + v_diff
-        scenario_manager.set_parameters(n_platoon, are_vehicles_cooperative,
-                                        v_ref)
-        for s in strategies:
-            print(f'    strategy number={s}')
-            scenario_manager.run_all_single_gap_cases(s)
-    result = scenario_manager.get_results()
-    print(result.groupby('strategy')[
-              ['success', 'completion_time', 'accel_cost']].mean())
-    result.to_csv('results_temp_name.csv', index=False)
-    scenario_manager.append_results_to_csv()
-
-
-# def run_optimal_platoon_test(
-#         n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
-#         n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool,
-#         are_vehicles_cooperative: bool):
-#     v_ref = dict()  # TODO: make param
-#     delta_x = dict()  # TODO: make param
-#     scenario = scenarios.LaneChangeScenario(n_platoon, are_vehicles_cooperative)
-#     scenario.set_control_type('optimal', is_acceleration_optimal)
-#     scenario.create_test_scenario(n_dest_ahead, n_dest_behind, n_orig_ahead,
-#                                   n_orig_behind, v_ref, delta_x)
-#     # scenario.create_optimal_control_test_scenario(
-#     #     n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind)
-#     tf = configuration.Configuration.time_horizon + 2
-#     run_save_and_plot(scenario, tf)
-
-
 def run_save_and_plot(scenario: scenarios.SimulationScenario, tf: float,
                       scenario_name: str = None):
     scenario.run(tf)
@@ -158,6 +110,62 @@ def run_save_and_plot(scenario: scenarios.SimulationScenario, tf: float,
         analysis.plot_costs_vs_iteration(running_cost, terminal_cost)
     except AttributeError:
         pass
+
+
+def run_all_scenarios_for_comparison(n_platoon: int,
+                                     are_vehicles_cooperative: bool):
+    run_scenarios_for_comparison(n_platoon, are_vehicles_cooperative,
+                                 [4, 12, 13], [0, -5, 5], False)
+
+
+def run_scenarios_for_comparison(
+        n_platoon: int, are_vehicles_cooperative: bool,
+        strategies: Iterable[int], delta_v: Iterable[float],
+        has_plots: bool):
+    try:
+        vsg = graph_tools.VehicleStatesGraph.load_from_file(n_platoon)
+    except FileNotFoundError:
+        vsg = graph_tools.VehicleStatesGraph(n_platoon)
+        vsg.create_graph()
+        vsg.save_to_file()
+
+    scenario_manager = scenarios.LaneChangeScenarioManager()
+    scenario_manager.set_plotting(has_plots)
+    scenario_manager.set_lane_change_graph(vsg)
+    v_base = 20.
+    p_speed = v_base * 1.25
+    v_ref = {'lo': v_base, 'p': p_speed,
+             'fo': v_base, 'fd': v_base}
+    print('Starting multiple runs')
+    for dv in delta_v:
+        print(f'  delta_v={dv}')
+        v_ref['ld'] = v_base + dv
+        scenario_manager.set_parameters(n_platoon, are_vehicles_cooperative,
+                                        v_ref)
+        for s in strategies:
+            print(f'    strategy number={s}')
+            scenario_manager.run_all_single_gap_cases(s)
+    result = scenario_manager.get_results()
+    print(result.groupby('strategy')[
+              ['success', 'completion_time', 'accel_cost']].mean())
+    result.to_csv('results_temp_name.csv', index=False)
+    # scenario_manager.append_results_to_csv()
+
+
+# def run_optimal_platoon_test(
+#         n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
+#         n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool,
+#         are_vehicles_cooperative: bool):
+#     v_ref = dict()  # TODO: make param
+#     delta_x = dict()  # TODO: make param
+#     scenario = scenarios.LaneChangeScenario(n_platoon, are_vehicles_cooperative)
+#     scenario.set_control_type('optimal', is_acceleration_optimal)
+#     scenario.create_test_scenario(n_dest_ahead, n_dest_behind, n_orig_ahead,
+#                                   n_orig_behind, v_ref, delta_x)
+#     # scenario.create_optimal_control_test_scenario(
+#     #     n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind)
+#     tf = configuration.Configuration.time_horizon + 2
+#     run_save_and_plot(scenario, tf)
 
 
 def load_and_plot_latest_scenario():
@@ -179,14 +187,7 @@ def load_and_plot_latest_scenario():
 def create_graph(n_platoon: int):
     vsg = graph_tools.VehicleStatesGraph(n_platoon)
     vsg.create_graph()
-    # nx.draw_circular(vsg.states_graph)
-    # plt.show()
-    # vsg.find_minimum_time_maneuver_order()
-
     vsg.save_to_file()
-    # data = vsg.vehicle_group.to_dataframe()
-    # analysis.plot_trajectory(data)
-    # analysis.plot_platoon_lane_change(data)
 
 
 def main():
@@ -214,24 +215,23 @@ def main():
     p_speed = v_base * 1.25
     v_ref = {'lo': v_base, 'ld': v_base, 'p': p_speed,
              'fo': v_base, 'fd': v_base}
-    delta_x = {'lo': 0., 'ld': 0., 'p': 0., 'fd': 0.}
+    delta_x = {'lo': 0., 'ld': 26., 'p': 0., 'fd': 0.}
 
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
 
     start_time = time.time()
 
+    # create_graph(n_platoon)
+    run_scenarios_for_comparison(n_platoon, are_vehicles_cooperative,
+                                 [4], [0], True)
+    # run_all_scenarios_for_comparison(n_platoon, are_vehicles_cooperative)
     # lcsm = scenarios.LaneChangeScenarioManager()
     # lcsm.set_parameters(n_platoon, are_vehicles_cooperative, v_ref, delta_x)
     # lcsm.run_strategy_comparison_on_test_scenario(
     #     n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
-    #     [11, 12, 13])
-    # create_graph(n_platoon)
-    run_scenarios_for_comparison(n_platoon, are_vehicles_cooperative)
-    # run_cbf_lc_scenario(n_platoon, n_orig_ahead, n_orig_behind,
-    #                     n_dest_ahead, n_dest_behind,
-    #                     are_vehicles_cooperative)
-    # test_full_lane_scenario(n_platoon, are_vehicles_cooperative)
+    #     [9, 10, 11, 12, 13])
+
     # run_brute_force_strategy_test(
     #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead,
     #     n_dest_behind, are_vehicles_cooperative)
@@ -240,16 +240,8 @@ def main():
     #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
     #     is_acceleration_optimal, are_vehicles_cooperative
     # )
-    # run_platoon_test(n_platoon, n_orig_ahead, n_orig_behind,
-    #                  n_dest_ahead, n_dest_behind,
-    #                  is_acceleration_optimal,
-    #                  are_vehicles_cooperative
-    #                  )
-    # load_and_plot_latest_scenario()
 
-    # run_graph_based_scenario(
-    #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
-    #     are_vehicles_cooperative, load_from_file=True)
+    # load_and_plot_latest_scenario()
 
     end_time = time.time()
 

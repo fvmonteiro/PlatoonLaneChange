@@ -191,27 +191,40 @@ class ClosedLoopPlatoon(Platoon):
             lo = all_vehicles[platoon_leader.get_origin_lane_leader_id()]
             lo_states = lo.get_states()
         else:
-            lo_states = None
+            lo_states = []
 
         for veh in self.vehicles:
-            # TODO: tests [nov 29]
             # if veh.get_is_lane_change_safe():
             if veh.get_is_lane_change_gap_suitable():
                 if veh.has_destination_lane_leader():
                     ld = all_vehicles[veh.get_destination_lane_leader_id()]
                     ld_states = ld.get_states()
                 else:
-                    ld_states = None
+                    ld_states = []
                 self.set_maneuver_initial_state(veh.get_id(),
                                                 lo_states, ld_states)
+            # TODO?
+            # else:
+            #     self.set_maneuver_initial_state(all empty)
 
     def set_maneuver_initial_state(
             self, ego_id: int, lo_states: Sequence[float],
             ld_states: Sequence[float]):
-        ego_position = self._id_to_position_map[ego_id]
-        # We center all around the leader TODO: avoid hard coding array indices
-        leader_x = self.get_platoon_leader().get_x()
-        leader_y = self.get_platoon_leader().get_y()
+        # TODO: avoid hard coding array indices
+
+        p1 = self.get_platoon_leader()
+        # TODO: lazy workaround. We need to include the no leader
+        #  possibilities in the graph
+        if len(lo_states) == 0:
+            lo_states = p1.get_states().copy()
+            lo_states[0] += p1.compute_lane_keeping_desired_gap()
+        if len(ld_states) == 0:
+            ld_states = lo_states.copy()
+            ld_states[1] = p1.get_target_y()
+
+        # We center all around the leader
+        leader_x = p1.get_x()
+        leader_y = p1.get_y()
 
         platoon_states = []
         for veh in self.vehicles:
@@ -219,19 +232,15 @@ class ClosedLoopPlatoon(Platoon):
             veh_states[0] -= leader_x
             veh_states[1] -= leader_y
             platoon_states.extend(veh_states)
-        if lo_states is not None:
-            lo_states = np.copy(lo_states)
-            lo_states[0] -= leader_x
-            lo_states[1] -= leader_y
-        if ld_states is not None:
-            ld_states = np.copy(ld_states)
-            ld_states[0] -= leader_x
-            ld_states[1] -= leader_y
-        else:
-            # TODO: lazy workaround. We need to include the no dest lane
-            #  leader possibility in the graph
-            ld_states = lo_states.copy()
-            ld_states[1] = configuration.LANE_WIDTH
+
+        lo_states = np.copy(lo_states)
+        lo_states[0] -= leader_x
+        lo_states[1] -= leader_y
+        ld_states = np.copy(ld_states)
+        ld_states[0] -= leader_x
+        ld_states[1] -= leader_y
+
+        ego_position = self._id_to_position_map[ego_id]
         self.lane_change_strategy.set_maneuver_initial_state(
             ego_position, lo_states, platoon_states, ld_states)
 
