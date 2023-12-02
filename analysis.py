@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Iterable
 import pickle
+import os
 import warnings
 from typing import Union
 
@@ -10,7 +11,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-import configuration as config
+import configuration
 import post_processing as pp
 
 
@@ -18,6 +19,49 @@ def load_latest_simulated_scenario(pickle_file_name: str):
     with open(pickle_file_name, 'rb') as f:
         data = pickle.load(f)
     return data
+
+
+def compare_to_approach(main_strategy: str = 'Graph-based'):
+    file_name = 'result_summary.csv'
+    file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                             'platoon_strategy_results', file_name)
+    results = pd.read_csv(file_path)
+    strategies = results['strategy'].unique()
+    platoon_sizes = results['n_platoon'].unique()
+    all_main_results = results.loc[results['strategy'] == main_strategy
+                                   ].reset_index(drop=True)
+    for strat in strategies:
+        if strat == main_strategy:
+            continue
+        for n in platoon_sizes:
+            main_results = all_main_results.loc[
+                all_main_results['n_platoon'] == n].reset_index(drop=True)
+            other_result = results.loc[(results['strategy'] == strat)
+                                       & (results['n_platoon'] == n)
+                                       ].reset_index(drop=True)
+            # other_success = other_result.loc[other_result['success']]
+            success_diff = (
+                    (main_results['success'].sum()
+                     - other_result['success'].sum())
+                    / other_result['success'].sum()
+            )
+            both_success_idx = (other_result['success']
+                                & main_results['success'])
+            time_diff = (
+                    (main_results.loc[both_success_idx, 'completion_time']
+                     - other_result.loc[both_success_idx, 'completion_time'])
+                    / other_result.loc[both_success_idx, 'completion_time']
+            ).mean()
+            accel_diff = (
+                    (main_results.loc[both_success_idx, 'accel_cost']
+                     - other_result.loc[both_success_idx, 'accel_cost'])
+                    / other_result.loc[both_success_idx, 'accel_cost']
+            ).mean()
+            print(f'Comparing {main_strategy} to {strat}, n={n}\n'
+                  f'success: {"+" if success_diff > 0 else ""}'
+                  f'{success_diff * 100:.1f}%\n'
+                  f'time: {time_diff * 100:.1f}%\n'
+                  f'accel: {accel_diff * 100:.1f}%')
 
 
 def plot_costs_vs_iteration(running_costs, terminal_costs,
@@ -120,7 +164,7 @@ def plot_trajectory(data: pd.DataFrame, plot_title: str = None,
     time = np.arange(data['t'].min(), tf + dt / 2, dt)
     step = round(dt / (data['t'].iloc[1] - data['t'].iloc[0]))
     fig, ax = plt.subplots(len(time), 1)
-    fig.set_size_inches(6, n_plots-1)
+    fig.set_size_inches(6, n_plots - 1)
     for i in range(len(time)):
         k = i * step
         for veh_id in data['id'].unique():
@@ -133,10 +177,12 @@ def plot_trajectory(data: pd.DataFrame, plot_title: str = None,
                           x='x', y='y', marker='>', color=color, )
 
         ax[i].set_title('t = {:.1f}'.format(time[i]), loc='left')
-        ax[i].axhline(y=config.LANE_WIDTH / 2, linestyle='--', color='black')
+        ax[i].axhline(y=configuration.LANE_WIDTH / 2, linestyle='--',
+                      color='black')
         # ax[i].set_aspect('equal', adjustable='box')
         ax[i].set(xlim=(min_x - 2, max_x + 3),
-                  ylim=(-config.LANE_WIDTH / 2, 3 * config.LANE_WIDTH / 2))
+                  ylim=(-configuration.LANE_WIDTH / 2,
+                        3 * configuration.LANE_WIDTH / 2))
         if i == len(time) - 1:
             ax[i].set(xlabel=_get_variable_with_unit('x'))
         else:
@@ -183,7 +229,7 @@ def plot_initial_and_final_states(data: pd.DataFrame, axis=None,
                        x='x', y='y', marker='>', color=color, alpha=0.6)
     min_y = data['y'].min()
     max_y = data['y'].max()
-    ax.axhline(y=config.LANE_WIDTH / 2, linestyle='--', color='black')
+    ax.axhline(y=configuration.LANE_WIDTH / 2, linestyle='--', color='black')
     ax.set(xlabel=_get_variable_with_unit('x'),
            ylabel=_get_variable_with_unit('y'),
            ylim=(min_y - 2, max_y + 2))
@@ -215,7 +261,7 @@ def plot_initial_state(data: pd.DataFrame, axis=None):
                    x='x', y='y', marker='>', color=color)
     min_y = data['y'].min()
     max_y = data['y'].max()
-    ax.axhline(y=config.LANE_WIDTH / 2, linestyle='--', color='black')
+    ax.axhline(y=configuration.LANE_WIDTH / 2, linestyle='--', color='black')
     ax.set(xlabel=_get_variable_with_unit('x'),
            ylabel=_get_variable_with_unit('y'),
            ylim=(min_y - 2, max_y + 2))
@@ -233,7 +279,7 @@ def plot_state_vector(state: Iterable[float]):
 
     fig, ax = plt.subplots()
     ax.scatter(x, y, marker='>')
-    ax.axhline(y=config.LANE_WIDTH / 2, linestyle='--', color='black')
+    ax.axhline(y=configuration.LANE_WIDTH / 2, linestyle='--', color='black')
     ax.set(xlabel=_get_variable_with_unit('x'),
            ylabel=_get_variable_with_unit('y'),
            ylim=(np.min(y) - 2, np.max(y) + 2))
@@ -457,11 +503,11 @@ def get_relevant_vehicle_ids(data: pd.DataFrame) -> np.ndarray:
     platoon_ids = data[data['name'].str.startswith('p')]['id'].unique()
     ld_id = pd.unique(data.loc[
                           (data['id'].isin(platoon_ids)) & (
-                                      data['y'] > 2), 'orig_lane_leader_id'
+                                  data['y'] > 2), 'orig_lane_leader_id'
                       ].values.ravel('K'))
     fd_id = pd.unique(data.loc[
                           (data['orig_lane_leader_id'].isin(platoon_ids) & (
-                                      data['y'] > 2), 'id')
+                                  data['y'] > 2), 'id')
                       ].values.ravel('K'))
     return np.unique(np.concatenate((platoon_ids, ld_id, fd_id)))
 
@@ -477,20 +523,20 @@ def _get_veh_data(data: pd.DataFrame, id_or_name: Union[int, str]
 
 def _get_variable_with_unit(variable: str):
     try:
-        return variable + ' [' + config.UNIT_MAP[variable] + ']'
+        return variable + ' [' + configuration.UNIT_MAP[variable] + ']'
     except KeyError:
         return variable
 
 
 def _get_color_by_name(veh_name: str):
     if veh_name == 'p1':
-        color = config.COLORS['dark_blue']
+        color = configuration.COLORS['dark_blue']
     elif veh_name == 'ego' or veh_name.startswith('p'):
-        color = config.COLORS['blue']
+        color = configuration.COLORS['blue']
     elif veh_name in {'lo', 'lo1', 'ld', 'ld1', 'fd', 'fd1'}:
-        color = config.COLORS['red']
+        color = configuration.COLORS['red']
     elif veh_name.startswith('ld') or veh_name.startswith('fd'):
-        color = config.COLORS['orange']
+        color = configuration.COLORS['orange']
     else:
-        color = config.COLORS['gray']
+        color = configuration.COLORS['gray']
     return color

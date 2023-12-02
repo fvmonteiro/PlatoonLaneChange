@@ -223,8 +223,9 @@ def main():
     start_time = time.time()
 
     # create_graph(n_platoon)
-    run_scenarios_for_comparison(n_platoon, are_vehicles_cooperative,
-                                 [4], [0], True)
+    # run_scenarios_for_comparison(n_platoon, are_vehicles_cooperative,
+    #                              [4], [0], True)
+    analysis.compare_to_approach()
     # run_all_scenarios_for_comparison(n_platoon, are_vehicles_cooperative)
     # lcsm = scenarios.LaneChangeScenarioManager()
     # lcsm.set_parameters(n_platoon, are_vehicles_cooperative, v_ref, delta_x)
