@@ -188,7 +188,7 @@ class BaseVehicle(ABC):
         return self._states_history
 
     def get_inputs(self) -> np.ndarray:
-        return self._inputs
+        return self._inputs_history[:, self._iter_counter]
 
     def get_an_input_history(self, input_name: str) -> np.ndarray:
         return self.get_input_history()[self._input_idx[input_name], :]
@@ -430,6 +430,7 @@ class BaseVehicle(ABC):
         # Initial state
         self._time[self._iter_counter] = 0.0
         self._states_history[:, self._iter_counter] = self._initial_state
+        self._inputs_history[:, self._iter_counter] = np.zeros(self._n_inputs)
 
     def initialize_simulation_logs(self, n_samples: int) -> None:
         self._iter_counter = 0
@@ -589,7 +590,7 @@ class BaseVehicle(ABC):
         self._aided_vehicle_id[self._iter_counter] = new_incoming_vehicle_id
 
     def check_surrounding_gaps_safety(
-            self, vehicles: Mapping[int, BaseVehicle]): # -> bool:
+            self, vehicles: Mapping[int, BaseVehicle]):
         margin = 1e-2
 
         ego_safe_gap = self.compute_safe_lane_change_gap()
@@ -654,7 +655,8 @@ class BaseVehicle(ABC):
 
     def set_platoon_strategy_order(
             self,
-            strategy_parameters: tuple[list[int], list[int]] = None) -> None:
+            strategy_parameters: tuple[list[set[int]], list[int]] = None
+    ) -> None:
         pass
 
     def set_platoon_strategy_states_graph(

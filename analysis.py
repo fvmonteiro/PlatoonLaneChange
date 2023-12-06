@@ -28,17 +28,22 @@ def compare_to_approach(main_strategy: str = 'Graph-based'):
     results = pd.read_csv(file_path)
     strategies = results['strategy'].unique()
     platoon_sizes = results['n_platoon'].unique()
-    all_main_results = results.loc[results['strategy'] == main_strategy
-                                   ].reset_index(drop=True)
+    latest_experiments = results.groupby('n_platoon')[
+        'experiment_counter'].max()
+    latest_results = results.loc[results['experiment_counter'].isin(
+        latest_experiments)]
+    all_main_results = latest_results.loc[
+        latest_results['strategy'] == main_strategy].reset_index(drop=True)
     for strat in strategies:
         if strat == main_strategy:
             continue
         for n in platoon_sizes:
             main_results = all_main_results.loc[
                 all_main_results['n_platoon'] == n].reset_index(drop=True)
-            other_result = results.loc[(results['strategy'] == strat)
-                                       & (results['n_platoon'] == n)
-                                       ].reset_index(drop=True)
+            other_result = latest_results.loc[
+                (latest_results['strategy'] == strat)
+                & (latest_results['n_platoon'] == n)
+                ].reset_index(drop=True)
             # other_success = other_result.loc[other_result['success']]
             success_diff = (
                     (main_results['success'].sum()

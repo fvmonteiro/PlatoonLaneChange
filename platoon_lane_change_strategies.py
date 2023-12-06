@@ -110,8 +110,8 @@ class LaneChangeStrategy(ABC):
                              'have a given cooperation order.')
 
     def set_maneuver_order(
-            self, lane_changing_order: Sequence[Sequence[int]] = None,
-            cooperating_order: Sequence[Sequence[int]] = None):
+            self, lane_changing_order: list[set[int]] = None,
+            cooperating_order: Sequence[int] = None):
         raise AttributeError('Only instances of the TemplateStrategy class '
                              'can have their lane change order set.')
 
@@ -156,7 +156,18 @@ class LaneChangeStrategy(ABC):
 
     def set_maneuver_initial_state(
             self, ego_position_in_platoon: int, lo_states: Iterable[float],
-            platoon_states: Iterable[float], ld_states: Iterable[float]):
+            platoon_states: Iterable[float], ld_states: Iterable[float],
+            fd_states: Iterable[float]):
+        pass
+
+    def set_empty_maneuver_initial_state(self, ego_position_in_platoon: int):
+        """
+        When the vehicle at the given position cannot be in the first group
+        to move to the destination lane, we must set its maneuver initial state
+        to an empty value
+        :param ego_position_in_platoon:
+        :return:
+        """
         pass
 
     @abstractmethod
@@ -215,7 +226,10 @@ class TemplateStrategy(LaneChangeStrategy):
             return False
         next_in_line = self._lane_changing_order[self._idx]
         next_vehs_to_maneuver = [self.platoon_vehicles[i] for i in next_in_line]
-        is_my_turn = ego_position in next_in_line
+
+        # TODO: change where this check happens. The current lc vehicles should
+        #  call a new method when they finish their maneuvers. In this new
+        #  method we advance the idx
         # Check if next_in_line has finished its lane change
         are_done = [not veh.has_lane_change_intention() for veh
                     in next_vehs_to_maneuver]
@@ -229,12 +243,17 @@ class TemplateStrategy(LaneChangeStrategy):
                 )
             self._idx += 1
 
-        are_on_the_right_gap = [
-            (veh.get_desired_destination_lane_leader_id()
-             == veh.get_destination_lane_leader_id()) for veh
-            in next_vehs_to_maneuver
-        ]
-        return is_my_turn and np.all(are_on_the_right_gap)
+        is_my_turn = ego_position in next_in_line
+        if is_my_turn:
+            for veh in next_vehs_to_maneuver:
+                if (veh.get_desired_destination_lane_leader_id()
+                        != veh.get_destination_lane_leader_id()):
+                    return False
+                if not veh.get_is_lane_change_safe():
+                    return False
+            return True
+        return False
+        # return is_my_turn and are_all_on_the_right_gap and are_all_safe
 
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         # First check if it's our turn to change lanes
@@ -287,72 +306,6 @@ class TemplateStrategy(LaneChangeStrategy):
         return [{i} for i in value]
 
 
-class TemplateRelaxedStrategy(TemplateStrategy):
-    """
-    Similar to TemplateStrategy but allows vehicles to move as soon as it is
-    safe
-    There are some issues to address:
-    - How to ensure vehicles stay together? We keep the desired dest lane
-     leader to current dest lane leader comparison
-    - How to ensure cooperation once the next vehicle starts its lane change
-    """
-
-    _id = 3
-    _name = 'Relaxed brute force'
-
-    def can_start_lane_change(self, ego_position: int) -> bool:
-        if self._idx >= len(self._lane_changing_order):
-            return True
-        next_in_line = self._lane_changing_order[self._idx]
-        next_veh_to_maneuver = self.platoon_vehicles[next_in_line]
-        is_my_turn = ego_position == next_in_line
-        # If it's my turn, and I start moving, I can allow the next vehicle
-        # to move too.
-        if is_my_turn and next_veh_to_maneuver.get_is_lane_change_safe():
-            if self._cooperating_order[self._idx] == -1:
-                # If the vehicle started a maneuver behind all others (no
-                # coop), it is now the last vehicle
-                self._last_dest_lane_vehicle_idx = next_in_line
-            self._idx += 1
-
-        return (is_my_turn and
-                (next_veh_to_maneuver.get_desired_destination_lane_leader_id()
-                 == next_veh_to_maneuver.get_destination_lane_leader_id()))
-
-    def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
-        # First check if it's our turn to change lanes
-        if (self._idx >= len(self.platoon_vehicles)  # all platoon moved
-                or ego_position != self._lane_changing_order[self._idx]):
-            return -1
-        # The first vehicle to change lanes does so behind its destination
-        # lane leader
-        if self._idx == 0:
-            return self.platoon_vehicles[self._lane_changing_order[
-                self._idx]].get_destination_lane_leader_id()
-
-        coop_veh_id = self._cooperating_order[self._idx]
-        if coop_veh_id == -1:
-            # Merge behind the platoon vehicle farther back in the dest lane
-            return self.platoon_vehicles[
-                self._last_dest_lane_vehicle_idx].get_id()
-        else:
-            # Get the vehicle ahead the vehicle which helps generate the gap
-            return self.platoon_vehicles[self._cooperating_order[
-                self._idx]].get_origin_lane_leader_id()
-
-    def _get_incoming_vehicle_id(self, ego_position: int) -> int:
-        # We don't have to check whether the vehicle is already at the
-        # destination lane because the cooperating order already takes care
-        # of that
-        # TODO: cooperation is ending too soon
-        # if (self._idx < len(self.platoon_vehicles)
-        idx = min(self._idx, len(self.platoon_vehicles) - 1)
-        if ego_position == self._cooperating_order[idx]:
-            return self.platoon_vehicles[
-                self._lane_changing_order[idx]].get_id()
-        return -1
-
-
 # TODO: poor naming
 class GraphStrategy(TemplateStrategy):
     _id = 4
@@ -364,15 +317,30 @@ class GraphStrategy(TemplateStrategy):
         self._lane_change_graph = states_graph
 
     def set_maneuver_initial_state(
-            self, ego_position_in_platoon: int, lo_states: Iterable[float],
-            platoon_states: Iterable[float], ld_states: Iterable[float]):
+            self, ego_position_in_platoon: int, lo_states: Sequence[float],
+            platoon_states: Iterable[float], ld_states: Sequence[float],
+            fd_states: Sequence[float]):
         if not self._is_initialized:
             self._lane_change_graph.set_maneuver_initial_state(
-                ego_position_in_platoon, lo_states, platoon_states, ld_states)
+                ego_position_in_platoon, lo_states, platoon_states, ld_states,
+                fd_states)
+
+    def set_empty_maneuver_initial_state(self, ego_position_in_platoon: int):
+        """
+        When the vehicle at the given position cannot be in the first group
+        to move to the destination lane, we must set its maneuver initial state
+        to an empty value
+        :param ego_position_in_platoon:
+        :return:
+        """
+        if not self._is_initialized:
+            self._lane_change_graph.set_empty_maneuver_initial_state(
+                ego_position_in_platoon)
 
     def can_start_lane_change(self, ego_position: int) -> bool:
         if not self._is_initialized:
             self._decide_lane_change_order(ego_position)
+            # self._decide_lane_change_order_new()
         if not self._is_initialized:
             return False
         return super().can_start_lane_change(ego_position)
@@ -390,36 +358,59 @@ class GraphStrategy(TemplateStrategy):
     def _decide_lane_change_order(self, ego_position: int):
         opt_path = None
         opt_cost = np.inf
-        for veh_pos in range(len(self.platoon_vehicles)):
-            veh = self.platoon_vehicles[veh_pos]
-            # if veh.get_is_lane_change_safe():
-            if veh.get_is_lane_change_gap_suitable():
-                # TODO: change once graph states include dest lane follower.
-                #  Then, the cost will include any necessary adjustment
-                # The condition here is tricky. We don't want to check
-                # for safety (more constrained) because the vehicle might
-                # need to brake to adjust to the gap. At the same time,
-                # checking only for gap suitable ignores the fact that some
-                # vehicles may be ready to move right now while others
-                # still need to adjust, and may never reach the gap.
+
+        # TODO: we may be able to simplify this if the graph states include
+        #  the dest lane follower (see _decide_lane_change_order_new), but
+        #  I was not able to avoid quantization issues yet
+
+        # First, we check if any vehicles are already at safe position to
+        # start the maneuver
+        for pos1 in range(len(self.platoon_vehicles)):
+            first_movers = set()
+            pos2 = pos1
+            while (pos2 < len(self.platoon_vehicles)
+                   and self.platoon_vehicles[pos2].get_is_lane_change_safe()):
+                first_movers.add(pos2)
                 try:
                     path, cost = (
                         self._lane_change_graph.
-                        find_minimum_time_maneuver_order(veh_pos))
-                    if not veh.get_is_lane_change_safe():
-                        cost += configuration.Configuration.time_horizon
+                        find_minimum_time_maneuver_order_given_first_mover(
+                            first_movers))
+                except nx.NetworkXNoPath:
+                    continue
+                pos2 += 1
+                if cost < opt_cost:
+                    opt_cost = cost
+                    opt_path = path
+
+        # If there are no vehicles at safe positions, we check if any are
+        # close to a suitable gap
+        if opt_path is None:
+            for veh_pos in range(len(self.platoon_vehicles)):
+                veh = self.platoon_vehicles[veh_pos]
+                if veh.get_is_lane_change_gap_suitable():
+                    try:
+                        path, cost = (
+                            self._lane_change_graph.
+                            find_minimum_time_maneuver_order_given_first_mover(
+                                {veh_pos}))
+                    except nx.NetworkXNoPath:
+                        continue
                     if cost < opt_cost:
                         opt_cost = cost
                         opt_path = path
-                except nx.NetworkXNoPath:
-                    continue
 
         if opt_path is not None:
-            self.set_maneuver_order(
-                TemplateStrategy._to_list_of_sets(opt_path[0]),
-                opt_path[1])
+            self.set_maneuver_order(opt_path[0], opt_path[1])
             self._is_initialized = True
             print(f'Path chosen from graph: {opt_path[0]}, {opt_path[1]}')
+
+    def _decide_lane_change_order_new(self):
+        path, cost = self._lane_change_graph.find_minimum_time_maneuver()
+        if path is not None:
+            self.set_maneuver_order(path[0], path[1])
+            self._is_initialized = True
+            print(f'Path chosen from graph: {path[0]}, {path[1]}')
 
 
 # ========================= Heuristic Strategies ============================= #
@@ -437,6 +428,9 @@ class IndividualStrategy(TemplateStrategy):
         cooperating_order = [-1] * len(self.platoon_vehicles)
         super().set_maneuver_order(lane_changing_order, cooperating_order)
 
+    def can_start_lane_change(self, ego_position: int) -> bool:
+        return True
+
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         ego_veh = self.platoon_vehicles[ego_position]
         return ego_veh.get_destination_lane_leader_id()
@@ -452,13 +446,6 @@ class SynchronousStrategy(TemplateStrategy):
         lane_changing_order = [{i for i in range(len(self.platoon_vehicles))}]
         cooperating_order = [-1] * len(self.platoon_vehicles)
         super().set_maneuver_order(lane_changing_order, cooperating_order)
-
-    def can_start_lane_change(self, ego_position: int) -> bool:
-        # Check if lane change is safe for all vehicles
-        for veh in self.platoon_vehicles:
-            if not veh.get_is_lane_change_safe():
-                return False
-        return True
 
 
 class LeaderFirstStrategy(TemplateStrategy):
@@ -648,7 +635,6 @@ strategy_map: dict[int, type[LaneChangeStrategy]] = {
     IndividualStrategy.get_id(): IndividualStrategy,
     SynchronousStrategy.get_id(): SynchronousStrategy,
     TemplateStrategy.get_id(): TemplateStrategy,
-    TemplateRelaxedStrategy.get_id(): TemplateRelaxedStrategy,
     GraphStrategy.get_id(): GraphStrategy,
     LeaderFirstStrategy.get_id(): LeaderFirstStrategy,
     LastFirstStrategy.get_id(): LastFirstStrategy,

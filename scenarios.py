@@ -219,6 +219,7 @@ class LaneChangeScenarioManager:
         current_results['experiment_counter'] = experiment_counter
         current_results.to_csv(file_path, mode='a', index=False,
                                header=write_header)
+        print(f'File {file_name} saved')
 
     def _create_scenario_name(self, strategy_number: int):
         scenario_name = lc_strategy.strategy_map[strategy_number].get_name()

@@ -187,9 +187,15 @@ class VehicleGroup:
         self._platoon_lane_change_strategy = strategy_number
         # self._strategy_parameters = strategy_parameters
 
-    def set_predefined_lane_change_order(self, lane_change_order: list[int],
-                                         cooperation_order: list[int]):
+    def set_predefined_lane_change_order(
+            self, lane_change_order: list[set[int]],
+            cooperation_order: list[int]):
         self._maneuver_order = (lane_change_order, cooperation_order)
+
+    def set_platoon_lane_change_order(self, lane_change_order: list[set[int]],
+                                      cooperation_order: list[int]):
+        p1 = self.get_vehicle_by_name('p1')
+        p1.set_platoon_strategy_order((lane_change_order, cooperation_order))
 
     def set_vehicle_states_graph(self,
                                  states_graph: graph_tools.VehicleStatesGraph):
@@ -388,6 +394,14 @@ class VehicleGroup:
             full_state.extend(vehicle.create_state_vector(
                 x[veh_id], y[veh_id], theta[veh_id], v[veh_id]))
         return np.array(full_state)
+
+    # def put_vehicles_in_platoon(self, platoon_vehicles: list[base.BaseVehicle]):
+    #     platoon_vehicles[0].set_platoon(platoon.ClosedLoopPlatoon(
+    #         platoon_vehicles[0], 4))
+    #     leader_platoon = platoon_vehicles[0].get_platoon()
+    #     for i in range(1, len(platoon_vehicles)):
+    #         leader_platoon.add_vehicle(platoon_vehicles[i])
+    #         platoon_vehicles[i].set_platoon(leader_platoon)
 
     def initialize_platoons(self):
         """

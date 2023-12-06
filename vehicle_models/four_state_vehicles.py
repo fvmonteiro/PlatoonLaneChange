@@ -204,7 +204,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         #             self.set_platoon(leader_platoon)
 
     def set_platoon_strategy_order(
-            self, strategy_order: tuple[list[int], list[int]] = None
+            self, strategy_order: tuple[list[set[int]], list[int]] = None
     ) -> None:
         if self.is_in_a_platoon():
             self.get_platoon().set_strategy_parameters(strategy_order)
@@ -505,13 +505,12 @@ class ShortSimulationVehicle(ClosedLoopVehicle):
             self._fixed_incoming_vehicle_id
         )
 
-    def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]
-                              ) -> bool:
-        # is_safe = self.check_is_lane_change_safe(vehicles)
-        is_safe = self.get_is_lane_change_safe()
-        is_my_turn = (self.get_desired_destination_lane_leader_id()
-                      == self.get_destination_lane_leader_id())
-        return is_safe and is_my_turn
+    # def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]
+    #                           ) -> bool:
+    #     is_safe = self.get_is_lane_change_safe()
+    #     is_my_turn = (self.get_desired_destination_lane_leader_id()
+    #                   == self.get_destination_lane_leader_id())
+    #     return is_safe and is_my_turn
 
     def make_closed_loop_copy(self, initial_state: np.ndarray = None
                               ) -> ShortSimulationVehicle:
