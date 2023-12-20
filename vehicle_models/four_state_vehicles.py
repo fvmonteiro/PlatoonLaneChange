@@ -57,9 +57,6 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         self._controller = self._controller_type(
             self, self._can_change_lanes, self._has_open_loop_acceleration)
 
-    def get_can_change_lanes(self) -> bool:
-        return self._can_change_lanes
-
     def get_has_open_loop_acceleration(self) -> bool:
         return self._has_open_loop_acceleration
 

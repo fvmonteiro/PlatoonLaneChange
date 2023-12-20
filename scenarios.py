@@ -217,6 +217,7 @@ class LaneChangeScenarioManager:
             write_header = True
         current_results = self.get_results()
         current_results['experiment_counter'] = experiment_counter
+        current_results['objective'] = configuration.Configuration.graph_cost
         current_results.to_csv(file_path, mode='a', index=False,
                                header=write_header)
         print(f'File {file_name} saved')
@@ -291,21 +292,13 @@ class SimulationScenario(ABC):
             pickle.dump(self.get_opc_cost_history(),
                         f, pickle.HIGHEST_PROTOCOL)
 
-    def create_uniform_vehicles(
-            self, n_per_lane: Iterable[int],
-            vehicle_class: type[base.BaseVehicle],
-            free_flow_speed: float):
-        array_2d = [[vehicle_class] * n for n in n_per_lane]
-        self.create_vehicle_group(array_2d)
-        self.vehicle_group.set_free_flow_speeds(free_flow_speed)
-
     def create_vehicle_group(
-            self, vehicle_classes: Sequence[Sequence[type[base.BaseVehicle]]]):
-        for i in range(len(vehicle_classes)):
-            self.n_per_lane.append(len(vehicle_classes[i]))
-        flat_vehicle_list = [item for sublist in vehicle_classes for
+            self, vehicles: Sequence[Sequence[base.BaseVehicle]]):
+        for i in range(len(vehicles)):
+            self.n_per_lane.append(len(vehicles[i]))
+        flat_vehicle_list = [item for sublist in vehicles for
                              item in sublist]
-        self.vehicle_group.create_vehicle_array_from_classes(flat_vehicle_list)
+        self.vehicle_group.fill_vehicle_array(flat_vehicle_list)
 
     def place_origin_lane_vehicles(
             self, v_ff_lo: float, v_ff_platoon: float,

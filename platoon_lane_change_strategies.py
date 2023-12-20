@@ -339,7 +339,8 @@ class GraphStrategy(TemplateStrategy):
 
     def can_start_lane_change(self, ego_position: int) -> bool:
         if not self._is_initialized:
-            self._decide_lane_change_order(ego_position)
+            self._decide_lane_change_order(
+                configuration.Configuration.graph_cost)
             # self._decide_lane_change_order_new()
         if not self._is_initialized:
             return False
@@ -355,7 +356,7 @@ class GraphStrategy(TemplateStrategy):
             return -1
         return super()._get_incoming_vehicle_id(ego_position)
 
-    def _decide_lane_change_order(self, ego_position: int):
+    def _decide_lane_change_order(self, objective: str):
         opt_path = None
         opt_cost = np.inf
 
@@ -375,7 +376,7 @@ class GraphStrategy(TemplateStrategy):
                     path, cost = (
                         self._lane_change_graph.
                         find_minimum_time_maneuver_order_given_first_mover(
-                            first_movers))
+                            first_movers, objective))
                 except nx.NetworkXNoPath:
                     continue
                 pos2 += 1
@@ -393,7 +394,7 @@ class GraphStrategy(TemplateStrategy):
                         path, cost = (
                             self._lane_change_graph.
                             find_minimum_time_maneuver_order_given_first_mover(
-                                {veh_pos}))
+                                {veh_pos}, objective))
                     except nx.NetworkXNoPath:
                         continue
                     if cost < opt_cost:
@@ -406,7 +407,10 @@ class GraphStrategy(TemplateStrategy):
             print(f'Path chosen from graph: {opt_path[0]}, {opt_path[1]}')
 
     def _decide_lane_change_order_new(self):
-        path, cost = self._lane_change_graph.find_minimum_time_maneuver()
+        objective = 'time'
+        path, min_cost = self._lane_change_graph.find_minimum_time_maneuver(
+            cost=objective
+        )
         if path is not None:
             self.set_maneuver_order(path[0], path[1])
             self._is_initialized = True

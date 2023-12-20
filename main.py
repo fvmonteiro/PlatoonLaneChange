@@ -36,13 +36,9 @@ def run_base_ocp_scenario():
 
     scenario = scenarios.ExampleScenarioExternal()
     vehicles = [
-        [vehicle_models.three_state_vehicles.ThreeStateVehicleRearWheel],
-        [vehicle_models.three_state_vehicles.ThreeStateVehicleRearWheel]
+        [vehicle_models.three_state_vehicles.ThreeStateVehicleRearWheel()],
+        [vehicle_models.three_state_vehicles.ThreeStateVehicleRearWheel()]
     ]
-    # vehicles = [
-    #     [vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle,
-    #      vehicle_models.four_state_vehicles.SafeAccelOpenLoopLCVehicle]
-    # ]
     scenario.create_vehicle_group(vehicles)
     scenario.set_free_flow_speeds(v_ff)
     scenario.create_initial_state()
@@ -206,14 +202,14 @@ def main():
         ftol=1.0e-3, estimate_gradient=True
     )
     configuration.Configuration.set_optimal_controller_parameters(
-        max_iter=3, time_horizon=20.0,
+        max_iter=3, time_horizon=30.0,
         has_terminal_lateral_constraints=False,
         has_lateral_safety_constraint=False,
         initial_input_guess='mode',
         jumpstart_next_solver_call=True, has_initial_mode_guess=True
     )
     configuration.Configuration.set_scenario_parameters(
-        increase_lc_time_headway=False
+        increase_lc_time_headway=False, graph_cost='accel'
     )
 
     v_base = 20
@@ -230,20 +226,21 @@ def main():
 
     # create_graph(n_platoon, graph_includes_fd)
     # run_scenarios_for_comparison(n_platoon, are_vehicles_cooperative,
-    #                              [4], [5], graph_includes_fd, True)
-    # analysis.compare_to_approach()
+    #                              [4], [0, -5, 5], graph_includes_fd,
+    #                              has_plots=False, save=False)
+    analysis.compare_to_approach('time')
     # for n in [2, 3]:
-    #     run_all_scenarios_for_comparison(n, are_vehicles_cooperative,
-    #                                      graph_includes_fd)
+    # run_all_scenarios_for_comparison(n_platoon, are_vehicles_cooperative,
+    #                                  graph_includes_fd)
 
-    vsg = graph_tools.VehicleStatesGraph.load_from_file(n_platoon,
-                                                        graph_includes_fd)
-    lcsm = scenarios.LaneChangeScenarioManager()
-    lcsm.set_lane_change_graph(vsg)
-    lcsm.set_parameters(n_platoon, are_vehicles_cooperative, v_ref, delta_x)
-    lcsm.run_strategy_comparison_on_test_scenario(
-        n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
-        [4])
+    # vsg = graph_tools.VehicleStatesGraph.load_from_file(n_platoon,
+    #                                                     graph_includes_fd)
+    # lcsm = scenarios.LaneChangeScenarioManager()
+    # lcsm.set_lane_change_graph(vsg)
+    # lcsm.set_parameters(n_platoon, are_vehicles_cooperative, v_ref, delta_x)
+    # lcsm.run_strategy_comparison_on_test_scenario(
+    #     n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
+    #     [4])
 
     # run_brute_force_strategy_test(
     #     n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead,

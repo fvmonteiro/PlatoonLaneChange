@@ -110,12 +110,6 @@ class VehicleStatesGraph:
 
     def create_graph(self):
 
-        sample_vehicle_group = self._create_vehicle_group()
-        platoon_veh_ids = [
-            sample_vehicle_group.get_vehicle_by_name(
-                'p' + str(i + 1)).get_id() for i in range(self.n_platoon)
-        ]
-
         # Still missing: loops for speeds and distances
         delta_x_lo = 0
         orig_lane_vel = [20]
@@ -150,24 +144,19 @@ class VehicleStatesGraph:
 
                 # Explore the children of each initial state node in BFS mode
                 self._explore_until_maneuver_completion(
-                    nodes, visited_states, platoon_veh_ids, free_flow_speeds)
+                    nodes, visited_states, free_flow_speeds)
 
     def _add_new_tree_to_graph(self, root: tuple[int], v0_lo: float,
                                v0_ld: float, v0_fd: float = None):
 
         visited_states = set(self.states_graph.nodes)
-        sample_vehicle_group = self._create_vehicle_group()
-        platoon_veh_ids = [
-            sample_vehicle_group.get_vehicle_by_name(
-                'p' + str(i + 1)).get_id() for i in range(self.n_platoon)
-        ]
         v_ff_platoon = 1.2 * v0_lo
         free_flow_speeds = self._order_values(v0_lo, v_ff_platoon,
                                               v0_ld, v0_fd)
         self.states_graph.add_node(root)
         nodes = deque([(PlatoonLCTracker(self.n_platoon), root)])
         self._explore_until_maneuver_completion(
-            nodes, visited_states, platoon_veh_ids, free_flow_speeds)
+            nodes, visited_states, free_flow_speeds)
 
     def set_maneuver_initial_state(
             self, ego_position_in_platoon: int, lo_states: Sequence[float],
@@ -176,11 +165,11 @@ class VehicleStatesGraph:
         states = np.round(
             self._order_values(lo_states, platoon_states, ld_states, fd_states))
         quantized_states = self.state_quantizer.quantize_state(states)
+        # TODO: create a set of root nodes and use it here
         if quantized_states not in set(self.states_graph.nodes):
             print(f'State {quantized_states} not in graph. Adding it now...')
             self._add_new_tree_to_graph(quantized_states, lo_states[-1],
                                         ld_states[-1], fd_states[-1])
-            # raise KeyError(f'State {quantized_states} not in graph')
         self._initial_state_per_vehicle[ego_position_in_platoon] = (
             quantized_states
         )
@@ -205,7 +194,8 @@ class VehicleStatesGraph:
                              f'{vehicle_position}')
 
     def find_minimum_time_maneuver(
-            self) -> tuple[tuple[list[set[int]], list[int]], float]:
+            self, cost: str = 'time'
+    ) -> tuple[tuple[list[set[int]], list[int]], float]:
         dag: nx.DiGraph = self.states_graph
         initial_states = set(self._initial_state_per_vehicle.values())
         initial_states.discard(self._empty_initial_state)
@@ -217,7 +207,8 @@ class VehicleStatesGraph:
         for root in initial_states:
             for node in nx.descendants(dag, root):
                 if dag.nodes[node].get('is_terminal', False):
-                    c, p = nx.single_source_dijkstra(dag, root, node)
+                    c, p = nx.single_source_dijkstra(dag, root, node,
+                                                     weight=cost)
                     costs.append(c)
                     # Get the lc and coop sequences in the path
                     lc_order = []
@@ -233,7 +224,7 @@ class VehicleStatesGraph:
         return opt_path, opt_cost
 
     def find_minimum_time_maneuver_order_given_first_mover(
-            self, first_mover_platoon_positions: set[int]
+            self, first_mover_platoon_positions: set[int], cost: str
     ) -> tuple[tuple[list[set[int]], list[int]], float]:
 
         # Get the initial state as seen by the first mover group
@@ -272,7 +263,7 @@ class VehicleStatesGraph:
                 lc_order = [first_mover_platoon_positions.copy()]
                 coop_order = [-1]
                 c, p = nx.single_source_dijkstra(dag, first_move_state,
-                                                 node)
+                                                 node, weight=cost)
                 costs.append(c)
                 # Get the lc and coop sequences in the path
                 for source_node, target_node in nx.utils.pairwise(p):
@@ -402,27 +393,25 @@ class VehicleStatesGraph:
 
     def _explore_until_maneuver_completion(
             self, nodes: deque[tuple[PlatoonLCTracker, tuple]],
-            visited_states: set[tuple],
-            platoon_veh_ids: Sequence[int], free_flow_speeds: Sequence[float]):
+            visited_states: set[tuple], free_flow_speeds: Sequence[float]):
         """
         Given a list of nodes containing all the first move states, explore
         until maneuver completion
         :param nodes:
-        :param platoon_veh_ids:
         :param free_flow_speeds:
         :return:
         """
+
         while len(nodes) > 0:
             tracker, quantized_state = nodes.pop()
-            remaining_vehicles = tracker.get_remaining_vehicles()
-            # Separated if conditions just for debugging
             if quantized_state in visited_states:
                 continue
+            visited_states.add(quantized_state)
+            remaining_vehicles = tracker.get_remaining_vehicles()
             if len(remaining_vehicles) == 0:
                 self.mark_terminal_node(quantized_state)
                 continue
 
-            visited_states.add(quantized_state)
             initial_state = self.state_quantizer.dequantize_state(
                 quantized_state)
             # print(tracker)
@@ -440,6 +429,8 @@ class VehicleStatesGraph:
                             initial_state)
                         vehicle_group.set_platoon_lane_change_order(
                             [next_positions_to_move], [next_pos_to_coop])
+                        platoon_veh_ids = (
+                            vehicle_group.get_lane_changing_vehicle_ids())
                         if next_pos_to_coop >= 0:
                             next_veh_to_coop = vehicle_group.vehicles[
                                 platoon_veh_ids[next_pos_to_coop]]
@@ -470,13 +461,14 @@ class VehicleStatesGraph:
                                     vehicle_group.get_current_state())
                             )
                             transition_time = vehicle_group.get_current_time()
+                            accel_cost = (
+                                vehicle_group.compute_acceleration_cost())
                             self._update_graphs(
                                 quantized_state, next_quantized_state,
-                                transition_time, next_positions_to_move,
-                                next_pos_to_coop)
+                                transition_time, accel_cost,
+                                next_positions_to_move, next_pos_to_coop)
                             nodes.appendleft((next_tracker,
                                               next_quantized_state))
-        # print('\tdone expanding one initial state')
 
     def simulate_till_lane_change(
             self, vehicle_group: vg.ShortSimulationVehicleGroup,
@@ -530,11 +522,13 @@ class VehicleStatesGraph:
 
     def _update_graphs(
             self, source_state: tuple[int], dest_state: tuple[int],
-            weight: float, lc_vehicles: Iterable[int], coop_vehicle: int):
+            transition_time: float, accel_cost: float,
+            lc_vehicles: Iterable[int], coop_vehicle: int):
         """
         Updates all tracking graphs with the same weight
         """
-        self.states_graph.add_edge(source_state, dest_state, weight=weight,
+        self.states_graph.add_edge(source_state, dest_state,
+                                   time=transition_time, accel=accel_cost,
                                    lc_vehicles=lc_vehicles,
                                    coop_vehicle=coop_vehicle)
 
@@ -582,8 +576,8 @@ class VehicleStatesGraph:
             next_tracker.move_vehicles([first_pos_to_move], -1)
             nodes.appendleft((next_tracker, next_quantized_state))
             self._update_graphs(
-                quantized_state, next_quantized_state,  # tracker, next_tracker,
-                1, [first_pos_to_move], -1)
+                quantized_state, next_quantized_state, 1., 0.,
+                [first_pos_to_move], -1)
 
     def _create_first_mover_node(
             self, vehicle_group: vg.VehicleGroup, v0_ld: float,

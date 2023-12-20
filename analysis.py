@@ -21,52 +21,68 @@ def load_latest_simulated_scenario(pickle_file_name: str):
     return data
 
 
-def compare_to_approach(main_strategy: str = 'Graph-based'):
+def compare_to_approach(objective: str):
     file_name = 'result_summary.csv'
     file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                              'platoon_strategy_results', file_name)
     results = pd.read_csv(file_path)
+    our_approach = 'Graph-based'
     strategies = results['strategy'].unique()
     platoon_sizes = results['n_platoon'].unique()
-    latest_experiments = results.groupby('n_platoon')[
-        'experiment_counter'].max()
+    latest_experiments = results.loc[results['objective'] == objective].groupby(
+        'n_platoon')['experiment_counter'].max()
     latest_results = results.loc[results['experiment_counter'].isin(
         latest_experiments)]
     all_main_results = latest_results.loc[
-        latest_results['strategy'] == main_strategy].reset_index(drop=True)
+        latest_results['strategy'] == our_approach].reset_index(drop=True)
     for strat in strategies:
-        if strat == main_strategy:
+        if strat == our_approach:
             continue
         for n in platoon_sizes:
             main_results = all_main_results.loc[
                 all_main_results['n_platoon'] == n].reset_index(drop=True)
-            other_result = latest_results.loc[
+            other_results = latest_results.loc[
                 (latest_results['strategy'] == strat)
                 & (latest_results['n_platoon'] == n)
                 ].reset_index(drop=True)
-            # other_success = other_result.loc[other_result['success']]
-            success_diff = (
-                    (main_results['success'].sum()
-                     - other_result['success'].sum())
-                    / other_result['success'].sum()
-            )
-            both_success_idx = (other_result['success']
+            # other_success = other_results.loc[other_results['success']]
+            main_success_count = main_results['success'].sum()
+            other_success_count = other_results['success'].sum()
+            success_diff = ((main_success_count - other_success_count)
+                            / other_success_count)
+            both_success_idx = (other_results['success']
                                 & main_results['success'])
-            time_diff = (
-                    (main_results.loc[both_success_idx, 'completion_time']
-                     - other_result.loc[both_success_idx, 'completion_time'])
-                    / other_result.loc[both_success_idx, 'completion_time']
-            ).mean()
-            accel_diff = (
-                    (main_results.loc[both_success_idx, 'accel_cost']
-                     - other_result.loc[both_success_idx, 'accel_cost'])
-                    / other_result.loc[both_success_idx, 'accel_cost']
-            ).mean()
-            print(f'Comparing {main_strategy} to {strat}, n={n}\n'
-                  f'success: {"+" if success_diff > 0 else ""}'
-                  f'{success_diff * 100:.1f}%\n'
-                  f'time: {time_diff * 100:.1f}%\n'
-                  f'accel: {accel_diff * 100:.1f}%')
+            time_results = _compute_variation(
+                other_results.loc[both_success_idx],
+                main_results.loc[both_success_idx],
+                'completion_time')
+            accel_results = _compute_variation(
+                other_results.loc[both_success_idx],
+                main_results.loc[both_success_idx],
+                'accel_cost')
+            print(f'Comparing {our_approach} to {strat}, n={n}')
+            print(f'Absolute results:\n'
+                  f'\tsuccess: {main_results["success"].sum()} vs '
+                  f'{other_results["success"].sum()}\n'
+                  f'\ttime: {time_results["new_avg"]:.1f} vs '
+                  f'{time_results["base_avg"]:.1f}\n'
+                  f'\taccel: {accel_results["new_avg"]:.1f} vs '
+                  f'{accel_results["base_avg"]:.1f}'
+                  )
+            print('Comparative:\n'
+                  f'\tsuccess: {success_diff * 100:+.1f}%\n'
+                  f'\ttime: {time_results["avg_of_changes"] * 100:+.1f}%\n'
+                  f'\taccel: {accel_results["avg_of_changes"] * 100:+.1f}%')
+
+
+def _compute_variation(base_results, new_results, variable):
+    base_avg = base_results[variable].mean()
+    new_avg = new_results[variable].mean()
+    change_in_avg = (new_avg - base_avg) / base_avg
+    avg_of_changes = ((new_results[variable] - base_results[variable])
+                      / base_results[variable]).mean()
+    return {'base_avg': base_avg, 'new_avg': new_avg,
+            'change_in_avg': change_in_avg, 'avg_of_changes': avg_of_changes}
 
 
 def plot_costs_vs_iteration(running_costs, terminal_costs,

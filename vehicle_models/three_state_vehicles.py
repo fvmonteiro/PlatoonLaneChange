@@ -19,6 +19,7 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
     def __init__(self):
         super().__init__()
         self._set_model()
+        self._can_change_lanes = True
 
     def set_ocp_leader_sequence(self, leader_sequence):
         """

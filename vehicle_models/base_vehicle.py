@@ -26,6 +26,7 @@ class BaseVehicle(ABC):
     _n_inputs: int
     _state_idx: dict[str, int]
     _input_idx: dict[str, int]
+    _can_change_lanes: bool
     _time: np.ndarray
     _states: np.ndarray
     _inputs: np.ndarray
@@ -118,6 +119,9 @@ class BaseVehicle(ABC):
     @classmethod
     def get_input_names(cls) -> list[str]:
         return cls._input_names
+
+    def get_can_change_lanes(self) -> bool:
+        return self._can_change_lanes
 
     def get_ocp_interface(self) -> BaseVehicleInterface:
         return self._ocp_interface_type(self)

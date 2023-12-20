@@ -24,6 +24,7 @@ class VehicleGroup:
         # Often, we need to iterate over all vehicles in the order they were
         # created. The list below makes that easy
         self.sorted_vehicle_ids: list[int] = []
+        self.lane_changing_vehicle_ids: list[int] = []
         self.name_to_id: dict[str, int] = {}
         # The full system (all vehicles) mode is defined by follower/leader
         # pairs.
@@ -152,6 +153,9 @@ class VehicleGroup:
             if isinstance(veh, vehicle_type):
                 selected_vehicles.append(veh)
         return selected_vehicles
+
+    def get_lane_changing_vehicle_ids(self) -> list[int]:
+        return self.lane_changing_vehicle_ids
 
     def get_platoon_lane_change_strategy(
             self) -> Union[lc_strategies.LaneChangeStrategy, None]:
@@ -291,22 +295,22 @@ class VehicleGroup:
         for vehicle in self.vehicles.values():
             vehicle.prepare_to_start_simulation(n_samples)
 
-    def create_vehicle_array_from_classes(
-            self, vehicle_classes: Iterable[type[base.BaseVehicle]]):
-        """
-
-        Populates the list of vehicles following the given classes
-        :param vehicle_classes: Class of each vehicle instances
-        :return:
-        """
-        if self.get_n_vehicles() > 0:
-            raise AttributeError("Trying to create a vehicle array in a "
-                                 "vehicle group that was already initialized")
-        self.vehicles = {}
-        self.sorted_vehicle_ids = []
-        for veh_class in vehicle_classes:
-            vehicle = veh_class()
-            self.add_vehicle(vehicle)
+    # def create_vehicle_array_from_classes(
+    #         self, vehicle_classes: Iterable[type[base.BaseVehicle]]):
+    #     """
+    #
+    #     Populates the list of vehicles following the given classes
+    #     :param vehicle_classes: Class of each vehicle instances
+    #     :return:
+    #     """
+    #     if self.get_n_vehicles() > 0:
+    #         raise AttributeError("Trying to create a vehicle array in a "
+    #                              "vehicle group that was already initialized")
+    #     self.vehicles = {}
+    #     self.sorted_vehicle_ids = []
+    #     for veh_class in vehicle_classes:
+    #         vehicle = veh_class()
+    #         self.add_vehicle(vehicle)
 
     def fill_vehicle_array(self, vehicles: Iterable[base.BaseVehicle]):
         if self.get_n_vehicles() > 0:
@@ -322,6 +326,8 @@ class VehicleGroup:
         self.sorted_vehicle_ids.append(veh_id)
         self.vehicles[veh_id] = new_vehicle
         self.name_to_id[new_vehicle.get_name()] = veh_id
+        if new_vehicle.get_can_change_lanes():
+            self.lane_changing_vehicle_ids.append(veh_id)
 
     def populate_with_open_loop_copies(
             self, vehicles: Mapping[int, base.BaseVehicle],
@@ -355,26 +361,27 @@ class VehicleGroup:
          state
         :return:
         """
-        if self.get_n_vehicles() > 0:
-            raise AttributeError("Cannot set vehicles to a vehicle group "
-                                 "that was already initialized")
+        # if self.get_n_vehicles() > 0:
+        #     raise AttributeError("Cannot set vehicles to a vehicle group "
+        #                          "that was already initialized")
+        copied_vehicles = []
         for veh_id in sorted(vehicles.keys()):
             if initial_state_per_vehicle:
                 initial_state = initial_state_per_vehicle[veh_id]
             else:
                 initial_state = None
-            if veh_id in controlled_vehicle_ids:
-                if are_copies_open_loop:
-                    vehicle = vehicles[veh_id].make_open_loop_copy(
-                        initial_state)
-                else:
-                    vehicle = vehicles[veh_id].make_closed_loop_copy(
-                        initial_state)
-            else:
+
+            if veh_id not in controlled_vehicle_ids:
                 vehicle = vehicles[veh_id].make_reset_copy(initial_state)
-            self.sorted_vehicle_ids.append(veh_id)
-            self.vehicles[veh_id] = vehicle
-            self.name_to_id[vehicle.get_name()] = veh_id
+            elif are_copies_open_loop:
+                vehicle = vehicles[veh_id].make_open_loop_copy(
+                    initial_state)
+            else:
+                vehicle = vehicles[veh_id].make_closed_loop_copy(
+                    initial_state)
+            copied_vehicles.append(vehicle)
+            # self.add_vehicle(vehicle)
+        self.fill_vehicle_array(copied_vehicles)
 
     def create_full_state_vector(self, x, y, theta, v=None):
         """
@@ -518,21 +525,24 @@ class VehicleGroup:
         for vehicle in ocv:
             vehicle.set_centralized_controller(centralized_controller)
 
-    def compute_acceleration_cost(self):
+    def compute_acceleration_cost(self, include_followers: bool = False):
         """
         Returns the sum of the acceleration costs (integral of squared
-        acceleration) of platoon vehicles and immediate followers at the
-        origin and destination lanes
+        acceleration) of platoon vehicles and, possibly, immediate followers
+        at the origin and destination lanes
         :return:
         """
-        platoon_ids = {veh_id for veh_id, veh in self.vehicles.items()
-                       if veh.get_name().startswith('p')}
-        # Get all vehicles that, at any point, followed one of the platoon
-        # vehicles. This should return fo, fd and most of the platoon vehicles.
-        follower_ids = {veh_id for veh_id, veh in self.vehicles.items()
-                        if not platoon_ids.isdisjoint(
-                set(veh.get_origin_lane_leader_id_history()))}
-        relevant_ids = platoon_ids | follower_ids
+        lc_vehicle_ids = set(self.lane_changing_vehicle_ids)
+        if include_followers:
+            # Get all vehicles that, at any point, followed one of the platoon
+            # vehicles.
+            # This should return fo, fd and most of the platoon vehicles.
+            follower_ids = {veh_id for veh_id, veh in self.vehicles.items()
+                            if not lc_vehicle_ids.isdisjoint(
+                    set(veh.get_origin_lane_leader_id_history()))}
+            relevant_ids = lc_vehicle_ids | follower_ids
+        else:
+            relevant_ids = lc_vehicle_ids
         accel_cost = 0
         for veh_id in relevant_ids:
             time = self.vehicles[veh_id].get_simulated_time()
