@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
+import time
 import warnings
 
 import networkx as nx
@@ -92,6 +93,7 @@ class LaneChangeStrategy(ABC):
         # TODO: make the strategy have the platoon as a member. This will make
         #  it clearer that the strategy has access to updated platoon info
         self.platoon_vehicles = platoon_vehicles
+        self._decision_time = 0.  # only used by Graph-Based.
 
     @classmethod
     def get_id(cls) -> int:
@@ -100,6 +102,9 @@ class LaneChangeStrategy(ABC):
     @classmethod
     def get_name(cls) -> str:
         return cls._name
+
+    def get_decision_time(self) -> float:
+        return self._decision_time
 
     def get_lane_change_order(self):
         raise AttributeError('Only instances of the TemplateStrategy class '
@@ -364,6 +369,7 @@ class GraphStrategy(TemplateStrategy):
         #  the dest lane follower (see _decide_lane_change_order_new), but
         #  I was not able to avoid quantization issues yet
 
+        start_time = time.time()
         # First, we check if any vehicles are already at safe position to
         # start the maneuver
         for pos1 in range(len(self.platoon_vehicles)):
@@ -402,9 +408,13 @@ class GraphStrategy(TemplateStrategy):
                         opt_path = path
 
         if opt_path is not None:
+            final_time = time.time()
+            self._decision_time = final_time - start_time
             self.set_maneuver_order(opt_path[0], opt_path[1])
             self._is_initialized = True
-            print(f'Path chosen from graph: {opt_path[0]}, {opt_path[1]}')
+            print(f'Path chosen from graph: {opt_path[0]}, {opt_path[1]} '
+                  f'after {self._decision_time:.2e} seconds')
+            # print(f't0={start_time}, tf={final_time}')
 
     def _decide_lane_change_order_new(self):
         objective = 'time'

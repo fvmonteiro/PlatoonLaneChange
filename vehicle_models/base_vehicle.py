@@ -302,6 +302,9 @@ class BaseVehicle(ABC):
     def get_platoon(self):
         return None
 
+    def get_platoon_strategy_decision_time(self) -> float:
+        pass  # TODO: make abstract or refactor code
+
     def make_reset_copy(self, initial_state: np.ndarray = None) -> V:
         """
         Creates copies of vehicles used in internal iterations of our optimal

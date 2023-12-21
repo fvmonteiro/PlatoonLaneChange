@@ -146,7 +146,8 @@ def run_scenarios_for_comparison(
             scenario_manager.run_all_single_gap_cases(s)
     result = scenario_manager.get_results()
     print(result.groupby('strategy')[
-              ['success', 'completion_time', 'accel_cost']].mean())
+              ['success', 'completion_time', 'accel_cost', 'decision_time']
+          ].mean())
     result.to_csv('results_temp_name.csv', index=False)
     if save:
         scenario_manager.append_results_to_csv()
@@ -225,10 +226,10 @@ def main():
     start_time = time.time()
 
     # create_graph(n_platoon, graph_includes_fd)
-    # run_scenarios_for_comparison(n_platoon, are_vehicles_cooperative,
-    #                              [4], [0, -5, 5], graph_includes_fd,
-    #                              has_plots=False, save=False)
-    analysis.compare_to_approach('time')
+    run_scenarios_for_comparison(n_platoon, are_vehicles_cooperative,
+                                 [4], [0, 5, -5], graph_includes_fd,
+                                 has_plots=False, save=False)
+    # analysis.compare_to_approach('time')
     # for n in [2, 3]:
     # run_all_scenarios_for_comparison(n_platoon, are_vehicles_cooperative,
     #                                  graph_includes_fd)

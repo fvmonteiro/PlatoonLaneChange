@@ -69,6 +69,9 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         except AttributeError:
             return None
 
+    def get_platoon_strategy_decision_time(self) -> float:
+        return self._platoon.lane_change_strategy.get_decision_time()
+
     def get_external_input_idx(self) -> dict[str, int]:
         return self._external_input_idx
 

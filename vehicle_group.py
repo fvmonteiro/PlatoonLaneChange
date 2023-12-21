@@ -186,6 +186,11 @@ class VehicleGroup:
             final_times.append(self.vehicles[veh_id].get_lc_end_time())
         return final_times
 
+    def get_decision_time(self) -> float:
+        for veh in self.vehicles.values():
+            if veh.is_in_a_platoon():
+                return veh.get_platoon_strategy_decision_time()
+
     def set_platoon_lane_change_strategy(
             self, strategy_number: int):
         self._platoon_lane_change_strategy = strategy_number

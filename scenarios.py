@@ -18,7 +18,7 @@ import configuration
 import graph_tools
 import platoon_lane_change_strategies as lc_strategy
 import post_processing as pp
-from vehicle_group import VehicleGroup
+import vehicle_group as vg
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
 
@@ -41,7 +41,8 @@ class LaneChangeScenarioManager:
         self.results: dict[str, list] = {
             'n_platoon': [], 'vo': [], 'vd': [], 'strategy': [],
             'lane_change_order': [], 'cooperation_order': [],
-            'success': [], 'completion_time': [], 'accel_cost': []
+            'success': [], 'completion_time': [], 'accel_cost': [],
+            'decision_time': []
         }
         self._has_plots = True
 
@@ -178,7 +179,8 @@ class LaneChangeScenarioManager:
                 pass
 
     def store_results(self, scenario: LaneChangeScenario):
-        strategy = scenario.vehicle_group.get_platoon_lane_change_strategy()
+        veh_group = scenario.vehicle_group
+        strategy = veh_group.get_platoon_lane_change_strategy()
         if strategy is not None:
             strategy_name = strategy.get_name()
             lane_change_order = strategy.get_lane_change_order()
@@ -189,8 +191,9 @@ class LaneChangeScenarioManager:
             strategy_name = 'none'
             lane_change_order = []
             cooperation_order = []
-        completion_time = np.max(scenario.vehicle_group.get_lc_end_times())
-        accel_cost = scenario.vehicle_group.compute_acceleration_cost()
+        completion_time = np.max(veh_group.get_lc_end_times())
+        accel_cost = veh_group.compute_acceleration_cost()
+        decision_time = veh_group.get_decision_time()
 
         result = {
             'n_platoon': scenario.get_n_platoon(),
@@ -198,9 +201,11 @@ class LaneChangeScenarioManager:
             'strategy': strategy_name,
             'lane_change_order': lane_change_order,
             'cooperation_order': cooperation_order,
-            'success': scenario.vehicle_group.check_lane_change_success(),
-            'completion_time': completion_time, 'accel_cost': accel_cost
+            'success': veh_group.check_lane_change_success(),
+            'completion_time': completion_time, 'accel_cost': accel_cost,
+            'decision_time': decision_time
         }
+
         for key, value in result.items():
             self.results[key].append(value)
 
@@ -248,7 +253,7 @@ class SimulationScenario(ABC):
     def __init__(self):
         self.n_per_lane: list[int] = []
         base.BaseVehicle.reset_vehicle_counter()
-        self.vehicle_group: VehicleGroup = VehicleGroup()
+        self.vehicle_group: vg.VehicleGroup = vg.VehicleGroup()
         self.result_summary: dict = {}
         self._are_vehicles_cooperative = False
         self.lc_vehicle_names = []
@@ -779,7 +784,7 @@ class AllLaneChangeStrategies(LaneChangeScenario):
 
                 counter += 1
                 base.BaseVehicle.reset_vehicle_counter()
-                self.vehicle_group = VehicleGroup()
+                self.vehicle_group = vg.VehicleGroup()
                 self.set_test_initial_state(self._nda, self._ndb, self._noa,
                                             self._nob, self.v_ref, self.delta_x)
                 self.vehicle_group.set_platoon_lane_change_strategy(
