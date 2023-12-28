@@ -103,6 +103,9 @@ class LaneChangeStrategy(ABC):
     def get_name(cls) -> str:
         return cls._name
 
+    # def get_name_with_info(self) -> str:
+    #     return self.get_name()
+
     def get_decision_time(self) -> float:
         return self._decision_time
 
@@ -312,11 +315,16 @@ class TemplateStrategy(LaneChangeStrategy):
 
 
 # TODO: poor naming
-class GraphStrategy(TemplateStrategy):
+class GraphLaneChangeApproach(TemplateStrategy):
     _id = 4
     _name = 'Graph-based'
 
     _lane_change_graph: graph_tools.VehicleStatesGraph
+    _cost_name: str
+
+    @classmethod
+    def get_name(cls) -> str:
+        return '_'.join([cls._name, cls._cost_name])
 
     def set_states_graph(self, states_graph: graph_tools.VehicleStatesGraph):
         self._lane_change_graph = states_graph
@@ -344,8 +352,7 @@ class GraphStrategy(TemplateStrategy):
 
     def can_start_lane_change(self, ego_position: int) -> bool:
         if not self._is_initialized:
-            self._decide_lane_change_order(
-                configuration.Configuration.graph_cost)
+            self._decide_lane_change_order(self._cost_name)
             # self._decide_lane_change_order_new()
         if not self._is_initialized:
             return False
@@ -365,10 +372,6 @@ class GraphStrategy(TemplateStrategy):
         opt_path = None
         opt_cost = np.inf
 
-        # TODO: we may be able to simplify this if the graph states include
-        #  the dest lane follower (see _decide_lane_change_order_new), but
-        #  I was not able to avoid quantization issues yet
-
         start_time = time.time()
         # First, we check if any vehicles are already at safe position to
         # start the maneuver
@@ -381,7 +384,7 @@ class GraphStrategy(TemplateStrategy):
                 try:
                     path, cost = (
                         self._lane_change_graph.
-                        find_minimum_time_maneuver_order_given_first_mover(
+                        find_minimum_cost_maneuver_order_given_first_mover(
                             first_movers, objective))
                 except nx.NetworkXNoPath:
                     continue
@@ -399,7 +402,7 @@ class GraphStrategy(TemplateStrategy):
                     try:
                         path, cost = (
                             self._lane_change_graph.
-                            find_minimum_time_maneuver_order_given_first_mover(
+                            find_minimum_cost_maneuver_order_given_first_mover(
                                 {veh_pos}, objective))
                     except nx.NetworkXNoPath:
                         continue
@@ -416,15 +419,31 @@ class GraphStrategy(TemplateStrategy):
                   f'after {self._decision_time:.2e} seconds')
             # print(f't0={start_time}, tf={final_time}')
 
-    def _decide_lane_change_order_new(self):
-        objective = 'time'
+    def _decide_lane_change_order_from_root(self, cost_name: str):
+        # To be used if we include fd's state in the graph node's state
+        # representation.
         path, min_cost = self._lane_change_graph.find_minimum_time_maneuver(
-            cost=objective
+            cost_name=cost_name
         )
         if path is not None:
             self.set_maneuver_order(path[0], path[1])
             self._is_initialized = True
             print(f'Path chosen from graph: {path[0]}, {path[1]}')
+
+
+class GraphLaneChangeApproachMinTime(GraphLaneChangeApproach):
+    _id = 5
+    _cost_name = 'time'
+
+
+class GraphLaneChangeApproachMinAccel(GraphLaneChangeApproach):
+    _id = 6
+    _cost_name = 'accel'
+
+
+graphStrategyIds = {GraphLaneChangeApproach.get_id(),
+                    GraphLaneChangeApproachMinTime.get_id(),
+                    GraphLaneChangeApproachMinAccel.get_id()}
 
 
 # ========================= Heuristic Strategies ============================= #
@@ -649,7 +668,9 @@ strategy_map: dict[int, type[LaneChangeStrategy]] = {
     IndividualStrategy.get_id(): IndividualStrategy,
     SynchronousStrategy.get_id(): SynchronousStrategy,
     TemplateStrategy.get_id(): TemplateStrategy,
-    GraphStrategy.get_id(): GraphStrategy,
+    GraphLaneChangeApproach.get_id(): GraphLaneChangeApproach,
+    GraphLaneChangeApproachMinTime.get_id(): GraphLaneChangeApproachMinTime,
+    GraphLaneChangeApproachMinAccel.get_id(): GraphLaneChangeApproachMinAccel,
     LeaderFirstStrategy.get_id(): LeaderFirstStrategy,
     LastFirstStrategy.get_id(): LastFirstStrategy,
     LeaderFirstReverseStrategy.get_id(): LeaderFirstReverseStrategy,

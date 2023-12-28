@@ -21,15 +21,81 @@ def load_latest_simulated_scenario(pickle_file_name: str):
     return data
 
 
-def compare_to_approach(objective: str):
+def load_result_summary():
     file_name = 'result_summary.csv'
     file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                              'platoon_strategy_results', file_name)
     results = pd.read_csv(file_path)
-    our_approach = 'Graph-based'
+    latest_experiments = results.groupby(
+        'n_platoon')['experiment_counter'].max()
+    latest_results = results.loc[results['experiment_counter'].isin(
+        latest_experiments)]
+    return latest_results
+
+
+def save_fig_at_shared_folder(figure: plt.Figure, fig_name: str):
+    file_path = os.path.join(configuration.SHARED_IMAGES_PATH, fig_name)
+    figure.savefig(file_path)
+
+
+def compare_approaches(save_fig: bool = False):
+    results = load_result_summary()
+    success_rate = results.groupby(['n_platoon', 'strategy'])[
+                        'success'].mean()
+    print(success_rate)
+
+    sns.set_style('whitegrid')
+    plt.rcParams.update({'font.size': 16})
+
+    graph_strategies = []
+    other_strategies = []
+    for s in results['strategy'].unique():
+        if s.lower().startswith('graph'):
+            graph_strategies.append(s)
+        else:
+            other_strategies.append(s)
+
+    cost_names = ['completion_time', 'accel_cost']
+    platoon_sizes = results['n_platoon'].unique()
+    for other in other_strategies:
+        relevant_results_per_n = []
+        for n in platoon_sizes:
+            # print(f'n={n}')
+            results_n = results[results['n_platoon'] == n]
+            other_results = results_n.loc[
+                (results_n['strategy'] == other)].reset_index(drop=True)
+            other_success_idx = other_results['success']
+            graph_results = pd.concat(
+                [results_n.loc[results_n['strategy'] == gs
+                               ].reset_index(drop=True).loc[other_success_idx]
+                 for gs in graph_strategies])
+            relevant_results_per_n.append(pd.concat(
+                [graph_results, other_results.loc[other_success_idx]]))
+        relevant_results = pd.concat(relevant_results_per_n)
+        grouped_results = relevant_results.groupby(['n_platoon', 'strategy'])
+        avg_costs = grouped_results[cost_names].mean()
+        print(avg_costs)
+
+        for c in cost_names:
+            ax: plt.Axes = sns.boxplot(
+                data=relevant_results, x='n_platoon', y=c,
+                hue='strategy')
+            fig: plt.Figure = ax.get_figure()
+            fig.tight_layout()
+            if save_fig:
+                save_fig_at_shared_folder(fig, c + '_comparison_to_' + other)
+            fig.show()
+
+
+def compare_to_approach(cost_name: str):
+    file_name = 'result_summary.csv'
+    file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                             'platoon_strategy_results', file_name)
+    results = pd.read_csv(file_path)
+    our_approach = 'Graph-based' + '_' + cost_name
     strategies = results['strategy'].unique()
     platoon_sizes = results['n_platoon'].unique()
-    latest_experiments = results.loc[results['objective'] == objective].groupby(
+    latest_experiments = results.groupby(
         'n_platoon')['experiment_counter'].max()
     latest_results = results.loc[results['experiment_counter'].isin(
         latest_experiments)]
@@ -192,8 +258,8 @@ def plot_trajectory(data: pd.DataFrame, plot_title: str = None,
             veh_data = data[data['id'] == veh_id]
             veh_name = veh_data['name'].iloc[0]
             color = _get_color_by_name(veh_name)
-            if i == len(time) - 1:  # temp
-                k = veh_data.shape[0] - 1
+            # if i == len(time) - 1:  # temp
+            #     k = veh_data.shape[0] - 1
             ax[i].scatter(data=veh_data.iloc[k],
                           x='x', y='y', marker='>', color=color, )
 
@@ -554,8 +620,8 @@ def _get_color_by_name(veh_name: str):
         color = configuration.COLORS['dark_blue']
     elif veh_name == 'ego' or veh_name.startswith('p'):
         color = configuration.COLORS['blue']
-    elif veh_name in {'lo', 'lo1', 'ld', 'ld1', 'fd', 'fd1'}:
-        color = configuration.COLORS['red']
+    # elif veh_name in {'lo', 'lo0', 'ld', 'ld0', 'fd', 'fd0'}:
+    #     color = configuration.COLORS['red']
     elif veh_name.startswith('ld') or veh_name.startswith('fd'):
         color = configuration.COLORS['orange']
     else:

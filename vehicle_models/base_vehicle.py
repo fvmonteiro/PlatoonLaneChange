@@ -526,6 +526,9 @@ class BaseVehicle(ABC):
     def has_lane_change_intention(self) -> bool:
         return self.get_current_lane() != self._target_lane
 
+    def is_at_lane_center(self) -> bool:
+        return np.abs(self.get_y() - self.get_target_y()) <= 1.0e-4
+
     def has_requested_cooperation(self) -> bool:
         return self.get_desired_future_follower_id() >= 0
 

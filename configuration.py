@@ -23,6 +23,9 @@ ACCEPTED_GRAPH_COSTS = {'time', 'accel'}
 # DATA_FOLDER_PATH = 'C:\\Users\\fvall\\Documents\\Research\\data'
 DATA_FOLDER_PATH = os.path.join('c:', os.sep, 'Users', 'fvall', 'Documents',
                                 'Research', 'data')
+SHARED_IMAGES_PATH = os.path.join('g:', os.sep, 'My Drive', 'PhD Research',
+                                  'Lane Change', 'images_for_platoon_paper',
+                                  'results')
 
 
 class Configuration:
@@ -32,7 +35,7 @@ class Configuration:
     ftol: float = 1.0e-6  # [s]
     estimate_gradient: bool = True
 
-    # Our controller's parameters
+    # Our optimal controller's parameters
     max_iter: int = 3
     time_horizon: float = 10.0  # [s]
     has_terminal_lateral_constraints: bool = False
@@ -42,12 +45,9 @@ class Configuration:
     has_initial_mode_guess: bool = False
 
     # Scenario parameters
-    # v_ref = {'lo': 10., 'ld': 10., 'p': 10.,
-    #          'fo': 10., 'fd': 10.}
-    # delta_x = {'lo': 0.0, 'ld': 0.0, 'p': 0.0, 'fo': 0.0, 'fd': 0.0}
+    sim_time: float = 10.0  # [s]
     platoon_strategies = [0]
     increase_lc_time_headway: bool = False
-    graph_cost: str = 'time'
 
     @staticmethod
     def set_solver_parameters(
@@ -119,6 +119,9 @@ class Configuration:
         if max_iter:
             Configuration.max_iter = max_iter
         if time_horizon:
+            if time_horizon > Configuration.sim_time:
+                raise ValueError("Opt controller's horizon time is larger than "
+                                 "the simulation time")
             Configuration.time_horizon = time_horizon
         Configuration.has_terminal_lateral_constraints = (
             has_terminal_lateral_constraints)
@@ -131,20 +134,13 @@ class Configuration:
 
     @staticmethod
     def set_scenario_parameters(
-            # v_ref: Mapping[str, float] = None,
-            # delta_x: Mapping[str, float] = None,
+            sim_time: float = None,
             platoon_strategies: Union[list[int], int] = None,
-            increase_lc_time_headway: bool = False,
-            graph_cost: str = 'time'):
+            increase_lc_time_headway: bool = None):
         """
-
-        # :param v_ref: Free-flow speed for all vehicles. The accepted keys are:
-        #  lo (origin leaders), ld (destination leaders), p (platoon or ego
-        #  vehicles), fo (origin followers), fd (destination followers)
-        # :param delta_x: Deviation from equilibrium position. The accepted keys
-        #  are: lo (origin leader), ld (destination leader), p (intra platoon),
-        #  fo (origin follower), fd (destination follower)
-
+        Sets scenario parameters. If a certain parameter is not set, we
+        keep its current value.
+        :param sim_time: Simulation run time
         :param platoon_strategies: Defines the strategies that may be used by
          the optimal controller to generate the initial mode sequence guess.
          Accepted numerical values are 0: no platoon strategy, 1: synch,
@@ -152,26 +148,17 @@ class Configuration:
          accepted string is 'all'.
         :param increase_lc_time_headway: If True, the safe time headway for
          lane changing is greater than the safe time headway for lane keeping.
-        :param graph_cost: The cost that will be optimized by the graph
          approach. Accepted values are 'time' and 'accel'
         :return:
         """
-        # if v_ref:
-        #     for key, value in v_ref.items():
-        #         Configuration.v_ref[key] = value
-        # if delta_x:
-        #     for key, value in delta_x.items():
-        #         Configuration.delta_x[key] = value
-        if platoon_strategies is None:
-            platoon_strategies = 0
-        elif np.isscalar(platoon_strategies):
-            platoon_strategies = [platoon_strategies]
-        Configuration.platoon_strategies = platoon_strategies
-        Configuration.increase_lc_time_headway = increase_lc_time_headway
-        if graph_cost not in ACCEPTED_GRAPH_COSTS:
-            raise ValueError(f'The only accepted graph costs are '
-                             f'{ACCEPTED_GRAPH_COSTS}')
-        Configuration.graph_cost = graph_cost
+        if sim_time:
+            Configuration.sim_time = sim_time
+        if platoon_strategies is not None:
+            if np.isscalar(platoon_strategies):
+                platoon_strategies = [platoon_strategies]
+            Configuration.platoon_strategies = platoon_strategies
+        if increase_lc_time_headway is not None:
+            Configuration.increase_lc_time_headway = increase_lc_time_headway
 
 
 def get_lane_changing_time_headway() -> float:

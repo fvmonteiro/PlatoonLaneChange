@@ -19,6 +19,9 @@ V = TypeVar('V', bound=base.BaseVehicle)
 class VehicleGroup:
     """ Class to help manage groups of vehicles """
 
+    front_most_vehicle: base.BaseVehicle
+    rear_most_vehicle: base.BaseVehicle
+
     def __init__(self):
         self.vehicles: dict[int, base.BaseVehicle] = {}
         # Often, we need to iterate over all vehicles in the order they were
@@ -30,8 +33,8 @@ class VehicleGroup:
         # pairs.
         self.mode_sequence: som.ModeSequence = som.ModeSequence()
         self._platoon_lane_change_strategy = 0
-        self._maneuver_order = None
         self._vehicle_states_graph = None
+        self._maneuver_order = None
         self._is_verbose = True
 
     def get_n_vehicles(self):
@@ -299,6 +302,10 @@ class VehicleGroup:
         self.mode_sequence = som.ModeSequence()
         for vehicle in self.vehicles.values():
             vehicle.prepare_to_start_simulation(n_samples)
+        self.front_most_vehicle = max(self.vehicles.values(),
+                                      key=lambda x: x.get_x())
+        self.rear_most_vehicle = min(self.vehicles.values(),
+                                     key=lambda x: x.get_x())
 
     # def create_vehicle_array_from_classes(
     #         self, vehicle_classes: Iterable[type[base.BaseVehicle]]):
@@ -479,6 +486,31 @@ class VehicleGroup:
         # Last, we update the internal iteration counters
         for veh in self.vehicles.values():
             veh.update_iteration_counter()
+
+    def is_any_vehicle_maneuvering(self):
+        """
+        Returns true if any platoon vehicle has lane intention or non-zero
+        acceleration
+        """
+        for veh_id in self.lane_changing_vehicle_ids:
+            veh = self.vehicles[veh_id]
+            if (veh.has_lane_change_intention()
+                    or not veh.is_at_lane_center()
+                    or np.abs(veh.get_an_input_by_name('a') > 1.0e-10)):
+                return True
+        return False
+
+    def is_platoon_out_of_range(self):
+        if (self._platoon_lane_change_strategy ==
+                lc_strategies.LastFirstStrategy.get_id()):
+            return np.any(
+                [self.vehicles[veh_id].get_x() < self.rear_most_vehicle.get_x()
+                 for veh_id in self.lane_changing_vehicle_ids])
+        if (self._platoon_lane_change_strategy ==
+                lc_strategies.LeaderFirstReverseStrategy.get_id()):
+            return np.any(
+                [self.vehicles[veh_id].get_x() > self.front_most_vehicle.get_x()
+                 for veh_id in self.lane_changing_vehicle_ids])
 
     def write_vehicle_states(self, time,
                              state_vectors: Mapping[int, np.ndarray],
