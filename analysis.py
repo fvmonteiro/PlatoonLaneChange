@@ -38,10 +38,56 @@ def save_fig_at_shared_folder(figure: plt.Figure, fig_name: str):
     figure.savefig(file_path)
 
 
+def compare_graph_to_best_heuristic(save_fig: bool = False):
+    results = load_result_summary()
+    success_rate = results.groupby(['n_platoon', 'strategy'])[
+        'success'].mean()
+    print(success_rate)
+
+    sns.set_style('whitegrid')
+    plt.rcParams.update({'font.size': 16})
+
+    graph_strategies = []
+    other_strategies = []
+    for s in results['strategy'].unique():
+        if s.lower().startswith('graph'):
+            graph_strategies.append(s)
+        else:
+            other_strategies.append(s)
+
+    cost_names = ['completion_time', 'accel_cost']
+    simulation_identifiers = ['n_platoon', 'vo', 'vd', 'gap_position']
+
+    other_results = results[results['strategy'].isin(other_strategies)
+                            ].sort_values(by=simulation_identifiers)
+    graph_results = results[results['strategy'].isin(graph_strategies)
+                            ].sort_values(by=simulation_identifiers)
+    other_results.loc[
+        ~other_results['success'], cost_names] = np.inf
+    for c in cost_names:
+        best_results = other_results.loc[other_results.groupby(
+            simulation_identifiers)[c].idxmin()]
+        best_results['strategy'] = 'Best Heuristic'
+        all_results = pd.concat([graph_results, best_results])
+        drop_sims = best_results.loc[~best_results['success'],
+                                     simulation_identifiers]
+        successful_sims = all_results.set_index(simulation_identifiers).drop(
+            index=drop_sims.to_numpy()).reset_index()
+        avg_costs = successful_sims.groupby('strategy')[c].mean()
+        print(avg_costs)
+
+        ax = sns.boxplot(data=successful_sims, x='n_platoon', y=c, hue='strategy')
+        fig: plt.Figure = ax.get_figure()
+        fig.tight_layout()
+        fig.show()
+        if save_fig:
+            save_fig_at_shared_folder(fig, c + '_comparison_to_best_heuristic')
+
+
 def compare_approaches(save_fig: bool = False):
     results = load_result_summary()
     success_rate = results.groupby(['n_platoon', 'strategy'])[
-                        'success'].mean()
+        'success'].mean()
     print(success_rate)
 
     sns.set_style('whitegrid')
@@ -82,9 +128,9 @@ def compare_approaches(save_fig: bool = False):
                 hue='strategy')
             fig: plt.Figure = ax.get_figure()
             fig.tight_layout()
+            fig.show()
             if save_fig:
                 save_fig_at_shared_folder(fig, c + '_comparison_to_' + other)
-            fig.show()
 
 
 def compare_to_approach(cost_name: str):
@@ -554,6 +600,8 @@ def plot_scenario_results(x_axes: list[str], y_axes: list[str],
         show_legend = True if i == len(x_axes) - 1 else False
         sns.lineplot(data_to_plot, x=x, y=y, hue='name', ax=ax[i],
                      palette='tab10', legend=show_legend)
+        if show_legend:
+            sns.move_legend(ax[i], 'right')
         low, high = ax[i].get_ylim()
         if y == 'v' and high - low < 1:
             low, high = np.floor(low - 0.5), np.ceil(high + 0.5)
