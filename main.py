@@ -124,12 +124,10 @@ def run_scenarios_for_comparison(
         strategies: Iterable[int], delta_v: Sequence[float],
         graph_includes_fd: bool, has_plots: bool, save: bool = False):
 
-    vsg = graph_tools.VehicleStatesGraph.load_from_file(n_platoon,
-                                                        graph_includes_fd)
-    # strategies = graph_tools.VehicleStatesGraph.load_strategies()
+    # vsg = graph_tools.VehicleStatesGraph.load_from_file(n_platoon,
+    #                                                     graph_includes_fd)
     scenario_manager = scenarios.LaneChangeScenarioManager()
     scenario_manager.set_plotting(has_plots)
-    scenario_manager.set_lane_change_graph(vsg)
     v_ref = {'orig': v_orig, 'platoon': v_ff_platoon}
     print('Starting multiple runs')
     for dv in delta_v:
@@ -197,12 +195,13 @@ def main():
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
 
-    sim_time = 30.0
+    sim_time = 15.0 * n_platoon
     # time_horizon = sim_time - 2
     # configuration.Configuration.set_solver_parameters(
     #     max_iter=100, discretization_step=0.2,
     #     ftol=1.0e-3, estimate_gradient=True
     # )
+
     # configuration.Configuration.set_optimal_controller_parameters(
     #     max_iter=3, time_horizon=time_horizon,
     #     has_terminal_lateral_constraints=False,
@@ -217,7 +216,6 @@ def main():
     v_orig = 20.
     v_ff_platoon = v_orig * 1.5
     delta_v_dest_lane = [0, -5, 5]
-    delta_x = {'lo': 0., 'ld': 0., 'p': 0., 'fd': 0.}
 
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
@@ -225,43 +223,43 @@ def main():
 
     start_time = time.time()
 
-    graph_tools.VehicleStatesGraph.load_strategies(2, 'time')
+    # create_graph(n_platoon, graph_includes_fd, [v_orig], v_ff_platoon,
+    #              [0, -5, 5])
+    # run_scenarios_for_comparison(
+    #     n_platoon, v_orig, v_ff_platoon, are_vehicles_cooperative,
+    #     [5, 6], [0, -5, 5], graph_includes_fd, has_plots=True, save=False
+    # )
 
-    # create_graph(n_platoon, graph_includes_fd)
-    # run_scenarios_for_comparison(n_platoon, v_orig, v_ff_platoon,
-    #                              are_vehicles_cooperative,
-    #                              [5], [5], graph_includes_fd,
-    #                              has_plots=True, save=False)
+    for n_platoon in [2, 3, 4]:
+        print(f'############ N={n_platoon} ############')
+        graph_t0 = time.time()
+        create_graph(n_platoon, graph_includes_fd, [v_orig], v_ff_platoon,
+                     delta_v_dest_lane)
+        print(f'Time to create graph: {time.time() - graph_t0}')
+        configuration.Configuration.set_scenario_parameters(
+            sim_time=15.0 * n_platoon
+        )
+        sim_t0 = time.time()
+        run_all_scenarios_for_comparison(n_platoon, v_orig, v_ff_platoon,
+                                         are_vehicles_cooperative,
+                                         graph_includes_fd)
+        print(f'Time simulated: {time.time() - sim_t0}')
+    # analysis.compare_approaches(save_fig=False)
+    analysis.compare_graph_to_best_heuristic(save_fig=False)
 
-    # for n_platoon in [2, 3]:
-    #     print(f'############ N={n_platoon} ############')
-    #     # graph_t0 = time.time()
-    #     # create_graph(n_platoon, graph_includes_fd, [v_orig], v_ff_platoon,
-    #     #              delta_v_dest_lane)
-    #     # print(f'Time to create graph: {time.time() - graph_t0}')
-    #     configuration.Configuration.set_scenario_parameters(
-    #         sim_time=15.0 * n_platoon
-    #     )
-    #     sim_t0 = time.time()
-    #     run_all_scenarios_for_comparison(n_platoon, v_orig, v_ff_platoon,
-    #                                      are_vehicles_cooperative,
-    #                                      graph_includes_fd)
-    #     print(f'Time simulated: {time.time() - sim_t0}')
-    # analysis.compare_approaches(save_fig=True)
-
-    # cost_name = 'accel'
-    # for n_platoon in [2, 3]:
+    # for n_platoon in [2, 3, 4]:
     #     vsg = graph_tools.VehicleStatesGraph.load_from_file(n_platoon,
     #                                                         graph_includes_fd)
-    #     # strategy_map = vsg.precompute_all_minimum_cost_strategies('time')
-    #     vsg.save_minimum_cost_strategies_to_json(cost_name)
+    #     for cost_name in ['time', 'accel']:
+    #         vsg.save_minimum_cost_strategies_to_json(cost_name)
 
     # lcsm = scenarios.LaneChangeScenarioManager()
-    # lcsm.set_lane_change_graph(vsg)
+    # v_ref = {'orig': v_orig, 'platoon': v_ff_platoon, 'dest': v_orig}
+    # delta_x = {'lo': 0., 'ld': 0., 'p': 0., 'fd': 10.}
     # lcsm.set_parameters(n_platoon, are_vehicles_cooperative, v_ref, delta_x)
     # lcsm.run_strategy_comparison_on_test_scenario(
     #     n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
-    #     [4])
+    #     [5, 6])
 
     # load_and_plot_latest_scenario()
 

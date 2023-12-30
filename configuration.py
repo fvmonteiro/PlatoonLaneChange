@@ -5,6 +5,15 @@ from typing import Mapping, Union
 
 import numpy as np
 
+# =================================== Types ================================== #
+LCOrder = list[set[int]]
+CoopOrder = list[int]
+QuantizedState = tuple[int]
+Strategy = tuple[LCOrder, CoopOrder]
+StrategyMap = dict[QuantizedState,
+                   dict[frozenset[int], tuple[Strategy, float]]]
+
+# ================================ Constants ================================= #
 LANE_WIDTH = 4  # [m]
 TIME_HEADWAY = 1.0  # [s]
 STANDSTILL_DISTANCE = 1.0  # [m]
@@ -28,6 +37,7 @@ SHARED_IMAGES_PATH = os.path.join('g:', os.sep, 'My Drive', 'PhD Research',
                                   'results')
 
 
+# ====================== Simulation Parameters =============================== #
 class Configuration:
     # Solver parameters
     solver_max_iter: int = 100

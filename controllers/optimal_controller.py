@@ -554,6 +554,7 @@ class VehicleOptimalController:
                 vehicles, self._controlled_veh_ids, initial_state_per_vehicle)
             veh_group.set_verbose(False)
             veh_group.prepare_to_start_simulation(len(sim_time))
+            # veh_group.initialize_platoons()
             for i in range(len(sim_time) - 1):
                 veh_group.simulate_one_time_step(sim_time[i + 1])
             # Check results

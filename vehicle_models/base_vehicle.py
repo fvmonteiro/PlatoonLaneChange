@@ -9,7 +9,6 @@ import pandas as pd
 
 import configuration as config
 from vehicle_models import dynamics
-import graph_tools
 import operating_modes.system_operating_mode as som
 import operating_modes.base_operating_modes as modes
 
@@ -33,12 +32,13 @@ class BaseVehicle(ABC):
     _iter_counter: int
     _states_history: np.ndarray
     _inputs_history: np.ndarray
-    _origin_leader_id: np.ndarray[int]
-    _destination_leader_id: np.ndarray[int]
-    _destination_follower_id: np.ndarray[int]
-    _aided_vehicle_id: np.ndarray[int]
-    _leader_id: np.ndarray[int]  # vehicle used to determine current accel
-    _derivatives: np.ndarray[float]
+    _origin_leader_id: np.ndarray
+    _origin_follower_id: np.ndarray
+    _destination_leader_id: np.ndarray
+    _destination_follower_id: np.ndarray
+    _aided_vehicle_id: np.ndarray
+    _leader_id: np.ndarray  # vehicle used to determine current accel
+    _derivatives: np.ndarray
     _mode: modes.VehicleMode
     _ocp_interface_type: Type[BaseVehicleInterface]
     _desired_future_follower_id: int
@@ -68,6 +68,7 @@ class BaseVehicle(ABC):
         self.phi_max = 0.1  # max steering wheel angle
         self.brake_max = -4.0
         self.accel_max = 2.0
+        self.brake_comfort_max = -2.0
         self._desired_future_follower_id = -1
         # Note: safe time headway values are used to linearly overestimate
         # the nonlinear safe gaps
@@ -214,6 +215,9 @@ class BaseVehicle(ABC):
     def get_origin_lane_leader_id_history(self) -> np.ndarray:
         return self._origin_leader_id
 
+    def get_origin_lane_follower_id_history(self) -> np.ndarray:
+        return self._origin_follower_id
+
     def get_destination_lane_leader_id_history(self) -> np.ndarray:
         return self._destination_leader_id
 
@@ -225,6 +229,9 @@ class BaseVehicle(ABC):
 
     def get_origin_lane_leader_id(self) -> int:
         return self._origin_leader_id[self._iter_counter]
+
+    def get_origin_lane_follower_id(self) -> int:
+        return self._origin_follower_id[self._iter_counter]
 
     def get_destination_lane_leader_id(self) -> int:
         return self._destination_leader_id[self._iter_counter]
@@ -246,6 +253,12 @@ class BaseVehicle(ABC):
         :return:
         """
         return self._is_lane_change_gap_suitable
+
+    def get_active_brake_max(self) -> float:
+        if self.get_current_leader_id() == self.get_origin_lane_leader_id():
+            return self.brake_max
+        else:
+            return self.brake_comfort_max
 
     def get_relevant_surrounding_vehicle_ids(self) -> dict[str, int]:
         """
@@ -445,6 +458,7 @@ class BaseVehicle(ABC):
         self._states_history = np.zeros([self._n_states, n_samples])
         self._inputs_history = np.zeros([self._n_inputs, n_samples])
         self._origin_leader_id = -np.ones(n_samples, dtype=int)
+        self._origin_follower_id = -np.ones(n_samples, dtype=int)
         self._destination_leader_id = -np.ones(n_samples, dtype=int)
         self._destination_follower_id = -np.ones(n_samples, dtype=int)
         self._aided_vehicle_id = -np.ones(n_samples, dtype=int)
@@ -472,6 +486,8 @@ class BaseVehicle(ABC):
             self._inputs_history = self._inputs_history[
                                    :, :self._iter_counter + 1]
             self._origin_leader_id = self._origin_leader_id[
+                                     :self._iter_counter + 1]
+            self._origin_follower_id = self._destination_follower_id[
                                      :self._iter_counter + 1]
             self._destination_leader_id = self._destination_leader_id[
                                           :self._iter_counter + 1]
@@ -538,23 +554,33 @@ class BaseVehicle(ABC):
     def is_in_a_platoon(self) -> bool:
         return not (self.get_platoon() is None)
 
-    def update_surrounding_vehicles(self, vehicles: Mapping[int, BaseVehicle]):
-        self.find_origin_lane_leader(vehicles.values())
-        self.find_destination_lane_vehicles(vehicles.values())
-        self.find_cooperation_requests(vehicles.values())
+    def update_surrounding_vehicles(self, vehicles: Iterable[BaseVehicle]):
+        self.find_origin_lane_vehicles(vehicles)
+        self.find_destination_lane_vehicles(vehicles)
+        self.find_cooperation_requests(vehicles)
 
-    def find_origin_lane_leader(self, vehicles: Iterable[BaseVehicle]) -> None:
+    def find_origin_lane_vehicles(self, vehicles: Iterable[BaseVehicle]) -> None:
+        """
+        Finds and sets the ids of the origin lane leader and follower.
+        """
         ego_x = self.get_x()
         orig_lane_leader_x = np.inf
+        orig_lane_follower_x = -np.inf
         new_orig_leader_id = -1
+        new_orig_follower_id = -1
         for other_vehicle in vehicles:
             other_x = other_vehicle.get_x()
-            if ((self.get_current_lane() == other_vehicle.get_current_lane()
+            is_on_same_lane = (
+                    self.get_current_lane() == other_vehicle.get_current_lane()
                     or self.is_other_cutting_in(other_vehicle))
-                    and ego_x < other_x < orig_lane_leader_x):
+            if is_on_same_lane and ego_x < other_x < orig_lane_leader_x:
                 orig_lane_leader_x = other_x
-                new_orig_leader_id = other_vehicle._id
+                new_orig_leader_id = other_vehicle.get_id()
+            elif is_on_same_lane and orig_lane_follower_x < other_x < ego_x:
+                orig_lane_follower_x = other_x
+                new_orig_follower_id = other_vehicle.get_id()
         self._origin_leader_id[self._iter_counter] = new_orig_leader_id
+        self._origin_follower_id[self._iter_counter] = new_orig_follower_id
 
     def is_other_cutting_in(self, other_vehicle: BaseVehicle):
         # return False
@@ -598,6 +624,13 @@ class BaseVehicle(ABC):
                     new_incoming_vehicle_id = other_vehicle._id
                     incoming_veh_x = other_x
         self._aided_vehicle_id[self._iter_counter] = new_incoming_vehicle_id
+
+    def detect_collision(self) -> bool:
+        if (self._iter_counter >= 1
+                and (self.get_origin_lane_leader_id()
+                     == self._origin_follower_id[self._iter_counter - 1])):
+            return True
+        return False
 
     def check_surrounding_gaps_safety(
             self, vehicles: Mapping[int, BaseVehicle]):
@@ -649,8 +682,7 @@ class BaseVehicle(ABC):
 
     def initialize_platoons(
             self, vehicles: Mapping[int, BaseVehicle],
-            platoon_lane_change_strategy: int,
-            # strategy_parameters: tuple[list[int], list[int]] = None
+            platoon_lane_change_strategy: int
     ) -> None:
         # [Nov 20] not yet sure there'll be any difference between initializing
         # and updating platoons
@@ -659,18 +691,15 @@ class BaseVehicle(ABC):
     def update_platoons(
             self, vehicles: Mapping[int, BaseVehicle],
             platoon_lane_change_strategy: int,
-            # strategy_parameters: tuple[list[int], list[int]] = None
     ) -> None:
         pass
 
-    def set_platoon_strategy_order(
-            self,
-            strategy_parameters: tuple[list[set[int]], list[int]] = None
-    ) -> None:
+    def set_platoon_lane_change_parameters(self):
         pass
 
-    def set_platoon_strategy_states_graph(
-            self, states_graph: graph_tools.VehicleStatesGraph) -> None:
+    def set_platoon_lane_change_order(
+            self, strategy_order: config.Strategy
+    ) -> None:
         pass
 
     def request_cooperation(self) -> None:

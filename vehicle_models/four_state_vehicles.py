@@ -6,10 +6,10 @@ from typing import Union
 
 import numpy as np
 
+import configuration
 import controllers.longitudinal_controller as long_ctrl
 import controllers.optimal_controller as opt_ctrl
 import controllers.vehicle_controller as veh_ctrl
-import graph_tools
 import operating_modes.concrete_vehicle_modes as modes
 import platoon
 import vehicle_models.base_vehicle as base
@@ -60,6 +60,22 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     def get_has_open_loop_acceleration(self) -> bool:
         return self._has_open_loop_acceleration
 
+    def get_desired_free_flow_speed(
+            self, vehicles: Mapping[int, base.BaseVehicle]) -> float:
+        """
+        Returns the free flow speed except for a platoon leader whose platoon
+        has started changing lanes, but the platoon leader is still at the
+        origin lane. In this situation, we want to prevent the platoon from
+        getting far from the gap.
+        """
+        if (self.is_in_a_platoon() and self.is_platoon_leader()
+                and self.has_lane_change_intention()
+                and self._platoon.has_lane_change_started()):
+            relevant_vehicle_id = (
+                self._platoon.get_platoon_desired_dest_lane_leader_id())
+            return vehicles[relevant_vehicle_id].get_vel()
+        return self._free_flow_speed
+
     def get_vel(self):
         return self.get_a_state_by_name('v')
 
@@ -86,7 +102,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             return -1
         if not self.is_in_a_platoon():
             return self.get_suitable_destination_lane_leader_id()
-        return self.get_platoon().get_desired_dest_lane_leader_id(self.get_id())
+        return self.get_platoon().get_vehicle_desired_dest_lane_leader_id(self.get_id())
 
     def get_suitable_destination_lane_leader_id(self) -> int:
         """
@@ -160,7 +176,10 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             platoon_lane_change_strategy: int,
             # strategy_parameters: tuple[list[int], list[int]] = None
     ) -> None:
-
+        """
+        For now, only used to set platoons at the start of the simulation.
+        Method cannot handle vehicles leaving or joining platoons afterwards.
+        """
         # [Aug 23] We are only simulating simple scenarios. At the start of
         # the simulation, every vehicle will either create its own platoon
         # or join the platoon of the vehicle ahead. Vehicles do not leave or
@@ -203,16 +222,15 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         #             leader_platoon.add_vehicle(self)
         #             self.set_platoon(leader_platoon)
 
-    def set_platoon_strategy_order(
-            self, strategy_order: tuple[list[set[int]], list[int]] = None
-    ) -> None:
-        if self.is_in_a_platoon():
-            self.get_platoon().set_strategy_parameters(strategy_order)
+    def set_platoon_lane_change_parameters(self):
+        if self.is_in_a_platoon() and self.is_platoon_leader():
+            self.get_platoon().set_lane_change_parameters()
 
-    def set_platoon_strategy_states_graph(
-            self, states_graph: graph_tools.VehicleStatesGraph) -> None:
-        if self.is_in_a_platoon():
-            self.get_platoon().set_strategy_states_graph(states_graph)
+    def set_platoon_lane_change_order(
+            self, strategy_order: configuration.Strategy
+    ) -> None:
+        if self.is_in_a_platoon() and self.is_platoon_leader():
+            self.get_platoon().set_lane_change_order(strategy_order)
 
     def _determine_inputs(self, open_loop_controls: np.ndarray,
                           vehicles: Mapping[int, FourStateVehicle]):
@@ -378,7 +396,7 @@ class ClosedLoopVehicle(FourStateVehicle):
 
     _controller_type = veh_ctrl.ClosedLoopControl
     _platoon: platoon.ClosedLoopPlatoon
-    _platoon_lane_change_graph: graph_tools.VehicleStatesGraph
+    # _platoon_lane_change_graph: graph_tools.VehicleStatesGraph
 
     def __init__(self, can_change_lanes: bool,
                  has_open_loop_acceleration: bool = False,
@@ -388,9 +406,9 @@ class ClosedLoopVehicle(FourStateVehicle):
         self._platoon_type = platoon.ClosedLoopPlatoon
         self.set_mode(modes.CLLaneKeepingMode())
 
-    def set_platon_lane_change_graph(
-            self, platoon_lane_change_graph: graph_tools.VehicleStatesGraph):
-        self._platoon_lane_change_graph = platoon_lane_change_graph
+    # def set_platon_lane_change_graph(
+    #         self, platoon_lane_change_graph: graph_tools.VehicleStatesGraph):
+    #     self._platoon_lane_change_graph = platoon_lane_change_graph
 
     def get_platoon(self) -> Union[None, platoon.ClosedLoopPlatoon]:
         try:

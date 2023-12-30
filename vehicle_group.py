@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 
 import controllers.optimal_controller as opt_ctrl
-import graph_tools
 import platoon_lane_change_strategies as lc_strategies
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
@@ -19,8 +18,8 @@ V = TypeVar('V', bound=base.BaseVehicle)
 class VehicleGroup:
     """ Class to help manage groups of vehicles """
 
-    front_most_vehicle: base.BaseVehicle
-    rear_most_vehicle: base.BaseVehicle
+    front_most_dest_lane_vehicle: base.BaseVehicle
+    rear_most_dest_lane_vehicle: base.BaseVehicle
 
     def __init__(self):
         self.vehicles: dict[int, base.BaseVehicle] = {}
@@ -33,7 +32,8 @@ class VehicleGroup:
         # pairs.
         self.mode_sequence: som.ModeSequence = som.ModeSequence()
         self._platoon_lane_change_strategy = 0
-        self._vehicle_states_graph = None
+        # self._vehicle_states_graph = None
+        # self._strategy_map = None
         self._maneuver_order = None
         self._is_verbose = True
 
@@ -197,7 +197,6 @@ class VehicleGroup:
     def set_platoon_lane_change_strategy(
             self, strategy_number: int):
         self._platoon_lane_change_strategy = strategy_number
-        # self._strategy_parameters = strategy_parameters
 
     def set_predefined_lane_change_order(
             self, lane_change_order: list[set[int]],
@@ -207,11 +206,14 @@ class VehicleGroup:
     def set_platoon_lane_change_order(self, lane_change_order: list[set[int]],
                                       cooperation_order: list[int]):
         p1 = self.get_vehicle_by_name('p1')
-        p1.set_platoon_strategy_order((lane_change_order, cooperation_order))
+        p1.set_platoon_lane_change_order((lane_change_order, cooperation_order))
 
-    def set_vehicle_states_graph(self,
-                                 states_graph: graph_tools.VehicleStatesGraph):
-        self._vehicle_states_graph = states_graph
+    # def set_vehicle_states_graph(self,
+    #                              states_graph: graph_tools.VehicleStatesGraph):
+    #     self._vehicle_states_graph = states_graph
+
+    # def set_strategy_map(self, strategy_map: graph_tools.StrategyMap):
+    #     self._strategy_map = strategy_map
 
     def set_verbose(self, value: bool):
         self._is_verbose = value
@@ -302,27 +304,14 @@ class VehicleGroup:
         self.mode_sequence = som.ModeSequence()
         for vehicle in self.vehicles.values():
             vehicle.prepare_to_start_simulation(n_samples)
-        self.front_most_vehicle = max(self.vehicles.values(),
-                                      key=lambda x: x.get_x())
-        self.rear_most_vehicle = min(self.vehicles.values(),
-                                     key=lambda x: x.get_x())
+        self.initialize_platoons()
 
-    # def create_vehicle_array_from_classes(
-    #         self, vehicle_classes: Iterable[type[base.BaseVehicle]]):
-    #     """
-    #
-    #     Populates the list of vehicles following the given classes
-    #     :param vehicle_classes: Class of each vehicle instances
-    #     :return:
-    #     """
-    #     if self.get_n_vehicles() > 0:
-    #         raise AttributeError("Trying to create a vehicle array in a "
-    #                              "vehicle group that was already initialized")
-    #     self.vehicles = {}
-    #     self.sorted_vehicle_ids = []
-    #     for veh_class in vehicle_classes:
-    #         vehicle = veh_class()
-    #         self.add_vehicle(vehicle)
+        dest_lane_vehicles = [veh for veh in self.vehicles.values()
+                              if veh.get_current_lane() > 0]
+        self.front_most_dest_lane_vehicle = max(dest_lane_vehicles,
+                                                key=lambda x: x.get_x())
+        self.rear_most_dest_lane_vehicle = min(dest_lane_vehicles,
+                                               key=lambda x: x.get_x())
 
     def fill_vehicle_array(self, vehicles: Iterable[base.BaseVehicle]):
         if self.get_n_vehicles() > 0:
@@ -414,14 +403,6 @@ class VehicleGroup:
                 x[veh_id], y[veh_id], theta[veh_id], v[veh_id]))
         return np.array(full_state)
 
-    # def put_vehicles_in_platoon(self, platoon_vehicles: list[base.BaseVehicle]):
-    #     platoon_vehicles[0].set_platoon(platoon.ClosedLoopPlatoon(
-    #         platoon_vehicles[0], 4))
-    #     leader_platoon = platoon_vehicles[0].get_platoon()
-    #     for i in range(1, len(platoon_vehicles)):
-    #         leader_platoon.add_vehicle(platoon_vehicles[i])
-    #         platoon_vehicles[i].set_platoon(leader_platoon)
-
     def initialize_platoons(self):
         """
         Based on vehicles parameters and initial position, create platoons
@@ -433,32 +414,34 @@ class VehicleGroup:
 
         # Then, we run their internal algorithms to form platoons
         for veh_id, veh in self.vehicles.items():
-            veh.update_platoons(
+            veh.initialize_platoons(
                 self.vehicles, self._platoon_lane_change_strategy)
 
-        # Some strategy parameters depend on the number of vehicles in the
+        # TODO: poor organization. The platoon strategy only has to be set once
+        #  per platoon. The code is also confusing cause self._maneuver_order
+        #  is sometimes None (by design)
+        # Strategy parameters depend on the number of vehicles in the
         # platoon. So, we can only set them after forming the platoons
-        if self._vehicle_states_graph is None:
-            for veh in self.vehicles.values():
-                veh.set_platoon_strategy_order(self._maneuver_order)
-        if self._vehicle_states_graph is not None:
-            for veh in self.vehicles.values():
-                veh.set_platoon_strategy_states_graph(
-                    self._vehicle_states_graph)
+        for veh in self.vehicles.values():
+            if self._maneuver_order is None:
+                veh.set_platoon_lane_change_parameters()
+            else:
+                veh.set_platoon_lane_change_order(self._maneuver_order)
 
     def simulate_one_time_step(
             self, new_time: float,
-            open_loop_controls: Mapping[int, np.ndarray] = None):
+            open_loop_controls: Mapping[int, np.ndarray] = None,
+            detect_collision: bool = False):
         if open_loop_controls is None:
             open_loop_controls = {}
 
-        # The separate for loop ensure that all vehicles use information from
+        # The separate for loops ensure that all vehicles use information from
         # the same time step
 
         # We check which vehicles are physically close to each other
         # and, given that, each vehicle decides who's its target leader and
         # whether it is safe to perform a lane change
-        self.update_surrounding_vehicles()
+        self.update_surrounding_vehicles(detect_collision)
         for veh in self.vehicles.values():
             veh.update_target_leader(self.vehicles)
             if veh.has_lane_change_intention():
@@ -475,8 +458,8 @@ class VehicleGroup:
 
         # Next, the dynamics and controls are computed
         for veh_id, veh in self.vehicles.items():
-            veh.update_platoons(
-                self.vehicles, self._platoon_lane_change_strategy)
+            # veh.update_platoons(
+            #     self.vehicles, self._platoon_lane_change_strategy)
             veh.update_mode(self.vehicles)
             veh.determine_inputs(open_loop_controls.get(veh_id, []),
                                  self.vehicles)
@@ -503,14 +486,16 @@ class VehicleGroup:
     def is_platoon_out_of_range(self):
         if (self._platoon_lane_change_strategy ==
                 lc_strategies.LastFirstStrategy.get_id()):
-            return np.any(
-                [self.vehicles[veh_id].get_x() < self.rear_most_vehicle.get_x()
-                 for veh_id in self.lane_changing_vehicle_ids])
+            for veh_id in self.lane_changing_vehicle_ids:
+                if (self.vehicles[veh_id].get_x()
+                        < self.rear_most_dest_lane_vehicle.get_x()):
+                    return True
         if (self._platoon_lane_change_strategy ==
                 lc_strategies.LeaderFirstReverseStrategy.get_id()):
-            return np.any(
-                [self.vehicles[veh_id].get_x() > self.front_most_vehicle.get_x()
-                 for veh_id in self.lane_changing_vehicle_ids])
+            for veh_id in self.lane_changing_vehicle_ids:
+                if (self.vehicles[veh_id].get_x()
+                        > self.front_most_dest_lane_vehicle.get_x()):
+                    return True
 
     def write_vehicle_states(self, time,
                              state_vectors: Mapping[int, np.ndarray],
@@ -527,9 +512,17 @@ class VehicleGroup:
             self.vehicles[veh_id].write_state_and_input(
                 time, state_vectors[veh_id], optimal_inputs[veh_id])
 
-    def update_surrounding_vehicles(self):
+    def update_surrounding_vehicles(self, detect_collision: bool = False):
         for ego_vehicle in self.vehicles.values():
-            ego_vehicle.update_surrounding_vehicles(self.vehicles)
+            ego_vehicle.update_surrounding_vehicles(self.vehicles.values())
+            if detect_collision and ego_vehicle.detect_collision():
+                # TODO: raise error, warning?
+                veh1 = ego_vehicle.get_name()
+                veh2 = self.vehicles[ego_vehicle.get_origin_lane_leader_id()
+                                     ].get_name()
+                print(f' ==== COLLISION DETECTED ====\n'
+                      f't={self.get_current_time()} between vehicles '
+                      f'{veh1} and {veh2}')
 
     def update_states(self, new_time):
         for vehicle in self.vehicles.values():
@@ -562,7 +555,9 @@ class VehicleGroup:
         for vehicle in ocv:
             vehicle.set_centralized_controller(centralized_controller)
 
-    def compute_acceleration_cost(self, include_followers: bool = False):
+    def compute_acceleration_cost(
+            self, include_followers: bool = False,
+            include_post_maneuver_adjustments: bool = False):
         """
         Returns the sum of the acceleration costs (integral of squared
         acceleration) of platoon vehicles and, possibly, immediate followers
@@ -581,9 +576,14 @@ class VehicleGroup:
         else:
             relevant_ids = lc_vehicle_ids
         accel_cost = 0
+        if include_post_maneuver_adjustments:
+            final_time = self.get_simulated_time()[-1]
+        else:
+            final_time = np.max(self.get_lc_end_times())
+        indices = self.get_simulated_time() <= final_time
         for veh_id in relevant_ids:
-            time = self.vehicles[veh_id].get_simulated_time()
-            accel = self.vehicles[veh_id].get_an_input_history('a')
+            time = self.vehicles[veh_id].get_simulated_time()[indices]
+            accel = self.vehicles[veh_id].get_an_input_history('a')[indices]
             accel_cost += np.trapz(np.square(accel), time)
         return accel_cost
 

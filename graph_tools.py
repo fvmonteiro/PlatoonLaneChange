@@ -19,9 +19,6 @@ import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
 
 
-Strategy = tuple[list[set[int]], list[int]]
-
-
 class PlatoonLCTracker:
     """
     Supporting class to make it easier to keep track of which vehicles have
@@ -66,7 +63,7 @@ class PlatoonLCTracker:
 
 class VehicleStatesGraph:
 
-    _empty_initial_state: tuple[int] = (0,)
+    _empty_initial_state: configuration.QuantizedState = (0,)
 
     def __init__(self, n_platoon: int, has_fd: bool):
         n_vehicles = n_platoon + 2 + has_fd
@@ -75,21 +72,9 @@ class VehicleStatesGraph:
         self._has_fd = has_fd
 
         self.states_graph = nx.DiGraph()
-        self._initial_states: set[tuple[int]] = set()
-        self._initial_state_per_vehicle: dict[int, tuple[int]] = dict()
-
-        # There are several ways of getting the total number of nodes.
-        # We could avoid iteration by using a formula:
-        # N![sum_{i=0}^{N} i!/(N-i-1)!]
-        # but this gives us less information to debug (and possible numerical
-        # issues?)
-        # children_per_level = [(self.n_platoon - i) * i
-        #                       for i in range(self.n_platoon)]
-        # children_per_level[0] = self.n_platoon
-        # nodes_per_level = [1]
-        # for n in children_per_level:
-        #     nodes_per_level.append(nodes_per_level[-1] * n)
-        # self.n_nodes_per_root = sum(nodes_per_level)
+        self._initial_states: set[configuration.QuantizedState] = set()
+        self._initial_state_per_vehicle: \
+            dict[int, configuration.QuantizedState] = dict()
 
     @staticmethod
     def load_from_file(n_platoon: int, has_fd: bool) -> VehicleStatesGraph:
@@ -106,7 +91,8 @@ class VehicleStatesGraph:
         return f'graph_{n_platoon}_vehicles_with{"" if has_fd else "out"}_fd'
 
     @staticmethod
-    def load_strategies(n_platoon: int, cost_name: str):
+    def load_strategies(n_platoon: int, cost_name: str
+                        ) -> configuration.StrategyMap:
         file_name = '_'.join(['min', cost_name, 'strategies_for',
                               str(n_platoon), 'vehicles.json'])
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
@@ -114,20 +100,20 @@ class VehicleStatesGraph:
 
         with open(file_path) as f:
             raw_data: list[dict] = json.load(f)
-            strategy_map = defaultdict(dict)
+            strategy_map: configuration.StrategyMap = defaultdict(dict)
             for d in raw_data:
                 key1 = tuple(d['root'])
                 key2 = frozenset(d['first_mover_set'])
                 lc_order = [set(i) for i in d['lc_order']]
-                strategy_map[key1][key2] = (lc_order, d['coop_order'])
+                strategy_map[key1][key2] = ((lc_order, d['coop_order']),
+                                            d[cost_name])
+        return strategy_map
 
     def create_graph(self, vel_orig_lane: Sequence[float],
                      vel_ff_platoon: float, delta_v_dest_lane: Sequence[float]):
 
         delta_x_lo = 0.
 
-        # self.n_nodes_per_root *= (len(orig_lane_vel) * self.n_platoon)
-        # print(f'Creating graph with approx. {self.n_nodes_per_root} nodes')
         print(f'Creating graph ')
 
         visited_states = set()
@@ -157,8 +143,8 @@ class VehicleStatesGraph:
                 self._explore_until_maneuver_completion(
                     nodes, visited_states, free_flow_speeds)
 
-    def _add_new_tree_to_graph(self, root: tuple[int], v0_lo: float,
-                               v0_ld: float, v0_fd: float = None):
+    def _add_new_tree_to_graph(self, root: configuration.QuantizedState, 
+                               v0_lo: float, v0_ld: float, v0_fd: float = None):
 
         visited_states = set(self.states_graph.nodes)
         v_ff_platoon = 1.2 * v0_lo
@@ -204,45 +190,28 @@ class VehicleStatesGraph:
                              f'starting the maneuver by veh position '
                              f'{vehicle_position}')
 
-    def find_minimum_time_maneuver(
-            self, cost_name: str) -> tuple[Strategy, float]:
-        # dag: nx.DiGraph = self.states_graph
+    def find_minimum_cost_maneuver(
+            self, cost_name: str) -> tuple[configuration.Strategy, float]:
         initial_states = set(self._initial_state_per_vehicle.values())
         initial_states.discard(self._empty_initial_state)
 
-        # costs = []
-        # paths = []
+        all_costs = []  # for debugging
+        all_strategies = []  # for debugging
         opt_cost = np.inf
-        opt_path = None
+        opt_strategy = None
         for root in initial_states:
-            path, cost = self.find_minimum_cost_strategy_from_node(root,
-                                                                   cost_name)
+            strategy, cost = self.find_minimum_cost_strategy_from_node(
+                root, cost_name)
+            all_costs.append(cost)
+            all_strategies.append(strategy)
             if cost < opt_cost:
                 opt_cost = cost
-                opt_path = path
-            # for node in nx.descendants(dag, root):
-            #     if dag.nodes[node].get('is_terminal', False):
-            #         c, p = nx.single_source_dijkstra(dag, root, node,
-            #                                          weight=cost)
-            #         costs.append(c)
-            #         # Get the lc and coop sequences in the path
-            #         lc_order, coop_order = self.get_maneuver_order_from_path(p)
-            #         # lc_order = []
-            #         # coop_order = []
-            #         # for source_node, target_node in nx.utils.pairwise(p):
-            #         #     edge = dag[source_node][target_node]
-            #         #     lc_order.append(edge['lc_vehicles'])
-            #         #     coop_order.append(edge['coop_vehicle'])
-            #         paths.append((lc_order, coop_order))
-            #         if c < opt_cost:
-            #             opt_cost = c
-            #             opt_path = paths[-1]
-        return opt_path, opt_cost
+                opt_strategy = strategy
+        return opt_strategy, opt_cost
 
     def find_minimum_cost_maneuver_order_given_first_mover(
             self, first_mover_platoon_positions: set[int], cost_name: str
-    ) -> tuple[Strategy, float]:
-
+    ) -> tuple[configuration.Strategy, float]:
         # Get the initial state as seen by the first mover group
         dag: nx.DiGraph = self.states_graph
         initial_state_candidates = {self._initial_state_per_vehicle[p]
@@ -263,20 +232,7 @@ class VehicleStatesGraph:
         if first_move_state is None:
             raise nx.NetworkXNoPath
 
-        # Find the minimum path between the first-movers lane change and the
-        # entire platoon lane change
-        # costs = []
-        # paths = []
-        # opt_cost = np.inf
-        # opt_path = None
-
-        # if dag.nodes[first_move_state].get('is_terminal', False):
-        #     lc_order = [first_mover_platoon_positions.copy()]
-        #     coop_order = [-1]
-        #     return (lc_order, coop_order), 0.
-
         opt_strategy = ([first_mover_platoon_positions.copy()], [-1])
-        # opt_cost = 0.
         opt_strategy_from_first, opt_cost_from_first = (
             self.find_minimum_cost_strategy_from_node(first_move_state,
                                                       cost_name)
@@ -284,51 +240,28 @@ class VehicleStatesGraph:
         opt_strategy[0].extend(opt_strategy_from_first[0])
         opt_strategy[1].extend(opt_strategy_from_first[1])
         opt_cost = opt_cost_from_first
-        return opt_strategy, opt_cost
-        # for node in nx.descendants(dag, first_move_state):
-        #     if dag.nodes[node].get('is_terminal', False):
-        #         lc_order = [first_mover_platoon_positions.copy()]
-        #         coop_order = [-1]
-        #         c, p = nx.single_source_dijkstra(dag, first_move_state,
-        #                                          node, weight=cost_name)
-        #         costs.append(c)
-        #         # Get the lc and coop sequences in the path
-        #         lc_order_from_first, coop_order_from_first = (
-        #             self.get_maneuver_order_from_path(p))
-        #         lc_order.extend(lc_order_from_first)
-        #         coop_order.extend(coop_order_from_first)
-        #         paths.append((lc_order, coop_order))
-        #         if c < opt_cost:
-        #             opt_cost = c
-        #             opt_path = paths[-1]
-        # return opt_path, opt_cost
 
-    # def precompute_all_minimum_cost_strategies(
-    #         self, cost_name: str) -> dict[tuple[int],
-    #                                       dict[frozenset[int], Strategy]]:
-    #     dag = self.states_graph
-    #     strategy_map: dict[tuple[int], dict[frozenset[int], Strategy]] = (
-    #         defaultdict(dict)
-    #     )
-    #     strategy_map_for_json = []
-    #
-    #     for root in self._initial_states:
-    #         for next_node in dag.successors(root):
-    #             first_mover_set = dag[root][next_node]['lc_vehicles'].copy()
-    #             strategy = ([first_mover_set], [-1])
-    #             strategy_from_node, _ = (
-    #                 self.find_minimum_cost_strategy_from_node(
-    #                     next_node, cost_name)
-    #             )
-    #             strategy[0].extend(strategy_from_node[0])
-    #             strategy[1].extend(strategy_from_node[1])
-    #             strategy_map[root][frozenset(first_mover_set)] = strategy
-    #
-    #             strategy_map_for_json.append(
-    #                 {'root': root, 'first_mover_set': first_mover_set,
-    #                  'lc_order': [list(s) for s in strategy[0]],
-    #                  'coop_order': strategy[1]})
-    #     return strategy_map
+        return opt_strategy, opt_cost
+
+    def find_minimum_cost_maneuver_order_given_first_mover_2(
+            self, first_mover_platoon_positions: set[int],
+            strategy_map: configuration.StrategyMap
+    ) -> tuple[configuration.Strategy, float]:
+        # Get the initial state as seen by the first mover group
+        initial_state_candidates = {self._initial_state_per_vehicle[p]
+                                    for p in first_mover_platoon_positions}
+        if len(initial_state_candidates) > 1:
+            # If multiple first-movers, they should all 'see' the same initial
+            # state, i.e., the same position for ld
+            raise RuntimeError('More than one possible initial state')
+        initial_state = initial_state_candidates.pop()
+
+        opt_strategy = strategy_map[initial_state][
+            frozenset(first_mover_platoon_positions)][0]
+        opt_cost = strategy_map[initial_state][
+            frozenset(first_mover_platoon_positions)][1]
+
+        return opt_strategy, opt_cost
 
     def save_self_to_file(self):
         file_name = VehicleStatesGraph.get_graph_file_name(self.n_platoon,
@@ -348,7 +281,7 @@ class VehicleStatesGraph:
             for next_node in dag.successors(root):
                 first_mover_set = dag[root][next_node]['lc_vehicles'].copy()
                 strategy = ([first_mover_set], [-1])
-                strategy_from_node, _ = (
+                strategy_from_node, cost = (
                     self.find_minimum_cost_strategy_from_node(
                         next_node, cost_name)
                 )
@@ -358,7 +291,8 @@ class VehicleStatesGraph:
                     {'root': [int(i) for i in root],
                      'first_mover_set': list(first_mover_set),
                      'lc_order': [list(s) for s in strategy[0]],
-                     'coop_order': strategy[1]})
+                     'coop_order': strategy[1], cost_name: cost}
+                )
 
         json_data = json.dumps(strategy_map, indent=2)
         file_name = '_'.join(['min', cost_name, 'strategies_for',
@@ -367,6 +301,7 @@ class VehicleStatesGraph:
                                  'strategy_maps', file_name)
         with open(file_path, 'w') as file:
             file.write(json_data)
+            print('Saved file ', file_name)
 
     def _create_vehicle_group(self, include_ld: bool = True
                               ) -> vg.ShortSimulationVehicleGroup:
@@ -418,7 +353,7 @@ class VehicleStatesGraph:
     def _create_initial_states(
             self, v0_lo: float, v0_platoon: float, v0_ld: float, v0_fd: float,
             delta_x_lo: float
-    ) -> list[tuple[int]]:
+    ) -> list[configuration.QuantizedState]:
         """
         The root node is the quantized states of all platoon vehicles and the
         two destination lane vehicles between which the platoon will move.
@@ -450,7 +385,7 @@ class VehicleStatesGraph:
         pN = vehicle_group.get_vehicle_by_name('p' + str(self.n_platoon))
         dx = self.state_quantizer.dx
         possible_ld_x = np.arange(pN.get_x(), lo.get_x() + 2*dx, dx)
-        quantized_initial_states: list[tuple[int]] = []
+        quantized_initial_states: list[configuration.QuantizedState] = []
         for ld_x in possible_ld_x:
             ld.set_initial_state(ld_x, configuration.LANE_WIDTH, 0., v0_ld)
             if self._has_fd:
@@ -527,7 +462,7 @@ class VehicleStatesGraph:
                         #       [veh.get_name() for veh in next_vehs_to_move])
 
                         success = self.simulate_till_lane_change(
-                            vehicle_group, free_flow_speeds, initial_state,
+                            vehicle_group, free_flow_speeds,
                             next_vehs_to_move, next_veh_to_coop)
                         # data = vehicle_group.to_dataframe()
                         # analysis.plot_trajectory(data)
@@ -552,7 +487,7 @@ class VehicleStatesGraph:
 
     def simulate_till_lane_change(
             self, vehicle_group: vg.ShortSimulationVehicleGroup,
-            free_flow_speeds: Sequence[float], initial_state: np.ndarray,
+            free_flow_speeds: Sequence[float],
             lc_vehicles: Iterable[fsv.ShortSimulationVehicle],
             next_to_coop: fsv.ShortSimulationVehicle) -> bool:
 
@@ -601,7 +536,8 @@ class VehicleStatesGraph:
         return np.all(success)
 
     def _update_graphs(
-            self, source_state: tuple[int], dest_state: tuple[int],
+            self, source_state: configuration.QuantizedState,
+            dest_state: configuration.QuantizedState,
             transition_time: float, accel_cost: float,
             lc_vehicles: Iterable[int], coop_vehicle: int):
         """
@@ -725,11 +661,11 @@ class VehicleStatesGraph:
             self._order_values(lo_states, platoon_states, ld_states, fd_states))
 
     def find_minimum_cost_strategy_from_node(
-            self, starting_node: tuple[int], cost_name: str
-    ) -> tuple[Strategy, float]:
+            self, starting_node: configuration.QuantizedState, cost_name: str
+    ) -> tuple[configuration.Strategy, float]:
         dag: nx.DiGraph = self.states_graph
-        # costs = []
-        # paths = []
+        all_costs = []  # for debugging
+        all_strategies = []  # for debugging
         opt_cost = np.inf
         opt_strategy = None
 
@@ -740,17 +676,15 @@ class VehicleStatesGraph:
             if dag.nodes[node].get('is_terminal', False):
                 cost, path = nx.single_source_dijkstra(
                     dag, starting_node, node, weight=cost_name)
-                # costs.append(cost)
-                # Get the lc and coop sequences in the path
-                # lc_order, coop_order = (
-                #     self.get_maneuver_order_from_path(path))
-                # paths.append((lc_order, coop_order))
+                strategy = self.get_maneuver_order_from_path(path)
+                all_costs.append(cost)
+                all_strategies.append(strategy)
                 if cost < opt_cost:
                     opt_cost = cost
-                    opt_strategy = self.get_maneuver_order_from_path(path)
+                    opt_strategy = strategy
         return opt_strategy, opt_cost
 
-    def get_maneuver_order_from_path(self, path) -> Strategy:
+    def get_maneuver_order_from_path(self, path) -> configuration.Strategy:
         lc_order = []
         coop_order = []
         for source_node, target_node in nx.utils.pairwise(path):
@@ -800,7 +734,8 @@ class StateQuantizer:
         self._shift = np.tile(shift, n_vehicles)
         self._zero_idx = np.isinf(self._intervals)
 
-    def quantize_state(self, full_system_state: Sequence[float]) -> tuple[int]:
+    def quantize_state(self, full_system_state: Sequence[float]
+                       ) -> configuration.QuantizedState:
         """
         Computes the quantized version of the system state (stack of all
         vehicle states)

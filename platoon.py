@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping, Sequence
 # import bisect
 import numpy as np
 
-# import configuration
-import graph_tools
-# import controllers.optimal_controller as opt_ctrl
+import configuration
 import platoon_lane_change_strategies as lc_strategies
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
@@ -66,16 +65,13 @@ class Platoon:
         else:
             return -1
 
-    def get_desired_dest_lane_leader_id(self, ego_id) -> int:
+    def get_vehicle_desired_dest_lane_leader_id(self, ego_id) -> int:
         """
-        Defines sequence of leaders during a coordinated lane change maneuver.
-        Only effective if platoon vehicles have a closed loop acceleration
-        policy, i.e., not optimal control
+        Defines the desired destination lane leader for vehicle ego_id based
+        on the platoon lane change strategy.
         :param ego_id:
         :return:
         """
-        # Coding the strategies becomes complicated when we want to control
-        # when each vehicle increases the desired time headway to its leader.
         ego_position = self._id_to_position_map[ego_id]
         return self.lane_change_strategy.get_desired_dest_lane_leader_id(
             ego_position)
@@ -83,6 +79,13 @@ class Platoon:
     def get_aided_vehicle_id(self, ego_id) -> int:
         ego_position = self._id_to_position_map[ego_id]
         return self.lane_change_strategy.get_incoming_vehicle_id(ego_position)
+
+    def get_platoon_desired_dest_lane_leader_id(self) -> int:
+        for veh in self.vehicles:
+            if veh.get_desired_destination_lane_leader_id() > -1:
+                return veh.get_desired_destination_lane_leader_id()
+        warnings.warn('No platoon vehicle has a desired dest lane leader')
+        return -1
 
     def get_strategy(self) -> lc_strategies.LaneChangeStrategy:
         return self.lane_change_strategy
@@ -94,18 +97,14 @@ class Platoon:
         self.lane_change_strategy = lc_strategies.strategy_map[
             lane_change_strategy](self.vehicles)
 
-    def set_strategy_parameters(
-            self, strategy_parameters: tuple[list[set[int]], Sequence[int]] = None
-    ) -> None:
-        if strategy_parameters:
-            self.lane_change_strategy.set_maneuver_order(
-                strategy_parameters[0], strategy_parameters[1])
-        else:
-            self.lane_change_strategy.set_maneuver_order()
+    def set_lane_change_parameters(self):
+        self.lane_change_strategy.set_parameters()
 
-    def set_strategy_states_graph(self,
-                                  state_graph: graph_tools.VehicleStatesGraph):
-        self.lane_change_strategy.set_states_graph(state_graph)
+    def set_lane_change_order(
+            self, strategy_parameters: configuration.Strategy
+    ) -> None:
+        self.lane_change_strategy.set_maneuver_order(
+            strategy_parameters[0], strategy_parameters[1])
 
     def add_vehicle(self, new_vehicle: fsv.FourStateVehicle):
         """
@@ -119,9 +118,6 @@ class Platoon:
                 or new_vehicle.get_x() < self.vehicles[-1].get_x()):
             self._id_to_position_map[new_vehicle.get_id()] = len(self.vehicles)
             self.vehicles.append(new_vehicle)
-        # elif new_vehicle.get_x() < self.vehicles[-1].get_x():
-        #     self._id_to_position_map[new_vehicle.get_id()] = len(self.vehicles)
-        #     self.vehicles.append(new_vehicle)
         else:
             # bisect.insort(self.vehicles, new_vehicle, key=lambda v: v.get_x())
             idx = np.searchsorted([veh.get_x() for veh in self.vehicles],

@@ -12,7 +12,7 @@ class LongitudinalController:
 
     def __init__(self, vehicle: fsv.FourStateVehicle):
         self.vehicle = vehicle
-        self.kg = 0.5
+        self.kg = 0.2
         self.kv = 0.5
 
     def compute_acceleration(self, vehicles: Mapping[int, base.BaseVehicle]
@@ -21,7 +21,7 @@ class LongitudinalController:
         Computes acceleration for the ego vehicle following a leader
         """
         v_ego = self.vehicle.get_vel()
-        v_ff = self.vehicle.get_free_flow_speed()
+        v_ff = self.vehicle.get_desired_free_flow_speed(vehicles)
         if not self.vehicle.has_leader():
             accel = self.compute_velocity_control(v_ff, v_ego)
         else:
@@ -29,7 +29,7 @@ class LongitudinalController:
             gap = self.vehicle.compute_gap_to_a_leader(leader)
             v_leader = leader.get_vel()
             accel = self.compute_gap_control(gap, v_ego, v_leader)
-        accel = self.saturate_accel(self.saturate_speed(v_ego, v_ff, accel))
+        accel = self.saturate_accel(accel, v_ego, v_ff)
         return accel
 
     def compute_acceleration_from_interface(
@@ -46,19 +46,23 @@ class LongitudinalController:
             v_leader = vehicle_interface.select_state_from_vector(
                 leader_states, 'v')
             accel = self.compute_gap_control(gap, v_ego, v_leader)
-        accel = self.saturate_accel(self.saturate_speed(v_ego, v_ff, accel))
+        accel = self.saturate_accel(accel, v_ego, v_ff)
         return accel
 
-    def saturate_speed(self, v_ego, v_ff, desired_accel) -> float:
+    def saturate_accel(self, desired_accel: float, v_ego: float, v_ff: float
+                       ) -> float:
+        """
+        Saturates the acceleration based on max and min accel values, and also
+        based on the current speed. This prevents the vehicle from traveling
+        with negative or above max speed
+        """
         if v_ego >= v_ff and desired_accel > 0:
-            return self.compute_velocity_control(v_ff, v_ego)
+            accel = self.compute_velocity_control(v_ff, v_ego)
         elif v_ego <= 0 and desired_accel < 0:
-            return 0.
+            accel = 0.
         else:
-            return desired_accel
-
-    def saturate_accel(self, desired_accel):
-        return min(max(self.vehicle.brake_max, desired_accel),
+            accel = desired_accel
+        return min(max(self.vehicle.get_active_brake_max(), accel),
                    self.vehicle.accel_max)
 
     def compute_accel_to_a_leader(
