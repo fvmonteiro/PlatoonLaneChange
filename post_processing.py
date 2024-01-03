@@ -1,74 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-# from typing import Union
+import os
+import shutil
 
 import numpy as np
 import pandas as pd
 
 import configuration as config
-# import vehicle_models.base_vehicle as base
-
-
-# TODO: still deciding if these 'to_dataframe' methods belong here or within
-#  the vehicle/vehicle_group classes.
-#  A: easier to keep been in the vehicle classes to avoid circular imports
-
-# def vehicle_to_dataframe(vehicle: base.BaseVehicle):
-#     data = np.concatenate([vehicle.get_simulated_time().reshape(1, -1),
-#                            vehicle.get_state_history(),
-#                            vehicle.get_input_history()])
-#     columns = (['t'] + [s for s in vehicle.get_state_names()]
-#                + [i for i in vehicle.get_input_names()])
-#     veh_data = pd.DataFrame(data=np.transpose(data), columns=columns)
-#     veh_data['id'] = vehicle.get_id()
-#     veh_data['name'] = vehicle.get_name()
-#
-#     def _set_surrounding_vehicles_ids_to_df(df, col_name, col_value):
-#         if len(col_value) == 1:
-#             df[col_name] = col_value[0]
-#         else:
-#             df[col_name] = col_value
-#
-#     _set_surrounding_vehicles_ids_to_df(
-#         veh_data, 'orig_lane_leader_id',
-#         vehicle.get_origin_lane_leader_id_history())
-#     _set_surrounding_vehicles_ids_to_df(
-#         veh_data, 'dest_lane_leader_id',
-#         vehicle.get_destination_lane_leader_id_history())
-#     _set_surrounding_vehicles_ids_to_df(
-#         veh_data, 'dest_lane_follower_id',
-#         vehicle.get_destination_lane_follower_id_history())
-#     return veh_data
-
-
-# def vehicles_to_dataframe(vehicles: Union[Iterable[base.BaseVehicle],
-#                                           vg.VehicleGroup]):
-#     if isinstance(vehicles, vg.VehicleGroup):
-#         vehicles = vehicles.get_all_vehicles()
-#
-#     data_per_vehicle = []
-#     for vehicle in vehicles:
-#         vehicle_df = vehicle_to_dataframe(vehicle)
-#         data_per_vehicle.append(vehicle_df)
-#     all_data = pd.concat(data_per_vehicle).reset_index(drop=True)
-#     return all_data.fillna(0)
-
-
-# def find_maneuver_completion_time(vehicles: Iterable[base.BaseVehicle]
-#                                   ) -> list[float]:
-#     final_times = []
-#     for veh in vehicles:
-#         y_error = veh.get_target_y() - veh.get_y_history()
-#         # argmax returns the idx of the first True (1)
-#         idx = np.argmax(np.abs(y_error) < 0.5)
-#         # argmax returns 0 if there is no True value, so we check to see if
-#         # the vehicle ended at the target lane
-#         if idx == 0 and veh.get_target_lane() != veh.get_current_lane():
-#             idx = - 1
-#         final_times.append(veh.get_simulated_time()[idx])
-#
-#     return final_times
 
 
 def compute_acceleration_costs(
@@ -154,3 +93,38 @@ def compute_all_relative_values(data: pd.DataFrame):
 def compute_default_safe_gap(vel):
     return (config.get_lane_changing_time_headway() * vel
             + config.STANDSTILL_DISTANCE)
+
+
+def export_strategy_maps_to_cloud(n_platoon: Iterable[int] = None,
+                                  cost_names: Iterable[str] = None):
+    _exchange_files_with_cloud(True, n_platoon, cost_names)
+
+
+def import_strategy_maps_from_cloud(n_platoon: Iterable[int] = None,
+                                    cost_names: Iterable[str] = None):
+    _exchange_files_with_cloud(False, n_platoon, cost_names)
+
+
+def _exchange_files_with_cloud(is_exporting: bool,
+                               n_platoon: Iterable[int] = None,
+                               cost_names: Iterable[str] = None):
+    if n_platoon is None:
+        n_platoon = [2, 3, 4]
+    if cost_names is None:
+        cost_names = ['time', 'accel']
+
+    local_dir = os.path.join(config.DATA_FOLDER_PATH, 'strategy_maps')
+    cloud_dir = os.path.join(config.SHARED_DATA_PATH, 'strategy_maps')
+    if is_exporting:
+        source_dir, dest_dir = local_dir, cloud_dir
+    else:
+        source_dir, dest_dir = cloud_dir, local_dir
+    for n in n_platoon:
+        for c in cost_names:
+            file_name = '_'.join(['min', c, 'strategies_for',
+                                  str(n), 'vehicles.json'])
+            source_path = os.path.join(source_dir, file_name)
+            dest_path = os.path.join(dest_dir, file_name)
+            shutil.copy2(source_path, dest_path)
+            print(f'File {file_name} copied from folder {source_dir} to '
+                  f'{dest_dir}')

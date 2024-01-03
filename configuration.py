@@ -35,6 +35,8 @@ DATA_FOLDER_PATH = os.path.join('c:', os.sep, 'Users', 'fvall', 'Documents',
 SHARED_IMAGES_PATH = os.path.join('g:', os.sep, 'My Drive', 'PhD Research',
                                   'Lane Change', 'images_for_platoon_paper',
                                   'results')
+SHARED_DATA_PATH = os.path.join('g:', os.sep, 'My Drive', 'PhD Research',
+                                'Lane Change', 'data_exchange')
 
 
 # ====================== Simulation Parameters =============================== #
