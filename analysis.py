@@ -40,12 +40,10 @@ def save_fig_at_shared_folder(figure: plt.Figure, fig_name: str):
 
 def compare_graph_to_best_heuristic(save_fig: bool = False):
     results = load_result_summary()
-    success_rate = results.groupby(['n_platoon', 'strategy'])[
-        'success'].mean()
-    print(success_rate)
 
-    sns.set_style('whitegrid')
-    plt.rcParams.update({'font.size': 16})
+    # Number of steps
+    results['K'] = results['cooperation_order'].str.strip('[]').str.split(
+        ',').apply(len)
 
     graph_strategies = []
     other_strategies = []
@@ -64,6 +62,19 @@ def compare_graph_to_best_heuristic(save_fig: bool = False):
                             ].sort_values(by=simulation_identifiers)
     other_results.loc[
         ~other_results['success'], cost_names] = np.inf
+
+    # Success rates
+    best_results = other_results.loc[other_results.groupby(
+        simulation_identifiers)['success'].idxmax()]
+    best_results['strategy'] = 'Best Heuristic'
+    all_results = pd.concat([graph_results, other_results, best_results])
+    success_rate = all_results.groupby(['n_platoon', 'strategy'])[
+        ['success', 'K']].mean()
+    print(success_rate)
+
+    # Time and Accel
+    sns.set_style('whitegrid')
+    plt.rcParams.update({'font.size': 16})
     for c in cost_names:
         best_results = other_results.loc[other_results.groupby(
             simulation_identifiers)[c].idxmin()]
@@ -71,12 +82,14 @@ def compare_graph_to_best_heuristic(save_fig: bool = False):
         all_results = pd.concat([graph_results, best_results])
         drop_sims = best_results.loc[~best_results['success'],
                                      simulation_identifiers]
-        successful_sims = all_results.set_index(simulation_identifiers).drop(
-            index=drop_sims.to_numpy()).reset_index()
-        avg_costs = successful_sims.groupby('strategy')[c].mean()
+        successful_sims = all_results.set_index(
+            simulation_identifiers).drop(index=drop_sims.to_numpy()
+                                         ).reset_index()
+        avg_costs = successful_sims.groupby(['n_platoon', 'strategy'])[c].mean()
         print(avg_costs)
 
-        ax = sns.boxplot(data=successful_sims, x='n_platoon', y=c, hue='strategy')
+        ax = sns.boxplot(data=successful_sims, x='n_platoon', y=c,
+                         hue='strategy')
         fig: plt.Figure = ax.get_figure()
         fig.tight_layout()
         fig.show()
@@ -295,7 +308,7 @@ def plot_trajectory(data: pd.DataFrame, plot_title: str = None,
     tf = data['t'].max()
     dt = tf / n_plots
     time = np.arange(data['t'].min(), tf + dt / 2, dt)
-    step = round(dt / (data['t'].iloc[1] - data['t'].iloc[0]))
+    step = int(np.floor(dt / (data['t'].iloc[1] - data['t'].iloc[0])))
     fig, ax = plt.subplots(len(time), 1)
     fig.set_size_inches(6, n_plots - 1)
     for i in range(len(time)):

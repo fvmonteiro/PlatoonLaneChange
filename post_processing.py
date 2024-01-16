@@ -24,8 +24,8 @@ def compute_acceleration_costs(
     return accel_costs
 
 
-def compute_values_relative_to_other_vehicle(
-        data: pd.DataFrame, other_name: str):
+def compute_values_relative_to_other_vehicle(data: pd.DataFrame,
+                                             other_name: str):
     """
     Computes gap relative to the relevant surrounding vehicle
     :param data: dataframe with position of all vehicles

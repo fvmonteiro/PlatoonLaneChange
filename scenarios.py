@@ -29,7 +29,7 @@ class LaneChangeScenarioManager:
 
     # scenario: LaneChangeScenario
     v_ref: Mapping[str, float]
-    delta_x: Mapping[str, float]
+    # delta_x: Mapping[str, float]
     n_platoon: int
     are_vehicles_cooperative: bool
     # _lane_change_graph: graph_tools.VehicleStatesGraph
@@ -46,6 +46,7 @@ class LaneChangeScenarioManager:
         #     'success': [], 'completion_time': [], 'accel_cost': [],
         #     'decision_time': []
         # }
+        self.delta_x: dict[str, float] = defaultdict(float)
         self._has_plots = True
 
     def get_results(self) -> pd.DataFrame:
@@ -57,9 +58,8 @@ class LaneChangeScenarioManager:
         self.n_platoon = n_platoon
         self.are_vehicles_cooperative = are_vehicles_cooperative
         self.v_ref = v_ref
-        if delta_x is None:
-            delta_x = {'lo': 0., 'fo': 0., 'ld': 0., 'fd': 0.}
-        self.delta_x = delta_x
+        if delta_x is not None:
+            self.delta_x = delta_x
 
     def set_plotting(self, value: bool):
         self._has_plots = value
@@ -67,7 +67,7 @@ class LaneChangeScenarioManager:
     def run_strategy_comparison_on_test_scenario(
             self, n_orig_ahead: int, n_orig_behind: int, n_dest_ahead: int,
             n_dest_behind: int, strategy_numbers: Iterable[int]):
-        tf = configuration.Configuration.sim_time
+        tf = config.sim_time
         for sn in strategy_numbers:
             scenario_name = self._create_scenario_name(sn)
             scenario = self.create_closed_loop_test_scenario(
@@ -81,7 +81,7 @@ class LaneChangeScenarioManager:
             self.run_all_single_gap_cases(sn)
 
     def run_all_single_gap_cases(self, strategy_number: int):
-        tf = configuration.Configuration.sim_time
+        tf = config.sim_time
         first_gap = 1
         last_gap = self.n_platoon
         if self.v_ref['orig'] > self.v_ref['dest']:
@@ -148,7 +148,7 @@ class LaneChangeScenarioManager:
             self, n_orig_ahead: int, n_orig_behind: int,
             n_dest_ahead: int, n_dest_behind: int,
             is_acceleration_optimal: bool):
-        # tf = configuration.Configuration.time_horizon + 2
+        # tf = config.time_horizon + 2
         scenario = self.initialize_optimal_control_scenario(
             is_acceleration_optimal)
         self.set_test_scenario_initial_state(
@@ -252,8 +252,6 @@ class SimulationScenario(ABC):
     _lc_veh_type: type[fsv.FourStateVehicle]
     _n_platoon: int
 
-    dt: float = 1.0e-2
-
     def __init__(self):
         self.n_per_lane: list[int] = []
         base.BaseVehicle.reset_vehicle_counter()
@@ -262,6 +260,7 @@ class SimulationScenario(ABC):
         self._are_vehicles_cooperative = False
         self.lc_vehicle_names = []
         self.final_time: float = 0.
+        self.dt = config.time_step
 
     def get_n_platoon(self):
         return self._n_platoon
@@ -618,7 +617,7 @@ class LaneChangeScenario(SimulationScenario):
             # Early termination conditions
             if self.vehicle_group.is_platoon_out_of_range():
                 print(f'Platoon out of simulation range at {time[i]}')
-                # self.vehicle_group.truncate_simulation_history()
+                self.vehicle_group.truncate_simulation_history()
                 break
 
 
@@ -729,7 +728,7 @@ class AllLaneChangeStrategies(LaneChangeScenario):
                 cost_with_tracker = occ.OCPCostTracker(
                     np.array([0]), n_states,
                     running_cost, terminal_cost,
-                    configuration.Configuration.solver_max_iter
+                    config.solver_max_iter
                 )
 
                 success.append(self.vehicle_group.check_lane_change_success())
@@ -790,34 +789,6 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
         self.tf = tf
         self.vehicle_group.prepare_to_start_simulation(1)
         self.set_desired_lane_changes()
-
-    # @abstractmethod
-    # def create_initial_state(self):
-    #     pass
-
-    # def boundary_conditions_to_dataframe(self) -> pd.DataFrame:
-    #     """
-    #     Puts initial state and desired final conditions in a dataframe.
-    #     """
-    #     return self.controller._ocp_interface.to_dataframe(
-    #         np.array([0, self.tf]),
-    #         np.vstack((self.vehicle_group.get_full_initial_state_vector(),
-    #                    self.controller.get_desired_state())).T,
-    #         np.zeros([self.controller._ocp_interface.n_inputs, 2])
-    #     )
-
-    # def ocp_simulation_to_dataframe(self) -> pd.DataFrame:
-    #     """
-    #     Puts the states computed by the ocp solver tool (and saved) in a df
-    #     """
-    #     return self.controller._ocp_interface.to_dataframe(
-    #         # self.controller.ocp_result.time,
-    #         # self.controller.ocp_result.states,
-    #         # self.controller.ocp_result.inputs,
-    #         self.ocp_response.time,
-    #         self.ocp_response.states,
-    #         self.ocp_response.inputs
-    #     )
 
     def solve(self):
         self.vehicle_group.update_surrounding_vehicles()

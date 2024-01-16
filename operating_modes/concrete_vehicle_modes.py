@@ -8,21 +8,12 @@ import vehicle_models.four_state_vehicles as fsv
 import operating_modes.base_operating_modes as vom
 
 
+# ========================= CL Control Vehicle States ======================== #
+
 class CLVehicleMode(vom.VehicleMode, ABC):
     """ Base of vehicle modes for the ClosedLoopVehicle"""
 
     vehicle: fsv.ClosedLoopVehicle
-
-
-class OCPVehicleMode(vom.VehicleMode, ABC):
-    """ Base of vehicle modes for vehicles equipped with optimal controllers"""
-
-    vehicle: fsv.OptimalControlVehicle
-
-
-# class PlatoonVehicleMode(vom.VehicleMode, ABC):
-#     """ Base of vehicle modes for platoon vehicles"""
-#     vehicle: fsv.OptimalControlVehicle
 
 
 class CLLaneKeepingMode(CLVehicleMode):
@@ -67,6 +58,14 @@ class CLLaneChangingMode(CLVehicleMode):
     def handle_lane_changing_intention(
             self, vehicles: Mapping[int, base.BaseVehicle]) -> None:
         pass
+
+
+# ====================== Optimal Control Vehicle States ====================== #
+
+class OCPVehicleMode(vom.VehicleMode, ABC):
+    """ Base of vehicle modes for vehicles equipped with optimal controllers"""
+
+    vehicle: fsv.OptimalControlVehicle
 
 
 class OCPLaneKeepingMode(OCPVehicleMode):
@@ -114,6 +113,12 @@ class OCPLaneChangingMode(OCPVehicleMode):
             self, vehicles: Mapping[int, base.BaseVehicle]) -> None:
         pass
 
+
+# ========================== Platoon Vehicle States ========================== #
+
+# class PlatoonVehicleMode(vom.VehicleMode, ABC):
+#     """ Base of vehicle modes for platoon vehicles"""
+#     vehicle: fsv.OptimalControlVehicle
 
 # class PlatoonVehicleLaneKeepingMode(PlatoonVehicleMode):
 #     def __init__(self):

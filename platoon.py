@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from collections.abc import Mapping, Sequence
 # import bisect
 import numpy as np
@@ -81,10 +80,12 @@ class Platoon:
         return self.lane_change_strategy.get_incoming_vehicle_id(ego_position)
 
     def get_platoon_desired_dest_lane_leader_id(self) -> int:
+        # TODO: looks wrong... We want the non-platoon dest lane leader and
+        #  this may return a platoon vehicle.
         for veh in self.vehicles:
             if veh.get_desired_destination_lane_leader_id() > -1:
                 return veh.get_desired_destination_lane_leader_id()
-        warnings.warn('No platoon vehicle has a desired dest lane leader')
+        print('Note: no platoon vehicle has a desired dest lane leader')
         return -1
 
     def get_strategy(self) -> lc_strategies.LaneChangeStrategy:

@@ -28,8 +28,6 @@ COLORS = {'gray': (0.5, 0.5, 0.5), 'red': (1.0, 0.0, 0.0),
 
 ACCEPTED_GRAPH_COSTS = {'time', 'accel'}
 
-# TODO: make dependent on current machine
-# DATA_FOLDER_PATH = 'C:\\Users\\fvall\\Documents\\Research\\data'
 DATA_FOLDER_PATH = os.path.join('c:', os.sep, 'Users', 'fvall', 'Documents',
                                 'Research', 'data')
 SHARED_IMAGES_PATH = os.path.join('g:', os.sep, 'My Drive', 'PhD Research',
@@ -58,6 +56,7 @@ class Configuration:
 
     # Scenario parameters
     sim_time: float = 10.0  # [s]
+    time_step: float = 1.0e-2  # [s]
     platoon_strategies = [0]
     increase_lc_time_headway: bool = False
 
@@ -146,13 +145,14 @@ class Configuration:
 
     @staticmethod
     def set_scenario_parameters(
-            sim_time: float = None,
+            sim_time: float = None, time_step: float = None,
             platoon_strategies: Union[list[int], int] = None,
             increase_lc_time_headway: bool = None):
         """
         Sets scenario parameters. If a certain parameter is not set, we
         keep its current value.
         :param sim_time: Simulation run time
+        :param time_step: Time discretization
         :param platoon_strategies: Defines the strategies that may be used by
          the optimal controller to generate the initial mode sequence guess.
          Accepted numerical values are 0: no platoon strategy, 1: synch,
@@ -165,6 +165,8 @@ class Configuration:
         """
         if sim_time:
             Configuration.sim_time = sim_time
+        if time_step:
+            Configuration.time_step = time_step
         if platoon_strategies is not None:
             if np.isscalar(platoon_strategies):
                 platoon_strategies = [platoon_strategies]

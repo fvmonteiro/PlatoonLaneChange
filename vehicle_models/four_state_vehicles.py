@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from abc import ABC
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Iterable
 from typing import Union
 
@@ -73,7 +73,10 @@ class FourStateVehicle(base.BaseVehicle, ABC):
                 and self._platoon.has_lane_change_started()):
             relevant_vehicle_id = (
                 self._platoon.get_platoon_desired_dest_lane_leader_id())
-            return vehicles[relevant_vehicle_id].get_vel()
+            if relevant_vehicle_id >= 0:
+                return vehicles[relevant_vehicle_id].get_vel()
+            else:
+                return self._free_flow_speed
         return self._free_flow_speed
 
     def get_vel(self):
@@ -102,7 +105,8 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             return -1
         if not self.is_in_a_platoon():
             return self.get_suitable_destination_lane_leader_id()
-        return self.get_platoon().get_vehicle_desired_dest_lane_leader_id(self.get_id())
+        return self.get_platoon().get_vehicle_desired_dest_lane_leader_id(
+            self.get_id())
 
     def get_suitable_destination_lane_leader_id(self) -> int:
         """
@@ -114,8 +118,6 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             return self.get_destination_lane_leader_id()
         else:
             return -1
-
-    # def check_is_gap_suitable(self) -> bool:
 
     def set_platoon(self, new_platoon: platoon.Platoon) -> None:
         self._platoon = new_platoon
@@ -168,6 +170,10 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     def compute_gap_to_a_leader(self, a_leader: base.BaseVehicle):
         return base.BaseVehicle.compute_a_gap(a_leader, self)
 
+    @abstractmethod
+    def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]):
+        pass
+
     def is_platoon_leader(self) -> bool:
         return self.get_id() == self._platoon.get_platoon_leader_id()
 
@@ -178,7 +184,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     ) -> None:
         """
         For now, only used to set platoons at the start of the simulation.
-        Method cannot handle vehicles leaving or joining platoons afterwards.
+        Method cannot handle vehicles leaving or joining platoons afterward.
         """
         # [Aug 23] We are only simulating simple scenarios. At the start of
         # the simulation, every vehicle will either create its own platoon
@@ -276,6 +282,9 @@ class OpenLoopVehicle(FourStateVehicle):
 
     def update_mode(self, vehicles: Mapping[int, base.BaseVehicle]):
         pass
+
+    def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]):
+        return True
 
 
 class OptimalControlVehicle(FourStateVehicle):
@@ -460,27 +469,6 @@ class ClosedLoopVehicle(FourStateVehicle):
         else:
             is_my_turn = True
 
-        # if is_safe:
-        #     if self.is_in_a_platoon():
-        #         my_platoon = self.get_platoon()
-        #         platoon_leader = my_platoon.get_platoon_leader()
-        #         if platoon_leader.has_origin_lane_leader():
-        #             lo = vehicles[platoon_leader.get_origin_lane_leader_id()]
-        #             lo_states = lo.get_states()
-        #         else:
-        #             lo_states = []
-        #         if self.has_destination_lane_leader():
-        #             ld = vehicles[self.get_destination_lane_leader_id()]
-        #             ld_states = ld.get_states()
-        #         else:
-        #             ld_states = []
-        #         my_platoon.set_maneuver_initial_state(self.get_id(),
-        #                                               lo_states, ld_states)
-
-        # is_my_turn = (
-        #         not self.is_in_a_platoon()
-        #         or self.get_platoon().can_start_lane_change(self.get_id())
-        # )
         return is_safe and is_my_turn
 
     def is_lane_change_complete(self):

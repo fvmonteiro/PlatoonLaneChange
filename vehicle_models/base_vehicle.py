@@ -627,6 +627,7 @@ class BaseVehicle(ABC):
 
     def detect_collision(self) -> bool:
         if (self._iter_counter >= 1
+                and self.has_origin_lane_leader()
                 and (self.get_origin_lane_leader_id()
                      == self._origin_follower_id[self._iter_counter - 1])):
             return True
