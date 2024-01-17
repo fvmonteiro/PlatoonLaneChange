@@ -48,7 +48,7 @@ class LongitudinalController:
         else:
             leader = vehicles[self.vehicle.get_current_leader_id()]
             accel = self._compute_accel_to_a_leader(leader)
-        # accel = self._saturate_accel(accel)
+        accel = self._saturate_accel(accel)
         return accel
 
     def compute_acceleration_from_interface(
@@ -58,10 +58,10 @@ class LongitudinalController:
         if leader_states is None or len(leader_states) == 0:
             accel = self._compute_velocity_control(v_ff, v_ego)
         else:
-            gap = (vehicle_interface.select_state_from_vector(leader_states,
-                                                              'x')
-                   - vehicle_interface.select_state_from_vector(ego_states,
-                                                                'x'))
+            gap = (
+                vehicle_interface.select_state_from_vector(leader_states, 'x')
+                - vehicle_interface.select_state_from_vector(ego_states, 'x')
+            )
             v_leader = vehicle_interface.select_state_from_vector(
                 leader_states, 'v')
             accel = self._compute_gap_control(gap, v_ego, v_leader)

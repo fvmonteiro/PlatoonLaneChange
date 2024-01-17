@@ -134,16 +134,16 @@ def run_closed_loop_test(
 def run_all_scenarios_for_comparison(
         n_platoon: int, v_orig: float, v_ff_platoon: float,
         are_vehicles_cooperative: bool):
-    run_scenarios_for_comparison(n_platoon, v_orig, v_ff_platoon,
-                                 are_vehicles_cooperative,
-                                 [5, 6, 12, 13], [0, -5, 5], False, save=True)
+    run_scenarios_for_comparison(
+        n_platoon, v_orig, v_ff_platoon, are_vehicles_cooperative,
+        [5, 6, 12, 13], [0, -5, 5], has_plots=False, save=True)
 
 
 def run_scenarios_for_comparison(
         n_platoon: int, v_orig: float, v_ff_platoon: float,
-        are_vehicles_cooperative: bool,
-        strategies: Iterable[int], delta_v: Sequence[float],
-        has_plots: bool, save: bool = False):
+        are_vehicles_cooperative: bool, strategies: Iterable[int],
+        delta_v: Sequence[float], gap_positions: Iterable[int] = None,
+        has_plots: bool = True, save: bool = False):
 
     scenario_manager = scenarios.LaneChangeScenarioManager()
     scenario_manager.set_plotting(has_plots)
@@ -156,7 +156,11 @@ def run_scenarios_for_comparison(
                                         v_ref)
         for s in strategies:
             print(f'    strategy number={s}')
-            scenario_manager.run_all_single_gap_cases(s)
+            if gap_positions is None:
+                scenario_manager.run_all_single_gap_cases(s)
+            else:
+                for gp in gap_positions:
+                    scenario_manager.run_single_gap_scenario(s, gp)
     result = scenario_manager.get_results()
     print(result.groupby('strategy')[
               ['success', 'completion_time', 'accel_cost', 'decision_time']
@@ -250,7 +254,7 @@ def filter_test():
 
 def main():
 
-    n_platoon = 2
+    n_platoon = 4
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
 
@@ -293,7 +297,7 @@ def main():
 
     # run_scenarios_for_comparison(
     #     n_platoon, v_orig, v_ff_platoon, are_vehicles_cooperative,
-    #     [13], [0], has_plots=True, save=False
+    #     [6], [-5], gap_positions=[3], has_plots=True, save=False
     # )
 
     for n_platoon in [2, 3, 4]:

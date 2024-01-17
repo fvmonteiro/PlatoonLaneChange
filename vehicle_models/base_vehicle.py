@@ -659,14 +659,14 @@ class BaseVehicle(ABC):
             dest_lane_follower = vehicles[
                 self.get_destination_lane_follower_id()]
             gap_from_fd = BaseVehicle.compute_a_gap(self, dest_lane_follower)
-            fo_safe_gap = dest_lane_follower.compute_safe_lane_change_gap()
+            fd_safe_gap = dest_lane_follower.compute_safe_lane_change_gap()
         else:
             gap_from_fd = np.inf
-            fo_safe_gap = 0.
-        is_safe_to_dest_lane_follower = gap_from_fd + margin >= fo_safe_gap
+            fd_safe_gap = 0.
+        is_safe_to_dest_lane_follower = gap_from_fd + margin >= fd_safe_gap
 
         self._is_lane_change_gap_suitable = (gap_to_ld + gap_from_fd + margin
-                                             >= fo_safe_gap + ego_safe_gap)
+                                             >= fd_safe_gap + ego_safe_gap)
         self._is_lane_change_safe = (is_safe_to_orig_lane_leader
                                      and is_safe_to_dest_lane_leader
                                      and is_safe_to_dest_lane_follower)

@@ -67,35 +67,45 @@ class LaneChangeScenarioManager:
     def run_strategy_comparison_on_test_scenario(
             self, n_orig_ahead: int, n_orig_behind: int, n_dest_ahead: int,
             n_dest_behind: int, strategy_numbers: Iterable[int]):
-        tf = config.sim_time
         for sn in strategy_numbers:
-            scenario_name = self._create_scenario_name(sn)
-            scenario = self.create_closed_loop_test_scenario(
-                n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind, sn)
-            gap_position = -1
-            self.run_save_and_plot(scenario, tf, gap_position, scenario_name)
+            self.run_test_scenario(n_orig_ahead, n_orig_behind, n_dest_ahead,
+                                   n_dest_behind, sn)
 
     def run_strategy_comparison_on_single_gap_scenario(
             self, strategy_numbers: Iterable[int]):
         for sn in strategy_numbers:
             self.run_all_single_gap_cases(sn)
 
-    def run_all_single_gap_cases(self, strategy_number: int):
+    def run_test_scenario(
+            self, n_orig_ahead: int, n_orig_behind: int, n_dest_ahead: int,
+            n_dest_behind: int, strategy_number: int):
         tf = config.sim_time
+        scenario_name = self._create_scenario_name(strategy_number)
+        scenario = self.create_closed_loop_test_scenario(
+            n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
+            strategy_number)
+        gap_position = -1
+        self.run_save_and_plot(scenario, tf, gap_position, scenario_name)
+
+    def run_all_single_gap_cases(self, strategy_number: int):
         first_gap = 1
         last_gap = self.n_platoon
         if self.v_ref['orig'] > self.v_ref['dest']:
             first_gap = 0
         elif self.v_ref['orig'] < self.v_ref['dest']:
             last_gap = self.n_platoon + 1
-        scenario_name = self._create_scenario_name(strategy_number)
         for gap_position in range(first_gap, last_gap + 1):
-            print(f'      gap position={gap_position}')
-            scenario = self.initialize_closed_loop_scenario(strategy_number)
-            scenario.set_single_gap_initial_state(gap_position, self.v_ref,
-                                                  self.delta_x['lo'])
-            self.run_save_and_plot(scenario, tf, gap_position,
-                                   scenario_name + f' gap at {gap_position}')
+            self.run_single_gap_scenario(strategy_number, gap_position)
+
+    def run_single_gap_scenario(self, strategy_number: int, gap_position: int):
+        tf = config.sim_time
+        scenario_name = self._create_scenario_name(strategy_number)
+        print(f'      gap position={gap_position}')
+        scenario = self.initialize_closed_loop_scenario(strategy_number)
+        scenario.set_single_gap_initial_state(gap_position, self.v_ref,
+                                              self.delta_x['lo'])
+        self.run_save_and_plot(scenario, tf, gap_position,
+                               scenario_name + f' gap at {gap_position}')
 
     def initialize_closed_loop_scenario(self, strategy_number: int
                                         ) -> LaneChangeScenario:

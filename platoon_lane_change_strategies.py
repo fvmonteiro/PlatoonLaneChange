@@ -129,9 +129,9 @@ class LaneChangeStrategy(ABC):
         raise AttributeError('Only instances of the TemplateStrategy class '
                              'can have their lane change order set.')
 
-    def set_states_graph(self, states_graph: graph_tools.VehicleStatesGraph):
-        raise AttributeError('Only instances of the GraphStrategy class '
-                             'can have their states graph set.')
+    # def set_states_graph(self, states_graph: graph_tools.VehicleStatesGraph):
+    #     raise AttributeError('Only instances of the GraphStrategy class '
+    #                          'can have their states graph set.')
 
     def get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         """
@@ -171,7 +171,7 @@ class LaneChangeStrategy(ABC):
     def set_maneuver_initial_state(
             self, ego_position_in_platoon: int, lo_states: Iterable[float],
             platoon_states: Iterable[float], ld_states: Iterable[float],
-            fd_states: Iterable[float]):
+            fd_states: Iterable[float]) -> None:
         pass
 
     def set_empty_maneuver_initial_state(self, ego_position_in_platoon: int):
@@ -292,8 +292,8 @@ class TemplateStrategy(LaneChangeStrategy):
                 self._last_dest_lane_vehicle_idx].get_id()
         else:
             # Get the vehicle ahead the vehicle which helps generate the gap
-            return self.platoon_vehicles[self._cooperating_order[
-                self._idx]].get_origin_lane_leader_id()
+            return self.platoon_vehicles[
+                coop_veh_id].get_origin_lane_leader_id()
 
     def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         # We don't have to check whether the vehicle is already at the
@@ -348,7 +348,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
     def set_maneuver_initial_state(
             self, ego_position_in_platoon: int, lo_states: Sequence[float],
             platoon_states: Iterable[float], ld_states: Sequence[float],
-            fd_states: Sequence[float]):
+            fd_states: Sequence[float]) -> None:
         if not self._is_initialized:
             self._lane_change_graph.set_maneuver_initial_state(
                 ego_position_in_platoon, lo_states, platoon_states, ld_states,

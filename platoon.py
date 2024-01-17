@@ -91,14 +91,14 @@ class Platoon:
     def get_strategy(self) -> lc_strategies.LaneChangeStrategy:
         return self.lane_change_strategy
 
-    def set_lc_start_time(self, time: float):
+    def set_lc_start_time(self, time: float) -> None:
         self._lc_start_time = time
 
-    def set_strategy(self, lane_change_strategy: int):
+    def set_strategy(self, lane_change_strategy: int) -> None:
         self.lane_change_strategy = lc_strategies.strategy_map[
             lane_change_strategy](self.vehicles)
 
-    def set_lane_change_parameters(self):
+    def set_lane_change_parameters(self) -> None:
         self.lane_change_strategy.set_parameters()
 
     def set_lane_change_order(
@@ -107,7 +107,7 @@ class Platoon:
         self.lane_change_strategy.set_maneuver_order(
             strategy_parameters[0], strategy_parameters[1])
 
-    def add_vehicle(self, new_vehicle: fsv.FourStateVehicle):
+    def add_vehicle(self, new_vehicle: fsv.FourStateVehicle) -> None:
         """
         Adds the vehicle to the platoon. The new vehicle does not have to
         be behind all platoon vehicles. The method checks the longitudinal
@@ -129,7 +129,7 @@ class Platoon:
             for i, veh in enumerate(self.vehicles):
                 self._id_to_position_map[veh.get_id()] = i
 
-    def append_vehicle(self, new_vehicle: fsv.FourStateVehicle):
+    def append_vehicle(self, new_vehicle: fsv.FourStateVehicle) -> None:
         """
         Adds the vehicle as the last platoon vehicle, even if it is not
         longitudinally behind the rear most platoon vehicle
@@ -139,7 +139,7 @@ class Platoon:
         self._id_to_position_map[new_vehicle.get_id()] = len(self.vehicles)
         self.vehicles.append(new_vehicle)
 
-    def has_lane_change_started(self):
+    def has_lane_change_started(self) -> bool:
         return self._lc_start_time < np.inf
 
 
@@ -160,7 +160,7 @@ class OptimalPlatoon(Platoon):
     def get_optimal_controller(self):  # -> opt_ctrl.VehicleOptimalController:
         return self.get_platoon_leader().get_opt_controller()
 
-    def add_vehicle(self, new_vehicle: fsv.OptimalControlVehicle):
+    def add_vehicle(self, new_vehicle: fsv.OptimalControlVehicle) -> None:
         super().add_vehicle(new_vehicle)
         new_vehicle.set_centralized_controller(self.get_optimal_controller())
 
@@ -187,7 +187,7 @@ class ClosedLoopPlatoon(Platoon):
         super().add_vehicle(new_vehicle)
 
     def set_maneuver_initial_state_for_all_vehicles(
-            self, all_vehicles: Mapping[int, base.BaseVehicle]):
+            self, all_vehicles: Mapping[int, base.BaseVehicle]) -> None:
 
         if self.has_lane_change_started():
             return
@@ -219,7 +219,7 @@ class ClosedLoopPlatoon(Platoon):
 
     def set_maneuver_initial_state(
             self, ego_id: int, lo_states: Sequence[float],
-            ld_states: Sequence[float], fd_states: Sequence[float]):
+            ld_states: Sequence[float], fd_states: Sequence[float]) -> None:
         # TODO: avoid hard coding array indices
 
         p1 = self.get_platoon_leader()
