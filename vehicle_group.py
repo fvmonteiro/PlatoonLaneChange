@@ -423,10 +423,10 @@ class VehicleGroup:
         # Strategy parameters depend on the number of vehicles in the
         # platoon. So, we can only set them after forming the platoons
         for veh in self.vehicles.values():
-            if self._maneuver_order is None:
-                veh.set_platoon_lane_change_parameters()
-            else:
+            if self._maneuver_order is not None:
                 veh.set_platoon_lane_change_order(self._maneuver_order)
+            # else:
+            #     veh.set_platoon_lane_change_parameters()
 
     def simulate_one_time_step(
             self, new_time: float,

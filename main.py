@@ -254,7 +254,7 @@ def filter_test():
 
 def main():
 
-    n_platoon = 4
+    n_platoon = 3
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
 
@@ -272,6 +272,7 @@ def main():
     #     initial_input_guess='mode',
     #     jumpstart_next_solver_call=True, has_initial_mode_guess=True
     # )
+
     configuration.Configuration.set_scenario_parameters(
         sim_time=sim_time, increase_lc_time_headway=False
     )
@@ -289,34 +290,34 @@ def main():
     # create_graph(n_platoon, graph_includes_fd, [v_orig], v_ff_platoon,
     #              [0, -5, 5])
 
-    # v_dest = v_orig + 5.0
-    # delta_x = {'ld': 0., 'lo': 0., 'fd': 0.}
+    v_dest = v_orig
+    delta_x = {'ld': -1., 'lo': 0., 'fd': -1.}
     # run_closed_loop_test(n_platoon, are_vehicles_cooperative,
     #                      v_orig, v_ff_platoon, v_dest, delta_x,
-    #                      [13], plot_results=True)
+    #                      [12, 5], plot_results=True)
 
-    # run_scenarios_for_comparison(
-    #     n_platoon, v_orig, v_ff_platoon, are_vehicles_cooperative,
-    #     [6], [-5], gap_positions=[3], has_plots=True, save=False
-    # )
+    run_scenarios_for_comparison(
+        n_platoon, v_orig, v_ff_platoon, are_vehicles_cooperative,
+        [6], [0], gap_positions=None, has_plots=True, save=False
+    )
 
-    for n_platoon in [2, 3, 4]:
-        print(f'############ N={n_platoon} ############')
-        graph_t0 = time.time()
-        create_graph(n_platoon, graph_includes_fd, [v_orig], v_ff_platoon,
-                     delta_v_dest_lane)
-        print(f'Time to create graph: {time.time() - graph_t0}')
-        configuration.Configuration.set_scenario_parameters(
-            sim_time=20.0 * n_platoon
-        )
-        sim_t0 = time.time()
-        run_all_scenarios_for_comparison(n_platoon, v_orig, v_ff_platoon,
-                                         are_vehicles_cooperative)
-        print(f'Time simulated: {time.time() - sim_t0}')
+    # for n_platoon in [2, 3, 4]:
+    #     print(f'############ N={n_platoon} ############')
+    #     graph_t0 = time.time()
+    #     create_graph(n_platoon, graph_includes_fd, [v_orig], v_ff_platoon,
+    #                  delta_v_dest_lane)
+    #     print(f'Time to create graph: {time.time() - graph_t0}')
+    #     configuration.Configuration.set_scenario_parameters(
+    #         sim_time=20.0 * n_platoon
+    #     )
+    #     sim_t0 = time.time()
+    #     run_all_scenarios_for_comparison(n_platoon, v_orig, v_ff_platoon,
+    #                                      are_vehicles_cooperative)
+    #     print(f'Time simulated: {time.time() - sim_t0}')
     # analysis.compare_approaches(save_fig=False)
-    analysis.compare_graph_to_best_heuristic(save_fig=False)
+    # analysis.compare_graph_to_best_heuristic(save_fig=True)
 
-    # post_processing.import_strategy_maps_from_cloud()
+    # post_processing.export_strategy_maps_to_cloud()
 
     end_time = time.time()
 

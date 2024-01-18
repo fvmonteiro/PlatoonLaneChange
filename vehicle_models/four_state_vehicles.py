@@ -228,10 +228,6 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         #             leader_platoon.add_vehicle(self)
         #             self.set_platoon(leader_platoon)
 
-    def set_platoon_lane_change_parameters(self):
-        if self.is_in_a_platoon() and self.is_platoon_leader():
-            self.get_platoon().set_lane_change_parameters()
-
     def set_platoon_lane_change_order(
             self, strategy_order: configuration.Strategy
     ) -> None:
@@ -405,7 +401,6 @@ class ClosedLoopVehicle(FourStateVehicle):
 
     _controller_type = veh_ctrl.ClosedLoopControl
     _platoon: platoon.ClosedLoopPlatoon
-    # _platoon_lane_change_graph: graph_tools.VehicleStatesGraph
 
     def __init__(self, can_change_lanes: bool,
                  has_open_loop_acceleration: bool = False,
@@ -414,10 +409,6 @@ class ClosedLoopVehicle(FourStateVehicle):
                          is_connected)
         self._platoon_type = platoon.ClosedLoopPlatoon
         self.set_mode(modes.CLLaneKeepingMode())
-
-    # def set_platon_lane_change_graph(
-    #         self, platoon_lane_change_graph: graph_tools.VehicleStatesGraph):
-    #     self._platoon_lane_change_graph = platoon_lane_change_graph
 
     def get_platoon(self) -> Union[None, platoon.ClosedLoopPlatoon]:
         try:
@@ -431,24 +422,10 @@ class ClosedLoopVehicle(FourStateVehicle):
         else:
             self._mode.handle_lane_keeping_intention(vehicles)
 
-    # def prepare_for_longitudinal_adjustments_start(
-    #         self, vehicles: Mapping[int, base.BaseVehicle]):
-    #     super().prepare_for_longitudinal_adjustments_start(vehicles)
+    # def prepare_for_lane_keeping_start(self) -> None:
+    #     super().prepare_for_lane_keeping_start()
     #     if self.is_in_a_platoon():
-    #         my_platoon = self.get_platoon()
-    #         platoon_leader = my_platoon.get_platoon_leader()
-    #         if platoon_leader.has_origin_lane_leader():
-    #             lo = vehicles[platoon_leader.get_origin_lane_leader_id()]
-    #             lo_states = lo.get_states()
-    #         else:
-    #             lo_states = []
-    #         if self.has_destination_lane_leader():
-    #             ld = vehicles[self.get_destination_lane_leader_id()]
-    #             ld_states = ld.get_states()
-    #         else:
-    #             ld_states = []
-    #         my_platoon.set_maneuver_initial_state(self.get_id(),
-    #                                               lo_states, ld_states)
+    #         self._platoon.lane_change_strategy.check_maneuver_step_done()
 
     def prepare_for_lane_change_start(self):
         super().prepare_for_lane_change_start()
@@ -457,9 +434,8 @@ class ClosedLoopVehicle(FourStateVehicle):
 
     def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]
                               ) -> bool:
-        # We can't short-circuit any of the evaluation because these methods
+        # We can't short-circuit any of the evaluations because these methods
         # also update internal values.
-        # TODO: check again. Maybe evaluate is_my_turn only if safe
         is_safe = self.get_is_lane_change_safe()
         if self.is_in_a_platoon():
             if self.is_platoon_leader():

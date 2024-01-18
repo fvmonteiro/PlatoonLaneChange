@@ -26,7 +26,7 @@ class CLLaneKeepingMode(CLVehicleMode):
 
     def handle_lane_changing_intention(
             self, vehicles: Mapping[int, base.BaseVehicle]) -> None:
-        self.vehicle.prepare_for_longitudinal_adjustments_start(vehicles)
+        self.vehicle.prepare_for_longitudinal_adjustments_start()
         self.vehicle.set_mode(CLLongAdjustmentMode())
 
 
@@ -52,7 +52,7 @@ class CLLaneChangingMode(CLVehicleMode):
     def handle_lane_keeping_intention(
             self, vehicles: Mapping[int, base.BaseVehicle]) -> None:
         if self.vehicle.is_lane_change_complete():
-            self.vehicle.set_lane_change_completion_time()
+            self.vehicle.prepare_for_lane_keeping_start()
             self.vehicle.set_mode(CLLaneKeepingMode())
 
     def handle_lane_changing_intention(
@@ -78,7 +78,7 @@ class OCPLaneKeepingMode(OCPVehicleMode):
 
     def handle_lane_changing_intention(
             self, vehicles: Mapping[int, base.BaseVehicle]) -> None:
-        self.vehicle.prepare_for_longitudinal_adjustments_start(vehicles)
+        self.vehicle.prepare_for_longitudinal_adjustments_start()
         self.vehicle.set_mode(OCPLongAdjustmentMode())
 
 
@@ -106,7 +106,7 @@ class OCPLaneChangingMode(OCPVehicleMode):
     def handle_lane_keeping_intention(
             self, vehicles: Mapping[int, base.BaseVehicle]) -> None:
         if not self.vehicle.is_lane_changing():
-            self.vehicle.set_lane_change_completion_time()
+            self.vehicle.prepare_for_lane_keeping_start()
             self.vehicle.set_mode(OCPLaneKeepingMode())
 
     def handle_lane_changing_intention(

@@ -467,11 +467,6 @@ class BaseVehicle(ABC):
     def reset_simulation_logs(self) -> None:
         self.initialize_simulation_logs(0)
 
-    def set_lane_change_completion_time(self) -> None:
-        self._lc_start_time = -np.inf
-        # we assume at most one lane change per simulation
-        self._lc_end_time = self.get_current_time()
-
     def truncate_simulation_history(self):
         """
         Truncates all the data matrices so that their size matches the
@@ -695,9 +690,6 @@ class BaseVehicle(ABC):
     ) -> None:
         pass
 
-    def set_platoon_lane_change_parameters(self):
-        pass
-
     def set_platoon_lane_change_order(
             self, strategy_order: config.Strategy
     ) -> None:
@@ -839,17 +831,21 @@ class BaseVehicle(ABC):
             df, 'dest_lane_follower_id', self._destination_follower_id)
         return df
 
-    def prepare_for_longitudinal_adjustments_start(
-            self, vehicles: Mapping[int, BaseVehicle]):
+    def prepare_for_lane_keeping_start(self) -> None:
+        self._lc_start_time = -np.inf
+        # we assume at most one lane change per simulation
+        self._lc_end_time = self.get_current_time()
+
+    def prepare_for_longitudinal_adjustments_start(self) -> None:
         self.request_cooperation()
         self._lc_end_time = np.inf
 
-    def prepare_for_lane_change_start(self):
+    def prepare_for_lane_change_start(self) -> None:
         self._lc_start_time = self.get_current_time()
         self._set_up_lane_change_control()
 
     @classmethod
-    def _set_model(cls):
+    def _set_model(cls) -> None:
         """
         Must be called in the constructor of every derived class to set the
         variables that define which vehicle model is implemented.
@@ -862,15 +858,15 @@ class BaseVehicle(ABC):
         cls._input_idx = {cls._input_names[i]: i for i
                           in range(cls._n_inputs)}
 
-    def follow_origin_lane_leader(self):
+    def follow_origin_lane_leader(self) -> None:
         self._set_current_leader_id(self.get_origin_lane_leader_id())
 
     @abstractmethod
-    def get_vel(self):
+    def get_vel(self) -> float:
         pass
 
     @staticmethod
-    def _set_surrounding_vehicles_ids_to_df(df, col_name, col_value):
+    def _set_surrounding_vehicles_ids_to_df(df, col_name, col_value) -> None:
         if len(col_value) == 1:
             df[col_name] = col_value[0]
         else:
@@ -878,7 +874,7 @@ class BaseVehicle(ABC):
 
     @classmethod
     @abstractmethod
-    def _set_speed(cls, v0, state):
+    def _set_speed(cls, v0, state) -> None:
         """
         Sets the proper element in array state equal to v0
         :param v0: speed to write

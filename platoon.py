@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 
 import configuration
+import platoon_lane_change_strategies
 import platoon_lane_change_strategies as lc_strategies
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
@@ -83,8 +84,11 @@ class Platoon:
         # TODO: looks wrong... We want the non-platoon dest lane leader and
         #  this may return a platoon vehicle.
         for veh in self.vehicles:
-            if veh.get_desired_destination_lane_leader_id() > -1:
-                return veh.get_desired_destination_lane_leader_id()
+            if veh.has_lane_change_intention():
+                desired_ld_id = self.get_vehicle_desired_dest_lane_leader_id(
+                        veh.get_id())
+                if desired_ld_id > -1:
+                    return desired_ld_id
         print('Note: no platoon vehicle has a desired dest lane leader')
         return -1
 
@@ -97,9 +101,6 @@ class Platoon:
     def set_strategy(self, lane_change_strategy: int) -> None:
         self.lane_change_strategy = lc_strategies.strategy_map[
             lane_change_strategy](self.vehicles)
-
-    def set_lane_change_parameters(self) -> None:
-        self.lane_change_strategy.set_parameters()
 
     def set_lane_change_order(
             self, strategy_parameters: configuration.Strategy
@@ -163,9 +164,6 @@ class OptimalPlatoon(Platoon):
     def add_vehicle(self, new_vehicle: fsv.OptimalControlVehicle) -> None:
         super().add_vehicle(new_vehicle)
         new_vehicle.set_centralized_controller(self.get_optimal_controller())
-
-    # def guess_mode_sequence(self, initial_mode_sequence: som.ModeSequence):
-    #     return self.strategy.create_mode_sequence(initial_mode_sequence)
     
 
 class ClosedLoopPlatoon(Platoon):
@@ -189,7 +187,10 @@ class ClosedLoopPlatoon(Platoon):
     def set_maneuver_initial_state_for_all_vehicles(
             self, all_vehicles: Mapping[int, base.BaseVehicle]) -> None:
 
-        if self.has_lane_change_started():
+        if (self.has_lane_change_started() or
+                not isinstance(
+                    self.lane_change_strategy,
+                    platoon_lane_change_strategies.GraphLaneChangeApproach)):
             return
 
         platoon_leader = self.get_platoon_leader()
