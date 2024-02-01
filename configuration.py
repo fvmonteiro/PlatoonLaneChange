@@ -15,7 +15,8 @@ StrategyMap = dict[QuantizedState,
 
 # ================================ Constants ================================= #
 LANE_WIDTH = 4  # [m]
-TIME_HEADWAY = 1.0  # [s]
+SAFE_TIME_HEADWAY = 2.0  # [s]
+SAFE_CONNECTED_TIME_HEADWAY = 1.0  # [s]
 STANDSTILL_DISTANCE = 1.0  # [m]
 
 UNIT_MAP = {'t': 's', 'x': 'm', 'y': 'm', 'theta': 'rad', 'v': 'm/s',
@@ -176,5 +177,5 @@ class Configuration:
 
 
 def get_lane_changing_time_headway() -> float:
-    return TIME_HEADWAY + (0.2 if Configuration.increase_lc_time_headway
+    return SAFE_CONNECTED_TIME_HEADWAY + (0.2 if Configuration.increase_lc_time_headway
                            else 0.)

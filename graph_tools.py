@@ -159,17 +159,24 @@ class VehicleStatesGraph:
             self, ego_position_in_platoon: int, lo_states: Sequence[float],
             platoon_states: Iterable[float], ld_states: Sequence[float],
             fd_states: Sequence[float]):
+        print("[GraphTools] set_maneuver_initial_state for veh at",
+              ego_position_in_platoon)
         states = np.round(
             self._order_values(lo_states, platoon_states, ld_states, fd_states))
         quantized_states = self.state_quantizer.quantize_state(states)
         if quantized_states not in self._initial_states:
             # not int set(self.states_graph.nodes):
-            print(f'State {quantized_states} not in graph. Adding it now...')
-            self._add_new_tree_to_graph(quantized_states, lo_states[-1],
-                                        ld_states[-1], fd_states[-1])
-        self._initial_state_per_vehicle[ego_position_in_platoon] = (
-            quantized_states
-        )
+            print(f'State {quantized_states} not in graph. '
+                  f'Waiting for next iteration...')
+            # self._initial_state_per_vehicle[ego_position_in_platoon] = (
+            #     self._empty_initial_state)
+            # print('Adding it now...')
+            # self._add_new_tree_to_graph(quantized_states, lo_states[-1],
+            #                             ld_states[-1], fd_states[-1])
+        else:
+            self._initial_state_per_vehicle[ego_position_in_platoon] = (
+                quantized_states
+            )
 
     def set_empty_maneuver_initial_state(self, ego_position_in_platoon: int):
         self._initial_state_per_vehicle[ego_position_in_platoon] = (

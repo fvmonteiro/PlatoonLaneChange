@@ -26,10 +26,6 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     _state_names = ['x', 'y', 'theta', 'v']
     _input_names = ['a', 'phi']
     _is_model_defined: bool = False
-    # _n_states = len(_state_names)
-    # _n_inputs = len(_input_names)
-    # _state_idx = {_state_names[i]: i for i in range(_n_states)}
-    # _input_idx = {_input_names[i]: i for i in range(_n_inputs)}
 
     static_attribute_names = base.BaseVehicle.static_attribute_names.union(
         {'brake_max', 'accel_max'}
@@ -70,10 +66,12 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         """
         if (self.is_in_a_platoon() and self.is_platoon_leader()
                 and self.has_lane_change_intention()
-                and self._platoon.has_lane_change_started()):
+                # and self._platoon.has_lane_change_started()
+        ):
             relevant_vehicle_id = (
                 self._platoon.get_platoon_desired_dest_lane_leader_id())
-            if relevant_vehicle_id >= 0:
+            if (relevant_vehicle_id > -1
+                    and relevant_vehicle_id != self.get_current_leader_id()):
                 return vehicles[relevant_vehicle_id].get_vel()
             else:
                 return self._free_flow_speed
@@ -180,7 +178,6 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     def update_platoons(
             self, vehicles: Mapping[int, base.BaseVehicle],
             platoon_lane_change_strategy: int,
-            # strategy_parameters: tuple[list[int], list[int]] = None
     ) -> None:
         """
         For now, only used to set platoons at the start of the simulation.
@@ -387,8 +384,10 @@ class OptimalControlVehicle(FourStateVehicle):
             return self.can_start_lane_change(vehicles)
 
     def is_lane_changing(self) -> bool:
-        delta_t = self.get_current_time() - self._lc_start_time
-        return delta_t <= self.get_opt_controller().get_time_horizon()
+        if self.has_started_lane_change():
+            delta_t = self.get_current_time() - self._lc_start_time
+            return delta_t <= self.get_opt_controller().get_time_horizon()
+        return False
 
     def _create_platoon(self, platoon_lane_change_strategy: int
                         ) -> platoon.OptimalPlatoon:
@@ -438,10 +437,11 @@ class ClosedLoopVehicle(FourStateVehicle):
         # also update internal values.
         is_safe = self.get_is_lane_change_safe()
         if self.is_in_a_platoon():
-            if self.is_platoon_leader():
-                self._platoon.set_maneuver_initial_state_for_all_vehicles(
-                    vehicles)
-            is_my_turn = self._platoon.can_start_lane_change(self.get_id())
+            # if self.is_platoon_leader():
+            #     self._platoon.set_maneuver_initial_state_for_all_vehicles(
+            #         vehicles)
+            is_my_turn = self._platoon.can_start_lane_change(
+                self.get_id(), vehicles)
         else:
             is_my_turn = True
 

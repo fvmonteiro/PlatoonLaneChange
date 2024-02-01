@@ -5,7 +5,6 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 
 import configuration
-import platoon_lane_change_strategies
 import platoon_lane_change_strategies as lc_strategies
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
@@ -81,16 +80,16 @@ class Platoon:
         return self.lane_change_strategy.get_incoming_vehicle_id(ego_position)
 
     def get_platoon_desired_dest_lane_leader_id(self) -> int:
-        # TODO: looks wrong... We want the non-platoon dest lane leader and
-        #  this may return a platoon vehicle.
-        for veh in self.vehicles:
-            if veh.has_lane_change_intention():
-                desired_ld_id = self.get_vehicle_desired_dest_lane_leader_id(
-                        veh.get_id())
-                if desired_ld_id > -1:
-                    return desired_ld_id
-        print('Note: no platoon vehicle has a desired dest lane leader')
-        return -1
+        return self.lane_change_strategy.get_platoon_destination_lane_leader()
+
+        # for veh in self.vehicles:
+        #     if veh.has_lane_change_intention():
+        #         desired_ld_id = self.get_vehicle_desired_dest_lane_leader_id(
+        #                 veh.get_id())
+        #         if desired_ld_id > -1:
+        #             return desired_ld_id
+        # print('Note: no platoon vehicle has a desired dest lane leader')
+        # return -1
 
     def get_strategy(self) -> lc_strategies.LaneChangeStrategy:
         return self.lane_change_strategy
@@ -100,7 +99,7 @@ class Platoon:
 
     def set_strategy(self, lane_change_strategy: int) -> None:
         self.lane_change_strategy = lc_strategies.strategy_map[
-            lane_change_strategy](self.vehicles)
+            lane_change_strategy](self)
 
     def set_lane_change_order(
             self, strategy_parameters: configuration.Strategy
@@ -184,88 +183,94 @@ class ClosedLoopPlatoon(Platoon):
     def add_vehicle(self, new_vehicle: fsv.ClosedLoopVehicle):
         super().add_vehicle(new_vehicle)
 
-    def set_maneuver_initial_state_for_all_vehicles(
-            self, all_vehicles: Mapping[int, base.BaseVehicle]) -> None:
+    # def set_maneuver_initial_state_for_all_vehicles(
+    #         self, all_vehicles: Mapping[int, base.BaseVehicle]) -> None:
+    #
+    #     if self.has_lane_change_started():
+    #         return
+    #
+    #     print(f"[Platoon] t={all_vehicles[0].get_current_time():.2f} "
+    #           f"setting all possible initial states")
+    #
+    #     # ugly workaround
+    #     if not isinstance(self.lane_change_strategy,
+    #                       lc_strategies.GraphLaneChangeApproach):
+    #         return
+    #
+    #     platoon_leader = self.get_platoon_leader()
+    #     if platoon_leader.has_origin_lane_leader():
+    #         lo = all_vehicles[platoon_leader.get_origin_lane_leader_id()]
+    #         lo_states = lo.get_states()
+    #     else:
+    #         lo_states = []
+    #
+    #     for veh in self.vehicles:
+    #         if veh.get_is_lane_change_gap_suitable():
+    #             if veh.has_destination_lane_leader():
+    #                 ld = all_vehicles[veh.get_destination_lane_leader_id()]
+    #                 ld_states = ld.get_states()
+    #             else:
+    #                 ld_states = []
+    #             if veh.has_destination_lane_follower():
+    #                 fd = all_vehicles[veh.get_destination_lane_follower_id()]
+    #                 fd_states = fd.get_states()
+    #             else:
+    #                 fd_states = []
+    #             self.set_maneuver_initial_state(veh.get_id(), lo_states,
+    #                                             ld_states, fd_states)
+    #         else:
+    #             self.lane_change_strategy.set_empty_maneuver_initial_state(
+    #                 veh.get_id())
 
-        if (self.has_lane_change_started() or
-                not isinstance(
-                    self.lane_change_strategy,
-                    platoon_lane_change_strategies.GraphLaneChangeApproach)):
-            return
+    # def set_maneuver_initial_state(
+    #         self, ego_id: int, lo_states: Sequence[float],
+    #         ld_states: Sequence[float], fd_states: Sequence[float]) -> None:
+    #
+    #     print("[Platoon] set_maneuver_initial_state for vehicle", ego_id)
+    #
+    #     p1 = self.get_platoon_leader()
+    #     if len(lo_states) == 0:
+    #         lo_states = p1.get_states().copy()
+    #         lo_states[0] += p1.compute_lane_keeping_desired_gap()
+    #     else:
+    #         lo_states = np.copy(lo_states)
+    #     if len(ld_states) == 0:
+    #         ld_states = lo_states.copy()
+    #         ld_states[1] = p1.get_target_y()
+    #     else:
+    #         ld_states = np.copy(ld_states)
+    #     if len(fd_states) == 0:
+    #         pN = self.get_last_platoon_vehicle()
+    #         fd_states = pN.get_states().copy()
+    #         fd_states[0] -= pN.compute_safe_lane_change_gap()
+    #         fd_states[1] = pN.get_target_y()
+    #     else:
+    #         fd_states = np.copy(fd_states)
+    #
+    #     # We center all around the leader
+    #     leader_x = p1.get_x()
+    #     leader_y = p1.get_y()
+    #
+    #     platoon_states = []
+    #     for veh in self.vehicles:
+    #         veh_states = veh.get_states().copy()
+    #         veh_states[0] -= leader_x
+    #         veh_states[1] -= leader_y
+    #         platoon_states.extend(veh_states)
+    #
+    #     lo_states[0] -= leader_x
+    #     lo_states[1] -= leader_y
+    #     ld_states[0] -= leader_x
+    #     ld_states[1] -= leader_y
+    #     fd_states[0] -= leader_x
+    #     fd_states[1] -= leader_y
+    #
+    #     ego_position = self._id_to_position_map[ego_id]
+    #     self.lane_change_strategy.set_maneuver_initial_state(
+    #         ego_position, lo_states, ld_states, fd_states)
 
-        platoon_leader = self.get_platoon_leader()
-        if platoon_leader.has_origin_lane_leader():
-            lo = all_vehicles[platoon_leader.get_origin_lane_leader_id()]
-            lo_states = lo.get_states()
-        else:
-            lo_states = []
-
-        for veh in self.vehicles:
-            if veh.get_is_lane_change_gap_suitable():
-                if veh.has_destination_lane_leader():
-                    ld = all_vehicles[veh.get_destination_lane_leader_id()]
-                    ld_states = ld.get_states()
-                else:
-                    ld_states = []
-                if veh.has_destination_lane_follower():
-                    fd = all_vehicles[veh.get_destination_lane_follower_id()]
-                    fd_states = fd.get_states()
-                else:
-                    fd_states = []
-                self.set_maneuver_initial_state(veh.get_id(), lo_states,
-                                                ld_states, fd_states)
-            else:
-                self.lane_change_strategy.set_empty_maneuver_initial_state(
-                    veh.get_id())
-
-    def set_maneuver_initial_state(
-            self, ego_id: int, lo_states: Sequence[float],
-            ld_states: Sequence[float], fd_states: Sequence[float]) -> None:
-        # TODO: avoid hard coding array indices
-
-        p1 = self.get_platoon_leader()
-        # TODO: lazy workaround. We need to include the no leader
-        #  possibilities in the graph
-        if len(lo_states) == 0:
-            lo_states = p1.get_states().copy()
-            lo_states[0] += p1.compute_lane_keeping_desired_gap()
-        else:
-            lo_states = np.copy(lo_states)
-        if len(ld_states) == 0:
-            ld_states = lo_states.copy()
-            ld_states[1] = p1.get_target_y()
-        else:
-            ld_states = np.copy(ld_states)
-        if len(fd_states) == 0:
-            pN = self.get_last_platoon_vehicle()
-            fd_states = pN.get_states().copy()
-            fd_states[0] -= pN.compute_safe_lane_change_gap()
-            fd_states[1] = pN.get_target_y()
-        else:
-            fd_states = np.copy(fd_states)
-
-        # We center all around the leader
-        leader_x = p1.get_x()
-        leader_y = p1.get_y()
-
-        platoon_states = []
-        for veh in self.vehicles:
-            veh_states = veh.get_states().copy()
-            veh_states[0] -= leader_x
-            veh_states[1] -= leader_y
-            platoon_states.extend(veh_states)
-
-        lo_states[0] -= leader_x
-        lo_states[1] -= leader_y
-        ld_states[0] -= leader_x
-        ld_states[1] -= leader_y
-        fd_states[0] -= leader_x
-        fd_states[1] -= leader_y
-
+    def can_start_lane_change(self, ego_id: int,
+                              vehicles: Mapping[int, base.BaseVehicle]) -> bool:
         ego_position = self._id_to_position_map[ego_id]
-        self.lane_change_strategy.set_maneuver_initial_state(
-            ego_position, lo_states, platoon_states, ld_states, fd_states)
-
-    def can_start_lane_change(self, ego_id: int) -> bool:
-        ego_position = self._id_to_position_map[ego_id]
-        return self.lane_change_strategy.can_start_lane_change(ego_position)
+        return self.lane_change_strategy.can_start_lane_change(
+            ego_position, vehicles)

@@ -34,13 +34,19 @@ class LongitudinalController:
         v_ego = self.vehicle.get_vel()
         v_ff = self.vehicle.get_desired_free_flow_speed(vehicles)
 
-        if not self.vehicle.has_leader() or self._is_vehicle_far_ahead(
-                vehicles[self.vehicle.get_current_leader_id()]):
-            if self._state != self.States.CRUISE:
-                self._velocity_controller.set(v_ego, v_ff)
+        if not self.vehicle.has_leader():
             new_state = self.States.CRUISE
         else:
-            new_state = self.States.VEHICLE_FOLLOWING
+            leader = vehicles[self.vehicle.get_current_leader_id()]
+            is_leader_too_fast = leader.get_vel() > 1.1 * v_ff
+            if self._is_vehicle_far_ahead(leader) or is_leader_too_fast:
+                new_state = self.States.CRUISE
+            else:
+                new_state = self.States.VEHICLE_FOLLOWING
+
+        # Transition back to cruising
+        if new_state == self.States.CRUISE and new_state != self._state:
+            self._velocity_controller.set(v_ego, v_ff)
 
         self._state = new_state
         if self._state == self.States.CRUISE:

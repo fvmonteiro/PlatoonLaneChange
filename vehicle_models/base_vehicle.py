@@ -66,16 +66,16 @@ class BaseVehicle(ABC):
         self.lf = 1  # dist from C.G. to front wheel
         self.wheelbase = self.lr + self.lf
         self.phi_max = 0.1  # max steering wheel angle
-        self.brake_max = -4.0
+        self.brake_max = -6.0
         self.accel_max = 2.0
         self.brake_comfort_max = -2.0
         self._desired_future_follower_id = -1
         # Note: safe time headway values are used to linearly overestimate
         # the nonlinear safe gaps
-        self.h_safe_lk = config.TIME_HEADWAY
-        self.h_ref_lk = self.h_safe_lk + 0.2
+        self.h_safe_lk = config.SAFE_CONNECTED_TIME_HEADWAY
+        self.h_ref_lk = self.h_safe_lk  # + 0.2
         self.h_safe_lc = config.get_lane_changing_time_headway()
-        self.h_ref_lc = self.h_safe_lc + 0.2
+        self.h_ref_lc = self.h_safe_lc  # + 0.2
         self.c = config.STANDSTILL_DISTANCE
 
         self._is_connected = is_connected
@@ -87,11 +87,12 @@ class BaseVehicle(ABC):
         return f'{self.__class__.__name__} id={self._id}, name={self._name}'
 
     @staticmethod
-    def reset_vehicle_counter():
+    def reset_vehicle_counter() -> None:
         BaseVehicle._counter = 0
 
     @staticmethod
-    def copy_from_other(vehicle_to: BaseVehicle, vehicle_from: BaseVehicle):
+    def copy_from_other(vehicle_to: BaseVehicle, vehicle_from: BaseVehicle
+                        ) -> None:
         for attr_name in vehicle_from.static_attribute_names:
             setattr(vehicle_to, attr_name, getattr(vehicle_from, attr_name))
         vehicle_to.copy_initial_state(vehicle_from.get_states())
@@ -152,7 +153,7 @@ class BaseVehicle(ABC):
     def get_theta(self) -> float:
         return self.get_a_state_by_name('theta')
 
-    def get_reference_time_headway(self):
+    def get_reference_time_headway(self) -> float:
         return (self.h_ref_lc if self.has_lane_change_intention()
                 else self.h_ref_lk)
 
@@ -335,7 +336,7 @@ class BaseVehicle(ABC):
         return new_vehicle
 
     def copy_attributes(self, new_vehicle: BaseVehicle,
-                        initial_state: np.ndarray = None):
+                        initial_state: np.ndarray = None) -> None:
         for attr_name in self.static_attribute_names:
             setattr(new_vehicle, attr_name, getattr(self, attr_name))
         if initial_state is None:
@@ -444,7 +445,7 @@ class BaseVehicle(ABC):
         simulated again
         """
         self.initialize_simulation_logs(n_samples)
-        self._lc_start_time = -np.inf
+        self._lc_start_time = np.inf
         self._lc_end_time = 0.
 
         # Initial state
@@ -549,12 +550,16 @@ class BaseVehicle(ABC):
     def is_in_a_platoon(self) -> bool:
         return not (self.get_platoon() is None)
 
+    def has_started_lane_change(self) -> bool:
+        return self.get_current_time() >= self._lc_start_time
+
     def update_surrounding_vehicles(self, vehicles: Iterable[BaseVehicle]):
         self.find_origin_lane_vehicles(vehicles)
         self.find_destination_lane_vehicles(vehicles)
         self.find_cooperation_requests(vehicles)
 
-    def find_origin_lane_vehicles(self, vehicles: Iterable[BaseVehicle]) -> None:
+    def find_origin_lane_vehicles(self, vehicles: Iterable[BaseVehicle]
+                                  ) -> None:
         """
         Finds and sets the ids of the origin lane leader and follower.
         """
@@ -630,7 +635,7 @@ class BaseVehicle(ABC):
 
     def check_surrounding_gaps_safety(
             self, vehicles: Mapping[int, BaseVehicle]):
-        margin = 1e-2
+        margin = 1e-1
 
         ego_safe_gap = self.compute_safe_lane_change_gap()
         # is_safe_to_orig_lane_leader = True
@@ -645,8 +650,10 @@ class BaseVehicle(ABC):
         if self.has_destination_lane_leader():
             dest_lane_leader = vehicles[self.get_destination_lane_leader_id()]
             gap_to_ld = BaseVehicle.compute_a_gap(dest_lane_leader, self)
+            dest_lane_leader_vel = dest_lane_leader.get_vel()
         else:
             gap_to_ld = np.inf
+            dest_lane_leader_vel = np.inf
         is_safe_to_dest_lane_leader = gap_to_ld + margin >= ego_safe_gap
 
         # is_safe_to_dest_lane_follower = True
@@ -660,8 +667,16 @@ class BaseVehicle(ABC):
             fd_safe_gap = 0.
         is_safe_to_dest_lane_follower = gap_from_fd + margin >= fd_safe_gap
 
-        self._is_lane_change_gap_suitable = (gap_to_ld + gap_from_fd + margin
-                                             >= fd_safe_gap + ego_safe_gap)
+        # A suitable gap is a gap that the vehicle can reach by decelerating
+        # and that is large enough for a lane change.
+        lc_speed = min(self.get_vel(), dest_lane_leader_vel)
+        ego_safe_gap_after_deceleration = self.compute_safe_lane_change_gap(
+            lc_speed)
+        self._is_lane_change_gap_suitable = (
+                is_safe_to_dest_lane_follower
+                and (gap_to_ld + gap_from_fd + margin
+                     >= fd_safe_gap + ego_safe_gap_after_deceleration)
+        )
         self._is_lane_change_safe = (is_safe_to_orig_lane_leader
                                      and is_safe_to_dest_lane_leader
                                      and is_safe_to_dest_lane_follower)
@@ -832,7 +847,7 @@ class BaseVehicle(ABC):
         return df
 
     def prepare_for_lane_keeping_start(self) -> None:
-        self._lc_start_time = -np.inf
+        self._lc_start_time = np.inf
         # we assume at most one lane change per simulation
         self._lc_end_time = self.get_current_time()
 

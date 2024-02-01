@@ -291,14 +291,14 @@ def main():
     #              [0, -5, 5])
 
     v_dest = v_orig
-    delta_x = {'ld': -1., 'lo': 0., 'fd': -1.}
+    delta_x = {'ld': 0., 'lo': 0., 'fd': 5.}
     # run_closed_loop_test(n_platoon, are_vehicles_cooperative,
     #                      v_orig, v_ff_platoon, v_dest, delta_x,
-    #                      [12, 5], plot_results=True)
+    #                      [5, 13], plot_results=True)
 
     run_scenarios_for_comparison(
         n_platoon, v_orig, v_ff_platoon, are_vehicles_cooperative,
-        [6], [0], gap_positions=None, has_plots=True, save=False
+        [13], [-5], gap_positions=[1], has_plots=True, save=False
     )
 
     # for n_platoon in [2, 3, 4]:
