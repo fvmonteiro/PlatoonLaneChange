@@ -254,7 +254,7 @@ def filter_test():
 
 def main():
 
-    n_platoon = 3
+    n_platoon = 2
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
 
@@ -277,9 +277,9 @@ def main():
         sim_time=sim_time, increase_lc_time_headway=False
     )
 
-    v_orig = 20.
-    v_ff_platoon = v_orig * 1.5
-    delta_v_dest_lane = [0, -5, 5]
+    v_orig = [70/3.6]
+    v_ff_platoon = 110/3.6
+    v_dest = np.array([50, 70, 90])/3.6
 
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
@@ -290,22 +290,26 @@ def main():
     # create_graph(n_platoon, graph_includes_fd, [v_orig], v_ff_platoon,
     #              [0, -5, 5])
 
-    v_dest = v_orig
     delta_x = {'ld': 0., 'lo': 0., 'fd': 5.}
     # run_closed_loop_test(n_platoon, are_vehicles_cooperative,
     #                      v_orig, v_ff_platoon, v_dest, delta_x,
     #                      [5, 13], plot_results=True)
+    #
+    # run_scenarios_for_comparison(
+    #     n_platoon, v_orig, v_ff_platoon, are_vehicles_cooperative,
+    #     [13], [-5], gap_positions=[1], has_plots=True, save=False
+    # )
 
-    run_scenarios_for_comparison(
-        n_platoon, v_orig, v_ff_platoon, are_vehicles_cooperative,
-        [13], [-5], gap_positions=[1], has_plots=True, save=False
-    )
+    vsg = graph_tools.VehicleStatesGraph(n_platoon, False)
+    graph_t0 = time.time()
+    vsg.create_graph(v_orig, v_ff_platoon, v_dest)
+    print(f'Time to create graph: {time.time() - graph_t0}')
 
     # for n_platoon in [2, 3, 4]:
     #     print(f'############ N={n_platoon} ############')
     #     graph_t0 = time.time()
-    #     create_graph(n_platoon, graph_includes_fd, [v_orig], v_ff_platoon,
-    #                  delta_v_dest_lane)
+    #     create_graph(n_platoon, graph_includes_fd, v_orig, v_ff_platoon,
+    #                  v_dest - v_orig[0])
     #     print(f'Time to create graph: {time.time() - graph_t0}')
     #     configuration.Configuration.set_scenario_parameters(
     #         sim_time=20.0 * n_platoon

@@ -67,7 +67,8 @@ class VehicleStatesGraph:
 
     def __init__(self, n_platoon: int, has_fd: bool):
         n_vehicles = n_platoon + 2 + has_fd
-        self.state_quantizer = StateQuantizer(n_vehicles, dx=9, dv=2)
+        self.state_quantizer = StateQuantizer(
+            n_vehicles, dx=configuration.DELTA_X, dv=configuration.DELTA_V)
         self.n_platoon = n_platoon
         self._has_fd = has_fd
 
@@ -109,39 +110,57 @@ class VehicleStatesGraph:
                                             d[cost_name])
         return strategy_map
 
-    def create_graph(self, vel_orig_lane: Sequence[float],
-                     vel_ff_platoon: float, delta_v_dest_lane: Sequence[float]):
+    def create_all_initial_speeds(
+            self, v_orig: Sequence[float], v_ff_platoon: float,
+            v_dest: Sequence[float]) -> list[tuple[float, float, float]]:
+        min_step_v = configuration.DELTA_V
+        all_combinations = []
+        for vo in v_orig:
+            # print('')
+            v_platoon = [vo]
+            while v_platoon[-1] < v_ff_platoon:
+                v_platoon.append(v_platoon[-1] + min_step_v)
+            for vp in v_platoon:
+                for vd in v_dest:
+                    all_combinations.append((vo, vp, vd))
+        return all_combinations
 
-        delta_x_lo = 0.
+    def create_all_initial_positions(self):
+        pass
+
+    def create_graph(self, vel_orig_lane: Sequence[float],
+                     vel_ff_platoon: float, vel_dest_lane: Sequence[float]):
+
+        max_dist = vel_ff_platoon * configuration.SAFE_TIME_HEADWAY * 3
 
         print(f'Creating graph ')
 
         visited_states = set()
-        for i, v0_lo in enumerate(vel_orig_lane):
-            print(f'  {i+1}/{len(vel_orig_lane)} vo')
-            for j, v0_diff in enumerate(delta_v_dest_lane):
-                print(f'    {j+1}/{len(delta_v_dest_lane)} delta_v')
-                v0_ld = v0_lo + v0_diff
-                v0_fd = v0_lo + v0_diff
-                free_flow_speeds = self._order_values(v0_lo, vel_ff_platoon,
-                                                      v0_ld, v0_fd)
+        all_velocities = self.create_all_initial_speeds(
+            vel_orig_lane, vel_ff_platoon, vel_dest_lane)
+        counter = 0
+        for v0_lo, v0_p, v0_dest in all_velocities:
+            counter += 1
+            print(f"{counter} / {len(all_velocities)} vel. combination")
 
-                nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque()
-                # Create and add the initial states nodes (before any lane
-                # change)
-                initial_states = self._create_initial_states(
-                    v0_lo, v0_lo, v0_ld, v0_fd, delta_x_lo)
-                self._initial_states |= set(initial_states)
+            # Create and add the initial states nodes (before any lane
+            # change)
+            initial_states = self._create_initial_states(
+                v0_lo, v0_p, v0_dest, v0_dest, max_dist)
+            self._initial_states |= initial_states
+            print(f'  {len(initial_states)} roots')
 
-                print(f'    {len(initial_states)} roots')
-                for x0 in initial_states:
-                    self.states_graph.add_node(x0)
-                    nodes.appendleft((PlatoonLCTracker(self.n_platoon), x0))
-                    # print(np.array(x0).reshape([-1, 4]).transpose())
-
-                # Explore the children of each initial state node in BFS mode
-                self._explore_until_maneuver_completion(
-                    nodes, visited_states, free_flow_speeds)
+            # nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque()
+            # for x0 in initial_states:
+            #     self.states_graph.add_node(x0)
+            #     nodes.appendleft((PlatoonLCTracker(self.n_platoon), x0))
+            #     # print(np.array(x0).reshape([-1, 4]).transpose())
+            # # BFS exploration of each initial state node
+            # free_flow_speeds = self._order_values(
+            #     v0_lo, vel_ff_platoon, v0_dest, v0_dest)
+            # self._explore_until_maneuver_completion(
+            #     nodes, visited_states, free_flow_speeds)
+        print(f"Total initial states: {len(self._initial_states)}")
 
     def _add_new_tree_to_graph(self, root: configuration.QuantizedState, 
                                v0_lo: float, v0_ld: float, v0_fd: float = None):
@@ -359,59 +378,80 @@ class VehicleStatesGraph:
 
     def _create_initial_states(
             self, v0_lo: float, v0_platoon: float, v0_ld: float, v0_fd: float,
-            delta_x_lo: float
-    ) -> list[configuration.QuantizedState]:
+            max_leader_dist: float
+    ) -> set[configuration.QuantizedState]:
         """
         The root node is the quantized states of all platoon vehicles and the
         two destination lane vehicles between which the platoon will move.
         We assume x0_p1 = 0
         :param v0_lo:
         :param v0_platoon:
-        :param delta_x_lo:
+        :param max_leader_dist: Assumed value of the farthest ahead any leader
+         may be
         :return:
         """
         vehicle_group = self._create_vehicle_group()
-        p1 = vehicle_group.get_vehicle_by_name('p1')
 
-        # Origin lane leader (convention: x0_p1 = 0)
-        x0_lo_min = p1.compute_lane_keeping_desired_gap(v0_platoon)
-        x0_lo = x0_lo_min + delta_x_lo
-        lo = vehicle_group.get_vehicle_by_name('lo')
-        lo.set_initial_state(x0_lo, 0., 0., v0_lo)
-
-        # Platoon vehicles
-        x0_platoon_vehicle = x0_lo_min
+        # Platoon vehicles (fixed positions given the speed)
+        x0_platoon_vehicle = 0
         for i in range(self.n_platoon):
             p_i = vehicle_group.get_vehicle_by_name('p' + str(i+1))
+            p_i.set_initial_state(x0_platoon_vehicle, 0., 0., v0_platoon)
             x0_platoon_vehicle -= p_i.compute_lane_keeping_desired_gap(
                 v0_platoon)
-            p_i.set_initial_state(x0_platoon_vehicle, 0., 0., v0_platoon)
-
-        # Destination lane
-        ld = vehicle_group.get_vehicle_by_name('ld')
+        p1 = vehicle_group.get_vehicle_by_name('p1')
         pN = vehicle_group.get_vehicle_by_name('p' + str(self.n_platoon))
-        dx = self.state_quantizer.dx
-        possible_ld_x = np.arange(pN.get_x(), lo.get_x() + 2*dx, dx)
-        quantized_initial_states: list[configuration.QuantizedState] = []
-        for ld_x in possible_ld_x:
-            ld.set_initial_state(ld_x, configuration.LANE_WIDTH, 0., v0_ld)
-            if self._has_fd:
-                fd = vehicle_group.get_vehicle_by_name('fd')
-                fd_safe_gap = fd.compute_lane_keeping_desired_gap(v0_fd)
-                possible_fd_x = np.arange(
-                    ld_x - fd_safe_gap, pN.get_x() - fd_safe_gap - dx, -dx)
-                for fd_x in possible_fd_x:
-                    fd.set_initial_state(fd_x, configuration.LANE_WIDTH, 0.,
-                                         v0_fd)
-                    initial_state = (
-                        vehicle_group.get_full_initial_state_vector())
-                    quantized_initial_states.append(
-                        self.state_quantizer.quantize_state(initial_state))
-            else:
-                initial_state = vehicle_group.get_full_initial_state_vector()
-                quantized_initial_states.append(
-                    self.state_quantizer.quantize_state(initial_state))
+
+        # Surrounding vehicles (variable positions)
+        lo = vehicle_group.get_vehicle_by_name('lo')
+        ld = vehicle_group.get_vehicle_by_name('ld')
+        x0_lo = p1.compute_lane_keeping_desired_gap(v0_platoon)
+        dx = configuration.DELTA_X
+        quantized_initial_states: set[configuration.QuantizedState] = set()
+        while x0_lo < max_leader_dist:
+            lo.set_initial_state(x0_lo, 0., 0., v0_lo)
+            x0_ld = pN.get_x()
+            while x0_ld < max_leader_dist:
+                ld.set_initial_state(x0_ld, configuration.LANE_WIDTH, 0., v0_ld)
+                # it's not conceptually right to use ld when computing fd's
+                # safe gap, but we know fd and ld have the same characteristics
+                x0_fd = pN.get_x() - ld.compute_lane_keeping_desired_gap(v0_fd)
+                while self._has_fd and x0_fd > pN.get_x() - max_leader_dist:
+                    fd = vehicle_group.get_vehicle_by_name('fd')
+                    fd.set_initial_state(x0_fd, configuration.LANE_WIDTH,
+                                         0., v0_fd)
+                    quantized_initial_states.add(
+                        self.state_quantizer.quantize_state(
+                            vehicle_group.get_full_initial_state_vector()))
+                    x0_fd -= dx
+                # We add again in case self._has_fd is false
+                quantized_initial_states.add(
+                    self.state_quantizer.quantize_state(
+                        vehicle_group.get_full_initial_state_vector()))
+                x0_ld += dx
+            x0_lo += dx
         return quantized_initial_states
+        # possible_ld_x = np.arange(pN.get_x(), lo.get_x() + 2*dx, dx)
+        #
+        # for ld_x in possible_ld_x:
+        #     ld.set_initial_state(ld_x, configuration.LANE_WIDTH, 0., v0_ld)
+        #     if self._has_fd:
+        #         fd = vehicle_group.get_vehicle_by_name('fd')
+        #         fd_safe_gap = fd.compute_lane_keeping_desired_gap(v0_fd)
+        #         possible_fd_x = np.arange(
+        #             ld_x - fd_safe_gap, pN.get_x() - fd_safe_gap - dx, -dx)
+        #         for fd_x in possible_fd_x:
+        #             fd.set_initial_state(fd_x, configuration.LANE_WIDTH, 0.,
+        #                                  v0_fd)
+        #             initial_state = (
+        #                 vehicle_group.get_full_initial_state_vector())
+        #             quantized_initial_states.append(
+        #                 self.state_quantizer.quantize_state(initial_state))
+        #     else:
+        #         initial_state = vehicle_group.get_full_initial_state_vector()
+        #         quantized_initial_states.append(
+        #             self.state_quantizer.quantize_state(initial_state))
+        # return quantized_initial_states
 
     def _explore_until_maneuver_completion(
             self, nodes: deque[tuple[PlatoonLCTracker, tuple]],
@@ -713,7 +753,8 @@ class StateQuantizer:
     # - Set n_vehicles in constructor
 
     def __init__(
-            self, n_vehicles: int, dx: float, dv: float, dy: float = 4,
+            self, n_vehicles: int, dx: float, dv: float,
+            dy: float = configuration.DELTA_Y,
             dtheta: float = None, veh_type: type[base.BaseVehicle] = None):
         if veh_type is None:
             veh_type = fsv.FourStateVehicle

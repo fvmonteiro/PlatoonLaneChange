@@ -18,6 +18,10 @@ LANE_WIDTH = 4  # [m]
 SAFE_TIME_HEADWAY = 2.0  # [s]
 SAFE_CONNECTED_TIME_HEADWAY = 1.0  # [s]
 STANDSTILL_DISTANCE = 1.0  # [m]
+# TODO: read these from a file
+DELTA_X = 9  # quantization interval [m]
+DELTA_V = 2  # quantization interval [m]
+DELTA_Y = 4  # quantization interval [m]
 
 UNIT_MAP = {'t': 's', 'x': 'm', 'y': 'm', 'theta': 'rad', 'v': 'm/s',
             'a': 'm/s^2', 'phi': 'rad', 'gap': 'm'}

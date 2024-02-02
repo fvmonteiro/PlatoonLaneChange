@@ -215,8 +215,8 @@ class TemplateStrategy(LaneChangeStrategy):
         self._last_dest_lane_vehicle_idx = (
             self._get_rearmost_lane_changing_vehicle_position())
         self._is_initialized = True
-        print(f'Chosen LC/coop order: {lane_changing_order}, '
-              f'{cooperating_order}')
+        # print(f'Chosen LC/coop order: {lane_changing_order}, '
+        #       f'{cooperating_order}')
 
     def can_start_lane_change(self, ego_position: int,
                               vehicles: Mapping[int, base.BaseVehicle]) -> bool:
@@ -259,7 +259,6 @@ class TemplateStrategy(LaneChangeStrategy):
                 )
             self._idx += 1
 
-    @abstractmethod
     def _decide_lane_change_order(
             self, vehicles: Mapping[int, base.BaseVehicle]) -> None:
         pass
