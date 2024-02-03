@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import pickle
+import warnings
 from collections.abc import Iterable, Mapping, Sequence
 from collections import defaultdict, deque
 import json
@@ -110,6 +111,89 @@ class VehicleStatesGraph:
                                             d[cost_name])
         return strategy_map
 
+    def get_initial_states(self) -> set[configuration.QuantizedState]:
+        return self._initial_states
+
+    def create_graph(self, vel_orig_lane: Sequence[float],
+                     vel_ff_platoon: float, vel_dest_lane: Sequence[float],
+                     max_dist: float, mode: str = "as"):
+        """
+
+        :param vel_orig_lane: The traveling speed of non-platoon
+         vehicles at the origin lane (only the origin lane leader)
+        :param vel_ff_platoon: The desired free-flow speed of the platoon. The
+         method creates nodes with initial platoon speed between
+         vel_orig_lane and vel_ff_platoon.
+        :param vel_dest_lane: The traveling speed of non-platoon
+         vehicles at the origin lane (destination lane leader and, possibly,
+         the destination lane follower)
+        :param max_dist: The maximum distance between the platoon leader and
+         its origin and destination lane leaders. The method creates nodes
+         with initial leader positions up to the way to max_dist.
+        :param mode: 'w': ignores any existing file (so saving this object
+         will overwrite existing graphs); 'ao': appends to an existing graph
+         (previously saved to a file) and overwrites previous results if
+         there are repeated initial nodes; 'as': appends to an existing graph
+         and skips any repeated initial nodes.
+        :return:
+        """
+        print(f'Creating graph ')
+
+        if mode not in {'w', 'ao', 'as'}:
+            raise ValueError(
+                "[VehicleStatesGraph] Chosen mode is not valid. Must be "
+                "'w', 'ao' or 'as'")
+
+        if mode.startswith('a'):
+            other_object = VehicleStatesGraph.load_from_file(self.n_platoon,
+                                                             self._has_fd)
+            self._initial_states = other_object.get_initial_states()
+            self.states_graph = other_object.states_graph
+            del other_object
+
+        visited_states = set()
+        all_velocities = self.create_all_initial_speeds(
+            vel_orig_lane, vel_ff_platoon, vel_dest_lane)
+        repeated_initial_states_counter = 0
+        counter = 0
+        for v0_lo, v0_p, v0_dest in all_velocities:
+            counter += 1
+            print(f"{counter} / {len(all_velocities)} vel. combination")
+
+            # Create and add the initial states nodes (before any lane
+            # change)
+            initial_states = self._create_initial_states(
+                v0_lo, v0_p, v0_dest, v0_dest, max_dist)
+            print(f'  {len(initial_states)} roots')
+
+            free_flow_speeds = self._order_values(
+                v0_lo, vel_ff_platoon, v0_dest, v0_dest)
+            # nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque()
+            for x0 in initial_states:
+                if x0 in self._initial_states:
+                    repeated_initial_states_counter += 1
+                    if mode.endswith('s'):
+                        continue
+                    elif mode.endswith('o'):
+                        self._delete_successor_nodes(x0)
+                    else:
+                        warnings.warn(
+                            "[VehicleStatesGraph] found a repeated initial "
+                            "state in writing mode. Overwriting it...")
+                        self._delete_successor_nodes(x0)
+                self.states_graph.add_node(x0)
+                root = (PlatoonLCTracker(self.n_platoon), x0)
+                # nodes.appendleft((PlatoonLCTracker(self.n_platoon), x0))
+                # print(np.array(x0).reshape([-1, 4]).transpose())
+                # BFS exploration of each initial state node
+                self._explore_until_maneuver_completion(
+                    root, visited_states, free_flow_speeds)
+            self._initial_states |= initial_states
+        print(f"Total initial states: {len(self._initial_states)}")
+        if repeated_initial_states_counter > 0:
+            print(("skipped" if mode.endswith('s') else "overwrote")
+                  + f" initial states: {repeated_initial_states_counter}")
+
     def create_all_initial_speeds(
             self, v_orig: Sequence[float], v_ff_platoon: float,
             v_dest: Sequence[float]) -> list[tuple[float, float, float]]:
@@ -125,61 +209,12 @@ class VehicleStatesGraph:
                     all_combinations.append((vo, vp, vd))
         return all_combinations
 
-    def create_all_initial_positions(self):
-        pass
-
-    def create_graph(self, vel_orig_lane: Sequence[float],
-                     vel_ff_platoon: float, vel_dest_lane: Sequence[float]):
-
-        max_dist = vel_ff_platoon * configuration.SAFE_TIME_HEADWAY * 3
-
-        print(f'Creating graph ')
-
-        visited_states = set()
-        all_velocities = self.create_all_initial_speeds(
-            vel_orig_lane, vel_ff_platoon, vel_dest_lane)
-        counter = 0
-        for v0_lo, v0_p, v0_dest in all_velocities:
-            counter += 1
-            print(f"{counter} / {len(all_velocities)} vel. combination")
-
-            # Create and add the initial states nodes (before any lane
-            # change)
-            initial_states = self._create_initial_states(
-                v0_lo, v0_p, v0_dest, v0_dest, max_dist)
-            self._initial_states |= initial_states
-            print(f'  {len(initial_states)} roots')
-
-            # nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque()
-            # for x0 in initial_states:
-            #     self.states_graph.add_node(x0)
-            #     nodes.appendleft((PlatoonLCTracker(self.n_platoon), x0))
-            #     # print(np.array(x0).reshape([-1, 4]).transpose())
-            # # BFS exploration of each initial state node
-            # free_flow_speeds = self._order_values(
-            #     v0_lo, vel_ff_platoon, v0_dest, v0_dest)
-            # self._explore_until_maneuver_completion(
-            #     nodes, visited_states, free_flow_speeds)
-        print(f"Total initial states: {len(self._initial_states)}")
-
-    def _add_new_tree_to_graph(self, root: configuration.QuantizedState, 
-                               v0_lo: float, v0_ld: float, v0_fd: float = None):
-
-        visited_states = set(self.states_graph.nodes)
-        v_ff_platoon = 1.2 * v0_lo
-        free_flow_speeds = self._order_values(v0_lo, v_ff_platoon,
-                                              v0_ld, v0_fd)
-        self.states_graph.add_node(root)
-        nodes = deque([(PlatoonLCTracker(self.n_platoon), root)])
-        self._explore_until_maneuver_completion(
-            nodes, visited_states, free_flow_speeds)
-
     def set_maneuver_initial_state(
             self, ego_position_in_platoon: int, lo_states: Sequence[float],
             platoon_states: Iterable[float], ld_states: Sequence[float],
             fd_states: Sequence[float]):
-        print("[GraphTools] set_maneuver_initial_state for veh at",
-              ego_position_in_platoon)
+        # print("[GraphTools] set_maneuver_initial_state for veh at",
+        #       ego_position_in_platoon)
         states = np.round(
             self._order_values(lo_states, platoon_states, ld_states, fd_states))
         quantized_states = self.state_quantizer.quantize_state(states)
@@ -454,16 +489,16 @@ class VehicleStatesGraph:
         # return quantized_initial_states
 
     def _explore_until_maneuver_completion(
-            self, nodes: deque[tuple[PlatoonLCTracker, tuple]],
+            self, root: tuple[PlatoonLCTracker, tuple],
             visited_states: set[tuple], free_flow_speeds: Sequence[float]):
         """
         Given a list of nodes containing all the first move states, explore
         until maneuver completion
-        :param nodes:
+        :param root: initial no lane changes state
         :param free_flow_speeds:
         :return:
         """
-
+        nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque([root])
         while len(nodes) > 0:
             tracker, quantized_state = nodes.pop()
             if quantized_state in visited_states:
@@ -575,7 +610,8 @@ class VehicleStatesGraph:
         i = 0
         while i < len(time) - 1 and np.any(
                 [veh.has_lane_change_intention() for veh in lc_vehicles]):
-            vehicle_group.simulate_one_time_step(time[i + 1])
+            vehicle_group.simulate_one_time_step(time[i + 1],
+                                                 detect_collision=True)
             i += 1
 
         vehicle_group.truncate_simulation_history()
@@ -602,13 +638,27 @@ class VehicleStatesGraph:
         # if percentage % 10 < 0.5:
         #     print(f'{percentage:.1f}% done')
 
-    def _mark_terminal_node(self, node):
+    def _mark_terminal_node(self, node: configuration.QuantizedState) -> None:
         self.states_graph.nodes[node]['is_terminal'] = True
+
+    def _delete_successor_nodes(self, node: configuration.QuantizedState
+                                ) -> None:
+        """
+        Recursively deletes all children of the given node if they don't have
+        any other ancestors
+        :param node:
+        :return:
+        """
+        if len(self.states_graph.predecessors(node)) > 1:
+            return
+        for successor in self.states_graph.successors(node):
+            self._delete_successor_nodes(successor)
+        self.states_graph.remove_node(node)
 
     def _add_all_first_mover_nodes(
             self, nodes: deque[tuple[PlatoonLCTracker, tuple]],
             platoon_veh_ids: Sequence[int],
-            v0_ld: float, delta_x_ld: float):
+            v0_ld: float, delta_x_ld: float) -> None:
         """
         Adds to nodes all the states after a single platoon vehicle has moved
         to the destination lane. The method puts the destination lane leader
@@ -729,6 +779,8 @@ class VehicleStatesGraph:
                 if cost < opt_cost:
                     opt_cost = cost
                     opt_strategy = strategy
+        if opt_strategy is None:
+            pass  # figure out
         return opt_strategy, opt_cost
 
     def get_maneuver_order_from_path(self, path) -> configuration.Strategy:
