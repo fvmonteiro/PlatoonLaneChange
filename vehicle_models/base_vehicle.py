@@ -72,10 +72,11 @@ class BaseVehicle(ABC):
         self._desired_future_follower_id = -1
         # Note: safe time headway values are used to linearly overestimate
         # the nonlinear safe gaps
+        # TODO: are these values used before they are properly set?
         self.h_safe_lk = config.SAFE_CONNECTED_TIME_HEADWAY
-        self.h_ref_lk = self.h_safe_lk  # + 0.2
+        self.h_ref_lk = self.h_safe_lk + config.TIME_HEADWAY_MARGIN
         self.h_safe_lc = config.get_lane_changing_time_headway()
-        self.h_ref_lc = self.h_safe_lc  # + 0.2
+        self.h_ref_lc = self.h_safe_lc + config.TIME_HEADWAY_MARGIN
         self.c = config.STANDSTILL_DISTANCE
 
         self._is_connected = is_connected
@@ -105,6 +106,9 @@ class BaseVehicle(ABC):
 
     def get_name(self) -> str:
         return self._name
+
+    def get_is_connected(self) -> bool:
+        return self._is_connected
 
     @classmethod
     def get_n_states(cls) -> int:
@@ -202,6 +206,12 @@ class BaseVehicle(ABC):
     def get_input_history(self) -> np.ndarray:
         return self._inputs_history
 
+    def get_h_safe_lk(self) -> float:
+        return None
+
+    def get_h_safe_lc(self) -> float:
+        return None
+
     @abstractmethod
     def get_external_input_idx(self) -> dict[str, int]:
         pass
@@ -296,6 +306,11 @@ class BaseVehicle(ABC):
     def get_desired_future_follower_id(self) -> int:
         return self._desired_future_follower_id
 
+    def get_lane_changing_time_headway(self, are_connected: bool) -> float:
+        h = self.get_h_safe_lk()
+        return h + (0.2 if config.Configuration.increase_lc_time_headway
+                    else 0.)
+
     def get_current_leader_id(self) -> int:
         """
         The 'current' leader is the vehicle being used to define this vehicle's
@@ -318,6 +333,11 @@ class BaseVehicle(ABC):
 
     def get_platoon_strategy_decision_time(self) -> float:
         pass  # TODO: make abstract or refactor code
+
+    def _set_time_headways(self, are_connected: bool) -> None:
+        self.h_safe_lk = (config.SAFE_CONNECTED_TIME_HEADWAY if are_connected
+                          else config.SAFE_TIME_HEADWAY)
+        self.h_safe_lc = config.get_lane_changing_time_headway(are_connected)
 
     def make_reset_copy(self, initial_state: np.ndarray = None) -> V:
         """
@@ -1137,10 +1157,10 @@ class BaseVehicleInterface(ABC):
             self._initial_state[self.state_idx[state_name]] = shifted
 
     def compute_lane_keeping_safe_gap(self, v_ego: float) -> float:
-        return self.compute_safe_gap(v_ego, self.base_vehicle.h_safe_lk)
+        return self.compute_safe_gap(v_ego, self.base_vehicle.get_h_safe_lk())
 
     def compute_lane_changing_safe_gap(self, v_ego: float) -> float:
-        return self.compute_safe_gap(v_ego, self.base_vehicle.h_safe_lc)
+        return self.compute_safe_gap(v_ego, self.base_vehicle.get_h_safe_lc())
 
     def compute_safe_gap(self, v_ego: float, safe_h: float) -> float:
         return safe_h * v_ego + self.base_vehicle.c

@@ -18,6 +18,7 @@ LANE_WIDTH = 4  # [m]
 SAFE_TIME_HEADWAY = 2.0  # [s]
 SAFE_CONNECTED_TIME_HEADWAY = 1.0  # [s]
 STANDSTILL_DISTANCE = 1.0  # [m]
+TIME_HEADWAY_MARGIN = 0.1  # [s]
 # TODO: read these from a file
 DELTA_X = 9  # quantization interval [m]
 DELTA_V = 2  # quantization interval [m]
@@ -180,6 +181,8 @@ class Configuration:
             Configuration.increase_lc_time_headway = increase_lc_time_headway
 
 
-def get_lane_changing_time_headway() -> float:
-    return SAFE_CONNECTED_TIME_HEADWAY + (0.2 if Configuration.increase_lc_time_headway
-                           else 0.)
+# TODO: remove default value. Each caller should know. Or maybe remove this
+#  function from here and figure out better design
+def get_lane_changing_time_headway(are_connected: bool = False) -> float:
+    h = SAFE_CONNECTED_TIME_HEADWAY if are_connected else SAFE_TIME_HEADWAY
+    return h + (0.2 if Configuration.increase_lc_time_headway else 0.)

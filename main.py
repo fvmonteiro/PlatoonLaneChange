@@ -204,13 +204,19 @@ def load_and_plot_latest_scenario():
 
 
 def create_graph(n_platoon: int, has_fd: bool, vel_orig_lane: Sequence[float],
-                 vel_ff_platoon: float, delta_v_dest_lane: Sequence[float]):
+                 vel_ff_platoon: float, delta_v_dest_lane: Sequence[float],
+                 max_dist: float, mode: str = "as"):
     vsg = graph_tools.VehicleStatesGraph(n_platoon, has_fd)
-    vsg.create_graph(vel_orig_lane, vel_ff_platoon, delta_v_dest_lane)
-    for cost_name in ['time', 'accel']:
-        vsg.save_minimum_cost_strategies_to_json(cost_name)
+    vsg.create_graph(vel_orig_lane, vel_ff_platoon, delta_v_dest_lane,
+                     max_dist, mode)
     print(f'#nodes={vsg.states_graph.number_of_nodes()}')
     vsg.save_self_to_file()
+    create_and_save_strategy_maps(vsg)
+
+
+def create_and_save_strategy_maps(vsg: graph_tools.VehicleStatesGraph):
+    for cost_name in ['time', 'accel']:
+        vsg.save_minimum_cost_strategies_to_json(cost_name)
 
 
 def filter_test():
@@ -252,8 +258,25 @@ def filter_test():
     fig.show()
 
 
-def main():
+def test():
+    n_platoon = 2
+    starting_node = (8, 0, 0, 9, 5, 1, 0, 11, 2, 0, 0, 11, 8, 1, 0, 12)
+    vsg = graph_tools.VehicleStatesGraph(n_platoon, False)
+    free_flow_speeds = np.array([70, 80, 80, 90]) / 3.6
+    tracker = graph_tools.PlatoonLCTracker(n_platoon)
+    tracker.move_vehicles([0], -1)
+    root = (tracker, starting_node)
+    vsg._explore_until_maneuver_completion(root, set(),
+                                           free_flow_speeds)
 
+    # state_quantizer = graph_tools.StateQuantizer(4, configuration.DELTA_X,
+    #                                              configuration.DELTA_V)
+    # next_pos_to_coop = 0
+    # next_positions_to_move = {1}
+
+
+def main():
+    test()
     n_platoon = 2
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
@@ -277,9 +300,12 @@ def main():
         sim_time=sim_time, increase_lc_time_headway=False
     )
 
+    # TODO: test values only
     v_orig = [70/3.6]
-    v_ff_platoon = 110/3.6
-    v_dest = np.array([50, 70, 90])/3.6
+    v_ff_platoon = 80/3.6  # make 110
+    v_dest = np.array([90])/3.6  # make 50, 70, 90
+    max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY  # *3
+    print("===== CREATING SMALL-SCALE GRAPHS ONLY ======")
 
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
@@ -287,23 +313,20 @@ def main():
 
     start_time = time.time()
 
-    # create_graph(n_platoon, graph_includes_fd, [v_orig], v_ff_platoon,
-    #              [0, -5, 5])
+    graph_t0 = time.time()
+    create_graph(n_platoon, graph_includes_fd, v_orig, v_ff_platoon,
+                 v_dest, max_dist, "as")
+    print(f"Time to create graph: {time.time() - graph_t0}")
 
-    delta_x = {'ld': 0., 'lo': 0., 'fd': 5.}
+    # delta_x = {'ld': 0., 'lo': 0., 'fd': 5.}
     # run_closed_loop_test(n_platoon, are_vehicles_cooperative,
-    #                      v_orig, v_ff_platoon, v_dest, delta_x,
+    #                      v_orig[0], v_ff_platoon, v_dest[0], delta_x,
     #                      [5, 13], plot_results=True)
     #
     # run_scenarios_for_comparison(
     #     n_platoon, v_orig, v_ff_platoon, are_vehicles_cooperative,
     #     [13], [-5], gap_positions=[1], has_plots=True, save=False
     # )
-
-    vsg = graph_tools.VehicleStatesGraph(n_platoon, False)
-    graph_t0 = time.time()
-    vsg.create_graph(v_orig, v_ff_platoon, v_dest)
-    print(f'Time to create graph: {time.time() - graph_t0}')
 
     # for n_platoon in [2, 3, 4]:
     #     print(f'############ N={n_platoon} ############')

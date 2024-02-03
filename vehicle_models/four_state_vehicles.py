@@ -164,6 +164,20 @@ class FourStateVehicle(base.BaseVehicle, ABC):
                              ) -> None:
         self._leader_id[self._iter_counter] = (
             self._controller.get_target_leader_id(vehicles))
+        is_new_leader_new = (
+                self._iter_counter == 0
+                or (self._leader_id[self._iter_counter-1]
+                    != self._leader_id[self._iter_counter]))
+        if self.has_leader() and is_new_leader_new:
+            leader = vehicles[self.get_current_leader_id()]
+            if self._is_connected and leader.get_is_connected():
+                self.h_safe_lk = configuration.SAFE_CONNECTED_TIME_HEADWAY
+                self.h_safe_lc = configuration.get_lane_changing_time_headway(True)
+            else:
+                self.h_safe_lk = configuration.SAFE_TIME_HEADWAY
+                self.h_safe_lc = configuration.get_lane_changing_time_headway(False)
+            self.h_ref_lk = self.h_safe_lk + configuration.TIME_HEADWAY_MARGIN
+            self.h_ref_lc = self.h_safe_lc + configuration.TIME_HEADWAY_MARGIN
 
     def compute_gap_to_a_leader(self, a_leader: base.BaseVehicle):
         return base.BaseVehicle.compute_a_gap(a_leader, self)
