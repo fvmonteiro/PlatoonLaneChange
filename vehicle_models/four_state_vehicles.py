@@ -60,9 +60,8 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             self, vehicles: Mapping[int, base.BaseVehicle]) -> float:
         """
         Returns the free flow speed except for a platoon leader whose platoon
-        has started changing lanes, but the platoon leader is still at the
-        origin lane. In this situation, we want to prevent the platoon from
-        getting far from the gap.
+        has started changing lanes but is still at the origin lane. In this
+        situation, we want to prevent the platoon from getting far from the gap.
         """
         if (self.is_in_a_platoon() and self.is_platoon_leader()
                 and self.has_lane_change_intention()
@@ -71,7 +70,8 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             relevant_vehicle_id = (
                 self._platoon.get_platoon_desired_dest_lane_leader_id())
             if (relevant_vehicle_id > -1
-                    and relevant_vehicle_id != self.get_current_leader_id()):
+                    and (relevant_vehicle_id
+                         != self.get_desired_destination_lane_leader_id())):
                 return vehicles[relevant_vehicle_id].get_vel()
             else:
                 return self._free_flow_speed
@@ -97,14 +97,6 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         for key in self._external_input_idx:
             ret.append(self._inputs_history[self._input_idx[key]])
         return np.array(ret)
-
-    def get_desired_destination_lane_leader_id(self) -> int:
-        if not self.has_lane_change_intention():
-            return -1
-        if not self.is_in_a_platoon():
-            return self.get_suitable_destination_lane_leader_id()
-        return self.get_platoon().get_vehicle_desired_dest_lane_leader_id(
-            self.get_id())
 
     def get_suitable_destination_lane_leader_id(self) -> int:
         """
@@ -160,24 +152,36 @@ class FourStateVehicle(base.BaseVehicle, ABC):
                 self.get_id())
             self._aided_vehicle_id[self._iter_counter] = aided_vehicle_id
 
-    def update_target_leader(self, vehicles: Mapping[int, FourStateVehicle]
-                             ) -> None:
-        self._leader_id[self._iter_counter] = (
-            self._controller.get_target_leader_id(vehicles))
-        is_new_leader_new = (
-                self._iter_counter == 0
-                or (self._leader_id[self._iter_counter-1]
-                    != self._leader_id[self._iter_counter]))
-        if self.has_leader() and is_new_leader_new:
-            leader = vehicles[self.get_current_leader_id()]
-            if self._is_connected and leader.get_is_connected():
-                self.h_safe_lk = configuration.SAFE_CONNECTED_TIME_HEADWAY
-                self.h_safe_lc = configuration.get_lane_changing_time_headway(True)
-            else:
-                self.h_safe_lk = configuration.SAFE_TIME_HEADWAY
-                self.h_safe_lc = configuration.get_lane_changing_time_headway(False)
-            self.h_ref_lk = self.h_safe_lk + configuration.TIME_HEADWAY_MARGIN
-            self.h_ref_lc = self.h_safe_lc + configuration.TIME_HEADWAY_MARGIN
+    def find_desired_destination_lane_leader(self):
+        if not self.has_lane_change_intention():
+            veh_id = -1
+        elif not self.is_in_a_platoon():
+            veh_id = self.get_suitable_destination_lane_leader_id()
+        else:
+            veh_id = self.get_platoon().get_vehicle_desired_dest_lane_leader_id(
+                self.get_id())
+        self._desired_destination_lane_leader_id[self._iter_counter] = veh_id
+
+    # def update_target_leader(self, vehicles: Mapping[int, FourStateVehicle]
+    #                          ) -> None:
+    #     self._leader_id[self._iter_counter] = (
+    #         self._controller.get_target_leader_id(vehicles))
+    #     is_new_leader_new = (
+    #             self._iter_counter == 0
+    #             or (self._leader_id[self._iter_counter-1]
+    #                 != self._leader_id[self._iter_counter]))
+    #     if self.has_leader() and is_new_leader_new:
+    #         leader = vehicles[self.get_current_leader_id()]
+    #         if self._is_connected and leader.get_is_connected():
+    #             self.h_safe_lk = configuration.SAFE_CONNECTED_TIME_HEADWAY
+    #             self.h_safe_lc = configuration.get_lane_changing_time_headway(
+    #             True)
+    #         else:
+    #             self.h_safe_lk = configuration.SAFE_TIME_HEADWAY
+    #             self.h_safe_lc = configuration.get_lane_changing_time_headway(
+    #             False)
+    #         self.h_ref_lk = self.h_safe_lk + configuration.TIME_HEADWAY_MARGIN
+    #         self.h_ref_lc = self.h_safe_lc + configuration.TIME_HEADWAY_MARGIN
 
     def compute_gap_to_a_leader(self, a_leader: base.BaseVehicle):
         return base.BaseVehicle.compute_a_gap(a_leader, self)
@@ -378,12 +382,14 @@ class OptimalControlVehicle(FourStateVehicle):
             cooperating_vehicle = vehicles[
                 self.get_desired_future_follower_id()]
             has_coop_just_started = (
-                    cooperating_vehicle.get_current_leader_id() == self._id
-                    and cooperating_vehicle.has_changed_leader())
+                    cooperating_vehicle.get_aided_vehicle_id() == self._id
+                    # and cooperating_vehicle.has_changed_leader()
+            )
         else:
             has_coop_just_started = False
         has_vehicle_configuration_changed = (
-                self.has_changed_leader() or has_coop_just_started
+                # self.has_changed_leader() or
+                has_coop_just_started
         )
         # If the OPC solver didn't find a solution at first, we do not want to
         # run it again too soon.
@@ -483,22 +489,24 @@ class ShortSimulationVehicle(ClosedLoopVehicle):
                  is_connected: bool = False):
         super().__init__(can_change_lanes, has_open_loop_acceleration,
                          is_connected)
-        self._desired_dest_lane_leader_id = -1
+        self._fixed_desired_dest_lane_leader_id = -1
         self._fixed_incoming_vehicle_id = -1
 
-    def set_desired_dest_lane_leader_id(self, value):
-        self._desired_dest_lane_leader_id = value
+    def set_fixed_desired_dest_lane_leader_id(self, value):
+        self._fixed_desired_dest_lane_leader_id = value
 
     def set_incoming_vehicle_id(self, value):
         self._fixed_incoming_vehicle_id = value
-
-    def get_desired_destination_lane_leader_id(self) -> int:
-        return self._desired_dest_lane_leader_id
 
     def find_cooperation_requests(self, vehicles: Iterable[base.BaseVehicle]
                                   ) -> None:
         self._aided_vehicle_id[self._iter_counter] = (
             self._fixed_incoming_vehicle_id
+        )
+
+    def find_desired_destination_lane_leader(self):
+        self._desired_destination_lane_leader_id[self._iter_counter] = (
+            self._fixed_desired_dest_lane_leader_id
         )
 
     # def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]

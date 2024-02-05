@@ -32,11 +32,14 @@ class BaseVehicle(ABC):
     _iter_counter: int
     _states_history: np.ndarray
     _inputs_history: np.ndarray
-    _origin_leader_id: np.ndarray
-    _origin_follower_id: np.ndarray
-    _destination_leader_id: np.ndarray
-    _destination_follower_id: np.ndarray
-    _aided_vehicle_id: np.ndarray
+    _origin_leader_id: np.ndarray  # vehicle physically ahead
+    _origin_follower_id: np.ndarray  # vehicle physically behind
+    _destination_leader_id: np.ndarray  # vehicle physically ahead in dest lane
+    _destination_follower_id: np.ndarray  # vehicle physically behind in dest
+    # lane
+    _desired_destination_lane_leader_id: np.ndarray  # vehicle behind which we
+    # want to move
+    _aided_vehicle_id: np.ndarray  # vehicle with which we cooperate
     _leader_id: np.ndarray  # vehicle used to determine current accel
     _derivatives: np.ndarray
     _mode: modes.VehicleMode
@@ -75,7 +78,7 @@ class BaseVehicle(ABC):
         # TODO: are these values used before they are properly set?
         self.h_safe_lk = config.SAFE_CONNECTED_TIME_HEADWAY
         self.h_ref_lk = self.h_safe_lk + config.TIME_HEADWAY_MARGIN
-        self.h_safe_lc = config.get_lane_changing_time_headway()
+        self.h_safe_lc = config.SAFE_CONNECTED_TIME_HEADWAY
         self.h_ref_lc = self.h_safe_lc + config.TIME_HEADWAY_MARGIN
         self.c = config.STANDSTILL_DISTANCE
 
@@ -265,11 +268,24 @@ class BaseVehicle(ABC):
         """
         return self._is_lane_change_gap_suitable
 
-    def get_active_brake_max(self) -> float:
-        if self.get_current_leader_id() == self.get_origin_lane_leader_id():
-            return self.brake_max
+    # def get_active_brake_max(self) -> float:
+    #     if self.get_current_leader_id() == self.get_origin_lane_leader_id():
+    #         return self.brake_max
+    #     else:
+    #         return self.brake_comfort_max
+
+    def get_virtual_leader_id(self):
+        if (self.get_aided_vehicle_id() >= 0
+                and self.get_desired_destination_lane_leader_id() >= 0):
+            warnings.warn(
+                "[BaseVehicle] Vehicles has a valid desired destination lane "
+                "leader and a valid assisted vehicle. Setting virtual leader "
+                "as the desired destination lane leader.")
+            return self.get_desired_destination_lane_leader_id()
+        elif self.get_aided_vehicle_id() >= 0:
+            return self.get_aided_vehicle_id()
         else:
-            return self.brake_comfort_max
+            return self.get_desired_destination_lane_leader_id()
 
     def get_relevant_surrounding_vehicle_ids(self) -> dict[str, int]:
         """
@@ -301,7 +317,7 @@ class BaseVehicle(ABC):
         return candidates
 
     def get_desired_destination_lane_leader_id(self) -> int:
-        return self.get_destination_lane_leader_id()
+        return self._desired_destination_lane_leader_id[self._iter_counter]
 
     def get_desired_future_follower_id(self) -> int:
         return self._desired_future_follower_id
@@ -338,6 +354,12 @@ class BaseVehicle(ABC):
         self.h_safe_lk = (config.SAFE_CONNECTED_TIME_HEADWAY if are_connected
                           else config.SAFE_TIME_HEADWAY)
         self.h_safe_lc = config.get_lane_changing_time_headway(are_connected)
+
+    def target_origin_lane_leader(self):
+        self._leader_id[self._iter_counter] = self.get_origin_lane_leader_id()
+
+    def target_virtual_leader(self):
+        self._leader_id[self._iter_counter] = self.get_virtual_leader_id()
 
     def make_reset_copy(self, initial_state: np.ndarray = None) -> V:
         """
@@ -483,6 +505,8 @@ class BaseVehicle(ABC):
         self._destination_leader_id = -np.ones(n_samples, dtype=int)
         self._destination_follower_id = -np.ones(n_samples, dtype=int)
         self._aided_vehicle_id = -np.ones(n_samples, dtype=int)
+        self._desired_destination_lane_leader_id = -np.ones(n_samples,
+                                                            dtype=int)
         self._leader_id = -np.ones(n_samples, dtype=int)
 
     def reset_simulation_logs(self) -> None:
@@ -512,6 +536,10 @@ class BaseVehicle(ABC):
             self._aided_vehicle_id = self._aided_vehicle_id[
                                      :self._iter_counter + 1]
             self._leader_id = self._leader_id[:self._iter_counter + 1]
+            self._desired_destination_lane_leader_id = (
+                self._desired_destination_lane_leader_id[
+                :self._iter_counter + 1]
+            )
         except IndexError:
             # The matrices already have the right size
             pass
@@ -543,17 +571,17 @@ class BaseVehicle(ABC):
     def is_cooperating(self) -> bool:
         return self.get_aided_vehicle_id() >= 0
 
-    def has_leader(self) -> bool:
-        return self.get_current_leader_id() >= 0
+    def has_virtual_leader(self) -> bool:
+        return self.get_virtual_leader_id() >= 0
 
-    def has_changed_leader(self) -> bool:
-        try:
-            return (self._leader_id[self._iter_counter - 1]
-                    != self._leader_id[self._iter_counter])
-        except IndexError:
-            warnings.warn("Warning: trying to check if leader has changed too"
-                          "early (before two simulation steps")
-            return False
+    # def has_changed_leader(self) -> bool:
+    #     try:
+    #         return (self._leader_id[self._iter_counter - 1]
+    #                 != self._leader_id[self._iter_counter])
+    #     except IndexError:
+    #         warnings.warn("Warning: trying to check if leader has changed too"
+    #                       "early (before two simulation steps)")
+    #         return False
 
     def has_lane_change_intention(self) -> bool:
         return self.get_current_lane() != self._target_lane
@@ -573,10 +601,16 @@ class BaseVehicle(ABC):
     def has_started_lane_change(self) -> bool:
         return self.get_current_time() >= self._lc_start_time
 
+    def has_origin_lane_leader_changed(self) -> bool:
+        if self._iter_counter > 0:
+            return self.get_origin_lane_leader_id() != self._origin_leader_id[
+                self._iter_counter - 1]
+        return True
+
     def update_surrounding_vehicles(self, vehicles: Iterable[BaseVehicle]):
         self.find_origin_lane_vehicles(vehicles)
         self.find_destination_lane_vehicles(vehicles)
-        self.find_cooperation_requests(vehicles)
+        # self.find_cooperation_requests(vehicles)
 
     def find_origin_lane_vehicles(self, vehicles: Iterable[BaseVehicle]
                                   ) -> None:
@@ -645,8 +679,12 @@ class BaseVehicle(ABC):
                     incoming_veh_x = other_x
         self._aided_vehicle_id[self._iter_counter] = new_incoming_vehicle_id
 
+    def find_desired_destination_lane_leader(self):
+        self._desired_destination_lane_leader_id[self._iter_counter] = (
+            self.get_destination_lane_leader_id())
+
     def detect_collision(self) -> bool:
-        if (self._iter_counter >= 1
+        if (self._iter_counter > 0
                 and self.has_origin_lane_leader()
                 and (self.get_origin_lane_leader_id()
                      == self._origin_follower_id[self._iter_counter - 1])):
@@ -739,14 +777,19 @@ class BaseVehicle(ABC):
         if self._is_connected:
             self._aided_vehicle_id = other_id
 
-    @abstractmethod
-    def update_target_leader(self, vehicles: Mapping[int, BaseVehicle]) -> None:
-        """
-        Defines which surrounding vehicle should be used to determine this
-        vehicle's own acceleration
-        :return:
-        """
-        pass
+    # @abstractmethod
+    # def update_target_leader(self, vehicles: Mapping[int, BaseVehicle]) -> None:
+    #     """
+    #     Defines which surrounding vehicle should be used to determine this
+    #     vehicle's own acceleration
+    #     :return:
+    #     """
+    #     pass
+
+    def update_virtual_leader(self, vehicles: Iterable[BaseVehicle]
+                              ) -> None:
+        self.find_cooperation_requests(vehicles)
+        self.find_desired_destination_lane_leader()
 
     @staticmethod
     def compute_a_gap(leading_vehicle: BaseVehicle,
@@ -893,8 +936,8 @@ class BaseVehicle(ABC):
         cls._input_idx = {cls._input_names[i]: i for i
                           in range(cls._n_inputs)}
 
-    def follow_origin_lane_leader(self) -> None:
-        self._set_current_leader_id(self.get_origin_lane_leader_id())
+    # def follow_origin_lane_leader(self) -> None:
+    #     self._set_current_leader_id(self.get_origin_lane_leader_id())
 
     @abstractmethod
     def get_vel(self) -> float:
@@ -945,15 +988,15 @@ class BaseVehicle(ABC):
         """
         pass
 
-    def _set_current_leader_id(self, veh_id):
-        """
-        Sets which vehicle used to determine this vehicle's accel. The
-        definition of leader ids for all vehicles in a vehicle group determines
-        the operating mode.
-        :param veh_id: leading vehicle's id. Use -1 to designate no leader
-        :return:
-        """
-        self._leader_id[self._iter_counter] = veh_id
+    # def _set_current_leader_id(self, veh_id):
+    #     """
+    #     Sets which vehicle used to determine this vehicle's accel. The
+    #     definition of leader ids for all vehicles in a vehicle group
+    #     determines the operating mode.
+    #     :param veh_id: leading vehicle's id. Use -1 to designate no leader
+    #     :return:
+    #     """
+    #     self._leader_id[self._iter_counter] = veh_id
 
 
 # TODO: still must figure out a way to prevent so much repeated code between
@@ -978,6 +1021,7 @@ class BaseVehicleInterface(ABC):
             vehicle.get_destination_lane_leader_id())
         self._destination_follower_id: int = (
             vehicle.get_destination_lane_follower_id())
+        # TODO: we must copy other surrounding vehicles' ids here too
         self._leader_id: int = vehicle.get_current_leader_id()
         self.target_lane: int = vehicle.get_target_lane()
         # The vehicle's current state is the starting point for the ocp

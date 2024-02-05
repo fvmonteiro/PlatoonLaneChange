@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+from enum import Enum
 import warnings
 
 import numpy as np
@@ -16,6 +17,11 @@ import vehicle_models.four_state_vehicles as fsv
 
 class VehicleController(ABC):
 
+    class LongMode(Enum):
+        REAL_LEADER = 1
+        VIRTUAL_LEADER = 2
+        OPTIMAL = 3
+
     _opt_controller: opt_ctrl.VehicleOptimalController
     _lk_controller: lat_ctrl.LaneKeepingController
     _lc_controller: lat_ctrl.LaneChangingController
@@ -25,8 +31,14 @@ class VehicleController(ABC):
         self._ego_vehicle = ego_vehicle
         self._can_change_lanes = can_change_lanes
         self._has_open_loop_acceleration = has_open_loop_acceleration
+        self.long_mode = (self.LongMode.OPTIMAL if has_open_loop_acceleration
+                          else self.LongMode.REAL_LEADER)
 
-        self._long_fb_controller = long_ctrl.LongitudinalController(ego_vehicle)
+        self._real_leader_long_controller = long_ctrl.LongitudinalController(
+            ego_vehicle, ego_vehicle.brake_max)
+        self._virtual_leader_long_controller = (
+            long_ctrl.LongitudinalController(
+                ego_vehicle, ego_vehicle.brake_comfort_max))
 
         self._external_input_idx = ego_vehicle.get_external_input_idx()
 
@@ -45,7 +57,9 @@ class VehicleController(ABC):
             accel = self._get_open_loop_acceleration(external_controls,
                                                      vehicles)
         else:
-            accel = self._long_fb_controller.compute_acceleration(vehicles)
+            accel = self._compute_closed_loop_acceleration(vehicles)
+            # accel = self._real_leader_long_controller.compute_acceleration(
+            #     vehicles)
         if self._can_change_lanes:
             phi = self._determine_steering_wheel_angle(external_controls,
                                                        vehicles)
@@ -53,17 +67,47 @@ class VehicleController(ABC):
             phi = 0.
         return accel, phi
 
-    def get_target_leader_id(self, vehicles: Mapping[int, fsv.FourStateVehicle]
-                             ) -> int:
-        if self._has_open_loop_acceleration:
-            return self._get_target_leader_id(vehicles)
-        else:
-            return self._long_fb_controller.get_more_critical_leader(vehicles)
+    # def get_target_leader_id(self,
+    # vehicles: Mapping[int, fsv.FourStateVehicle]
+    #                          ) -> int:
+    #     if self._has_open_loop_acceleration:
+    #         return self._get_target_leader_id(vehicles)
+    #     else:
+    #         return self._ego_vehicle.get_current_leader_id()
 
     # TODO: make virtual? abstract?
     def set_up_lane_change_control(self, start_time):
         self._lc_controller.compute_lc_trajectory(
             start_time)
+
+    def _compute_closed_loop_acceleration(
+            self, vehicles: Mapping[int, fsv.FourStateVehicle]) -> float:
+        accel_real_leader = (
+            self._real_leader_long_controller.compute_acceleration(
+                vehicles, self._ego_vehicle.get_origin_lane_leader_id()))
+        if self._ego_vehicle.has_virtual_leader():
+            accel_virtual_leader = (
+                self._virtual_leader_long_controller.compute_acceleration(
+                    vehicles, self._ego_vehicle.get_virtual_leader_id()))
+        else:
+            accel_virtual_leader = np.inf
+
+        if accel_real_leader <= accel_virtual_leader:
+            new_mode = self.LongMode.REAL_LEADER
+            self._ego_vehicle.target_origin_lane_leader()
+            desired_accel = accel_real_leader
+        else:
+            new_mode = self.LongMode.VIRTUAL_LEADER
+            self._ego_vehicle.target_virtual_leader()
+            desired_accel = accel_virtual_leader
+        # if self.long_mode != new_mode:
+        #     print(
+        #         f"[VehicleController] "
+        #         f"t={self._ego_vehicle.get_current_time()} "
+        #         f"veh {self._ego_vehicle.get_name()} long mode from: "
+        #         f"{self.long_mode.name} to {new_mode}")
+        self.long_mode = new_mode
+        return desired_accel
 
     @abstractmethod
     def _get_open_loop_acceleration(
@@ -132,7 +176,7 @@ class OptimalControl(VehicleController):
             return self._opt_controller.get_input(
                 t, self._ego_vehicle.get_id())[self._external_input_idx['a']]
         else:
-            return self._long_fb_controller.compute_acceleration(vehicles)
+            return self._compute_closed_loop_acceleration(vehicles)
 
     def _determine_steering_wheel_angle(
             self, external_controls: np.ndarray,
@@ -177,7 +221,7 @@ class ClosedLoopControl(VehicleController):
         # we should never reach this
         warnings.warn('ClosedLoopController was constructed with'
                       'has_open_loop_acceleration True')
-        return self._long_fb_controller.compute_acceleration(vehicles)
+        return self._compute_closed_loop_acceleration(vehicles)
 
     def _determine_steering_wheel_angle(
             self, external_controls: np.ndarray,
@@ -195,4 +239,5 @@ class ClosedLoopControl(VehicleController):
         # we should never reach this
         warnings.warn('ClosedLoopController was constructed with'
                       'has_open_loop_acceleration True')
-        return self._long_fb_controller.get_more_critical_leader(vehicles)
+        return self._real_leader_long_controller.get_more_critical_leader(
+            vehicles)

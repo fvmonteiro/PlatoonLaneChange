@@ -64,12 +64,12 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
         self._inputs[self._input_idx['phi']] = open_loop_controls[
             self._input_idx['phi']]
 
-    def update_target_leader(self, vehicles: dict[int, base.BaseVehicle]):
-        """
-        Does nothing, since this vehicle class does not have autonomous
-        longitudinal control
-        """
-        pass
+    # def update_target_leader(self, vehicles: dict[int, base.BaseVehicle]):
+    #     """
+    #     Does nothing, since this vehicle class does not have autonomous
+    #     longitudinal control
+    #     """
+    #     pass
 
 
 class ThreeStateVehicleRearWheel(ThreeStateVehicle):

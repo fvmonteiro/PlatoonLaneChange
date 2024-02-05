@@ -276,7 +276,7 @@ def test():
 
 
 def main():
-    test()
+    # test()
     n_platoon = 2
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
@@ -303,7 +303,7 @@ def main():
     # TODO: test values only
     v_orig = [70/3.6]
     v_ff_platoon = 80/3.6  # make 110
-    v_dest = np.array([90])/3.6  # make 50, 70, 90
+    v_dest = np.array([70])/3.6  # make 50, 70, 90
     max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY  # *3
     print("===== CREATING SMALL-SCALE GRAPHS ONLY ======")
 
@@ -314,14 +314,14 @@ def main():
     start_time = time.time()
 
     graph_t0 = time.time()
-    create_graph(n_platoon, graph_includes_fd, v_orig, v_ff_platoon,
-                 v_dest, max_dist, "as")
-    print(f"Time to create graph: {time.time() - graph_t0}")
+    # create_graph(n_platoon, graph_includes_fd, v_orig, v_ff_platoon,
+    #              v_dest, max_dist, "as")
+    # print(f"Time to create graph: {time.time() - graph_t0}")
 
-    # delta_x = {'ld': 0., 'lo': 0., 'fd': 5.}
-    # run_closed_loop_test(n_platoon, are_vehicles_cooperative,
-    #                      v_orig[0], v_ff_platoon, v_dest[0], delta_x,
-    #                      [5, 13], plot_results=True)
+    delta_x = {'ld': 0., 'lo': 0., 'fd': 0.}
+    run_closed_loop_test(n_platoon, are_vehicles_cooperative,
+                         v_orig[0], v_ff_platoon, v_dest[0], delta_x,
+                         [12], plot_results=True)
     #
     # run_scenarios_for_comparison(
     #     n_platoon, v_orig, v_ff_platoon, are_vehicles_cooperative,

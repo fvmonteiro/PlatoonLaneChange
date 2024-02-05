@@ -208,13 +208,6 @@ class VehicleGroup:
         p1 = self.get_vehicle_by_name('p1')
         p1.set_platoon_lane_change_order((lane_change_order, cooperation_order))
 
-    # def set_vehicle_states_graph(self,
-    #                              states_graph: graph_tools.VehicleStatesGraph):
-    #     self._vehicle_states_graph = states_graph
-
-    # def set_strategy_map(self, strategy_map: graph_tools.StrategyMap):
-    #     self._strategy_map = strategy_map
-
     def set_verbose(self, value: bool):
         self._is_verbose = value
         for vehicle in self.vehicles.values():
@@ -443,7 +436,8 @@ class VehicleGroup:
         # whether it is safe to perform a lane change
         self.update_surrounding_vehicles(detect_collision)
         for veh in self.vehicles.values():
-            veh.update_target_leader(self.vehicles)
+            # veh.update_target_leader(self.vehicles)
+            veh.update_virtual_leader(self.vehicles.values())
             if veh.has_lane_change_intention():
                 veh.check_surrounding_gaps_safety(self.vehicles)
 

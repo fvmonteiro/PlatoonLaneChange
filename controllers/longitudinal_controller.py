@@ -17,7 +17,7 @@ class LongitudinalController:
         CRUISE = 1
         VEHICLE_FOLLOWING = 2
 
-    def __init__(self, vehicle: fsv.FourStateVehicle):
+    def __init__(self, vehicle: fsv.FourStateVehicle, max_brake: float):
         self.vehicle = vehicle
         self._kg = 0.2
         self._kv = 0.5
@@ -25,34 +25,79 @@ class LongitudinalController:
         self._state = self.States.NOT_INITIALIZED
         self._velocity_controller = VelocityController(vehicle.brake_max,
                                                        vehicle.accel_max)
+        self._max_brake = max_brake
 
-    def compute_acceleration(self, vehicles: Mapping[int, base.BaseVehicle]
-                             ) -> float:
-        """
-        Computes acceleration for the ego vehicle following a leader
-        """
+    # def compute_acceleration_old(self,
+    #                              vehicles: Mapping[int, base.BaseVehicle]
+    #                              ) -> float:
+    #     """
+    #     Computes acceleration for the ego vehicle following a leader
+    #     """
+    #     v_ego = self.vehicle.get_vel()
+    #     v_ff = self.vehicle.get_desired_free_flow_speed(vehicles)
+    #
+    #     if not self.vehicle.has_leader():
+    #         new_state = self.States.CRUISE
+    #     else:
+    #         leader = vehicles[self.vehicle.get_current_leader_id()]
+    #         is_leader_too_fast = leader.get_vel() > 1.1 * v_ff
+    #         if self._is_vehicle_far_ahead(leader) or is_leader_too_fast:
+    #             new_state = self.States.CRUISE
+    #         else:
+    #             new_state = self.States.VEHICLE_FOLLOWING
+    #
+    #     # Transition back to cruising
+    #     if new_state == self.States.CRUISE and new_state != self._state:
+    #         self._velocity_controller.set(v_ego, v_ff)
+    #
+    #     self._state = new_state
+    #     if self._state == self.States.CRUISE:
+    #         accel = self._velocity_controller.compute_input(v_ego)
+    #     else:
+    #         leader = vehicles[self.vehicle.get_current_leader_id()]
+    #         accel = self._compute_accel_to_a_leader(leader)
+    #     accel = self._saturate_accel(accel)
+    #     return accel
+
+    def compute_acceleration(self, vehicles: Mapping[int, base.BaseVehicle],
+                             leader_id: int) -> float:
         v_ego = self.vehicle.get_vel()
         v_ff = self.vehicle.get_desired_free_flow_speed(vehicles)
 
-        if not self.vehicle.has_leader():
+        if leader_id < 0:
             new_state = self.States.CRUISE
         else:
-            leader = vehicles[self.vehicle.get_current_leader_id()]
+            leader = vehicles[leader_id]
             is_leader_too_fast = leader.get_vel() > 1.1 * v_ff
-            if self._is_vehicle_far_ahead(leader) or is_leader_too_fast:
-                new_state = self.States.CRUISE
+            if self._state == self.States.VEHICLE_FOLLOWING:
+                if (is_leader_too_fast
+                        or (self.vehicle.has_origin_lane_leader_changed()
+                            and self._is_vehicle_far_ahead(leader))):
+                    new_state = self.States.CRUISE
+                else:
+                    new_state = self.States.VEHICLE_FOLLOWING
             else:
-                new_state = self.States.VEHICLE_FOLLOWING
+                if self._is_vehicle_far_ahead(leader) or is_leader_too_fast:
+                    new_state = self.States.CRUISE
+                else:
+                    new_state = self.States.VEHICLE_FOLLOWING
 
         # Transition back to cruising
         if new_state == self.States.CRUISE and new_state != self._state:
             self._velocity_controller.set(v_ego, v_ff)
 
+        # if new_state != self._state:
+        #     print(
+        #         f"[LongController] "
+        #         f"t={self.vehicle.get_current_time()} "
+        #         f"veh {self.vehicle.get_name()} long mode from: "
+        #         f"{self._state.name} to {new_state}")
+
         self._state = new_state
         if self._state == self.States.CRUISE:
             accel = self._velocity_controller.compute_input(v_ego)
         else:
-            leader = vehicles[self.vehicle.get_current_leader_id()]
+            leader = vehicles[leader_id]
             accel = self._compute_accel_to_a_leader(leader)
         accel = self._saturate_accel(accel)
         return accel
@@ -75,26 +120,26 @@ class LongitudinalController:
         accel = self._saturate_accel(accel)
         return accel
 
-    def get_more_critical_leader(self, vehicles: Mapping[int, base.BaseVehicle]
-                                 ) -> int:
-        """
-        Compares the acceleration if following the origin or destination lane
-        leaders, and chooses as leader the vehicle which causes the lesser
-        acceleration
-        :param vehicles:
-        :return:
-        """
-        relevant_ids = self.vehicle.get_possible_target_leader_ids()
-
-        candidate_accel = {
-            veh_id: self._compute_accel_to_a_leader(vehicles[veh_id])
-            for veh_id in relevant_ids if veh_id >= 0
-        }
-
-        if len(candidate_accel) > 0:
-            return min(candidate_accel, key=candidate_accel.get)
-        else:
-            return -1
+    # def get_more_critical_leader(self, vehicles: Mapping[int, base.BaseVehicle]
+    #                              ) -> int:
+    #     """
+    #     Compares the acceleration if following the origin or destination lane
+    #     leaders, and chooses as leader the vehicle which causes the lesser
+    #     acceleration
+    #     :param vehicles:
+    #     :return:
+    #     """
+    #     relevant_ids = self.vehicle.get_possible_target_leader_ids()
+    #
+    #     candidate_accel = {
+    #         veh_id: self._compute_accel_to_a_leader(vehicles[veh_id])
+    #         for veh_id in relevant_ids if veh_id >= 0
+    #     }
+    #
+    #     if len(candidate_accel) > 0:
+    #         return min(candidate_accel, key=candidate_accel.get)
+    #     else:
+    #         return -1
 
     def _is_vehicle_far_ahead(self, other_vehicle: base.BaseVehicle):
         margin = 0.1
@@ -122,15 +167,13 @@ class LongitudinalController:
             accel = 0.
         else:
             accel = desired_accel
-        return min(max(self.vehicle.get_active_brake_max(), accel),
-                   self.vehicle.accel_max)
+        return min(max(self._max_brake, accel), self.vehicle.accel_max)
 
     def _saturate_accel(self, desired_accel: float) -> float:
         """
         Saturates the acceleration based on max and min accel values
         """
-        return min(max(self.vehicle.get_active_brake_max(), desired_accel),
-                   self.vehicle.accel_max)
+        return min(max(self._max_brake, desired_accel), self.vehicle.accel_max)
 
     def _compute_accel_to_a_leader(
             self, other_vehicle: base.BaseVehicle

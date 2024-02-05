@@ -605,7 +605,7 @@ class VehicleStatesGraph:
             desired_leader_id = next_to_coop.get_origin_lane_leader_id()
             next_to_coop.set_incoming_vehicle_id(rear_most_vehicle.get_id())
 
-        [veh.set_desired_dest_lane_leader_id(desired_leader_id) for veh
+        [veh.set_fixed_desired_dest_lane_leader_id(desired_leader_id) for veh
          in lc_vehicles]
         i = 0
         while i < len(time) - 1 and np.any(
