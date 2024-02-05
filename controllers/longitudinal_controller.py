@@ -26,6 +26,11 @@ class LongitudinalController:
         self._velocity_controller = VelocityController(vehicle.brake_max,
                                                        vehicle.accel_max)
         self._max_brake = max_brake
+        self._time_headway = 0
+        self._standstill_distance = self.vehicle.c
+
+    def set_time_headway(self, value: float) -> None:
+        self._time_headway = value
 
     # def compute_acceleration_old(self,
     #                              vehicles: Mapping[int, base.BaseVehicle]
@@ -59,6 +64,11 @@ class LongitudinalController:
     #     accel = self._saturate_accel(accel)
     #     return accel
 
+    # def compute_reference_gap(self, vel: float = None) -> float:
+    #     if vel is None:
+    #         vel = self.vehicle.get_vel()
+    #     return self._time_headway * vel + self._standstill_distance
+
     def compute_acceleration(self, vehicles: Mapping[int, base.BaseVehicle],
                              leader_id: int) -> float:
         v_ego = self.vehicle.get_vel()
@@ -89,9 +99,9 @@ class LongitudinalController:
         # if new_state != self._state:
         #     print(
         #         f"[LongController] "
-        #         f"t={self.vehicle.get_current_time()} "
+        #         f"t={self.vehicle.get_current_time():.2f} "
         #         f"veh {self.vehicle.get_name()} long mode from: "
-        #         f"{self._state.name} to {new_state}")
+        #         f"{self._state.name} to {new_state.name}")
 
         self._state = new_state
         if self._state == self.States.CRUISE:
@@ -150,7 +160,7 @@ class LongitudinalController:
     def _compute_vehicle_following_threshold(self, v_leader: float):
         v_ego = self.vehicle.get_vel()
         # v_ff = self.vehicle.get_free_flow_speed()
-        g_ref = (self.vehicle.get_reference_time_headway() * v_ego
+        g_ref = (self._time_headway * v_ego
                  + self.vehicle.c)
         return g_ref + self._threshold_param * max(v_ego - v_leader, 0.)
 
@@ -188,9 +198,9 @@ class LongitudinalController:
 
     def _compute_gap_control(self, gap: float, v_ego: float,
                              v_leader: float) -> float:
-        h_ref = self.vehicle.get_reference_time_headway()
-        return (self._kg * (gap - (h_ref * v_ego + self.vehicle.c))
-                + self._kv * (v_leader - v_ego))
+        gap_ref = self.vehicle.compute_reference_gap(self._time_headway,
+                                                     v_ego)
+        return self._kg * (gap - gap_ref) + self._kv * (v_leader - v_ego)
 
 
 class VelocityController:

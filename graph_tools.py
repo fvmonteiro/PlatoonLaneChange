@@ -346,6 +346,11 @@ class VehicleStatesGraph:
                     self.find_minimum_cost_strategy_from_node(
                         next_node, cost_name)
                 )
+                if strategy_from_node is None:
+                    warnings.warn(f"Could not find a strategy from root "
+                                  f"{root} with first mover set "
+                                  f"{first_mover_set}")
+                    continue
                 strategy[0].extend(strategy_from_node[0])
                 strategy[1].extend(strategy_from_node[1])
                 strategy_map.append(
@@ -432,15 +437,17 @@ class VehicleStatesGraph:
         for i in range(self.n_platoon):
             p_i = vehicle_group.get_vehicle_by_name('p' + str(i+1))
             p_i.set_initial_state(x0_platoon_vehicle, 0., 0., v0_platoon)
-            x0_platoon_vehicle -= p_i.compute_lane_keeping_desired_gap(
-                v0_platoon)
+            x0_platoon_vehicle -= p_i.compute_initial_reference_gap_to(
+                p_i, v0_platoon)  # since all platoon vehicles have the same
+            # parameters, the gap reference gap from a vehicle to itself is
+            # the same as between any two platoon vehicles
         p1 = vehicle_group.get_vehicle_by_name('p1')
         pN = vehicle_group.get_vehicle_by_name('p' + str(self.n_platoon))
 
         # Surrounding vehicles (variable positions)
         lo = vehicle_group.get_vehicle_by_name('lo')
         ld = vehicle_group.get_vehicle_by_name('ld')
-        x0_lo = p1.compute_lane_keeping_desired_gap(v0_platoon)
+        x0_lo = p1.compute_initial_reference_gap_to(lo, v0_platoon)
         dx = configuration.DELTA_X
         quantized_initial_states: set[configuration.QuantizedState] = set()
         while x0_lo < max_leader_dist:
@@ -450,7 +457,8 @@ class VehicleStatesGraph:
                 ld.set_initial_state(x0_ld, configuration.LANE_WIDTH, 0., v0_ld)
                 # it's not conceptually right to use ld when computing fd's
                 # safe gap, but we know fd and ld have the same characteristics
-                x0_fd = pN.get_x() - ld.compute_lane_keeping_desired_gap(v0_fd)
+                x0_fd = pN.get_x() - ld.compute_initial_reference_gap_to(
+                    pN, v0_fd)
                 while self._has_fd and x0_fd > pN.get_x() - max_leader_dist:
                     fd = vehicle_group.get_vehicle_by_name('fd')
                     fd.set_initial_state(x0_fd, configuration.LANE_WIDTH,
@@ -501,6 +509,8 @@ class VehicleStatesGraph:
         nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque([root])
         while len(nodes) > 0:
             tracker, quantized_state = nodes.pop()
+            if quantized_state == (8, 0, 0, 9, 5, 1, 0, 11, 2, 0, 0, 11, 8, 1, 0, 12):
+                a=1
             if quantized_state in visited_states:
                 continue
             visited_states.add(quantized_state)
@@ -655,64 +665,62 @@ class VehicleStatesGraph:
             self._delete_successor_nodes(successor)
         self.states_graph.remove_node(node)
 
-    def _add_all_first_mover_nodes(
-            self, nodes: deque[tuple[PlatoonLCTracker, tuple]],
-            platoon_veh_ids: Sequence[int],
-            v0_ld: float, delta_x_ld: float) -> None:
-        """
-        Adds to nodes all the states after a single platoon vehicle has moved
-        to the destination lane. The method puts the destination lane leader
-        at a safe distance in front of the first platoon vehicle to move
-        :param nodes:
-        :param platoon_veh_ids:
-        :param v0_ld:
-        :param delta_x_ld:
-        :return:
-        """
-        tracker, quantized_state = nodes.pop()
-        root_state = self.state_quantizer.dequantize_state(quantized_state)
-        # print(tracker)
-        # print('x0=\n', np.array(quantized_state).reshape(
-        #     -1, 4).transpose())
-        for first_pos_to_move in tracker.get_remaining_vehicles():
-            vehicle_group = self._create_vehicle_group()
-            vehicle_group.set_vehicles_initial_states_from_array(root_state)
-            # print('First to move:', vehicle_group.vehicles[
-            #     platoon_veh_ids[first_pos_to_move]].get_name())
-            next_quantized_state = self._create_first_mover_node(
-                copy.deepcopy(vehicle_group), v0_ld, delta_x_ld,
-                platoon_veh_ids[first_pos_to_move]
-            )
-            # print('x1=\n',
-            #       np.array(next_quantized_state).reshape(-1, 4).transpose())
-            next_tracker = copy.deepcopy(tracker)
-            next_tracker.move_vehicles([first_pos_to_move], -1)
-            nodes.appendleft((next_tracker, next_quantized_state))
-            self._update_graphs(
-                quantized_state, next_quantized_state, 1., 0.,
-                [first_pos_to_move], -1)
+    # def _add_all_first_mover_nodes(
+    #         self, nodes: deque[tuple[PlatoonLCTracker, tuple]],
+    #         platoon_veh_ids: Sequence[int],
+    #         v0_ld: float, delta_x_ld: float) -> None:
+    #     """
+    #     Adds to nodes all the states after a single platoon vehicle has moved
+    #     to the destination lane. The method puts the destination lane leader
+    #     at a safe distance in front of the first platoon vehicle to move
+    #     :param nodes:
+    #     :param platoon_veh_ids:
+    #     :param v0_ld:
+    #     :param delta_x_ld:
+    #     :return:
+    #     """
+    #     tracker, quantized_state = nodes.pop()
+    #     root_state = self.state_quantizer.dequantize_state(quantized_state)
+    #     # print(tracker)
+    #     # print('x0=\n', np.array(quantized_state).reshape(
+    #     #     -1, 4).transpose())
+    #     for first_pos_to_move in tracker.get_remaining_vehicles():
+    #         vehicle_group = self._create_vehicle_group()
+    #         vehicle_group.set_vehicles_initial_states_from_array(root_state)
+    #         # print('First to move:', vehicle_group.vehicles[
+    #         #     platoon_veh_ids[first_pos_to_move]].get_name())
+    #         next_quantized_state = self._create_first_mover_node(
+    #             copy.deepcopy(vehicle_group), v0_ld, delta_x_ld,
+    #             platoon_veh_ids[first_pos_to_move]
+    #         )
+    #         next_tracker = copy.deepcopy(tracker)
+    #         next_tracker.move_vehicles([first_pos_to_move], -1)
+    #         nodes.appendleft((next_tracker, next_quantized_state))
+    #         self._update_graphs(
+    #             quantized_state, next_quantized_state, 1., 0.,
+    #             [first_pos_to_move], -1)
 
-    def _create_first_mover_node(
-            self, vehicle_group: vg.VehicleGroup, v0_ld: float,
-            delta_x_ld: float, first_to_move_id: int
-    ) -> tuple:
-
-        lc_vehicle = vehicle_group.get_vehicle_by_id(first_to_move_id)
-        lc_vehicle_x = lc_vehicle.get_x()  # move veh to the dest lane
-        lc_vehicle.set_initial_state(
-            lc_vehicle_x, configuration.LANE_WIDTH, lc_vehicle.get_theta(),
-            lc_vehicle.get_vel())
-
-        # The dest lane leader is placed ahead of the lane changing vehicle
-        lc_vehicle_ref_gap = lc_vehicle.compute_lane_keeping_desired_gap()
-        x0_ld = (lc_vehicle_x + lc_vehicle_ref_gap + delta_x_ld)
-        ld = vehicle_group.get_vehicle_by_name('ld')
-        ld.set_initial_state(x0_ld, configuration.LANE_WIDTH, 0., v0_ld)
-
-        vehicle_group.get_full_initial_state_vector()
-        initial_state = vehicle_group.get_full_initial_state_vector()
-
-        return self.state_quantizer.quantize_state(initial_state)
+    # def _create_first_mover_node(
+    #         self, vehicle_group: vg.VehicleGroup, v0_ld: float,
+    #         delta_x_ld: float, first_to_move_id: int
+    # ) -> tuple:
+    #
+    #     lc_vehicle = vehicle_group.get_vehicle_by_id(first_to_move_id)
+    #     lc_vehicle_x = lc_vehicle.get_x()  # move veh to the dest lane
+    #     lc_vehicle.set_initial_state(
+    #         lc_vehicle_x, configuration.LANE_WIDTH, lc_vehicle.get_theta(),
+    #         lc_vehicle.get_vel())
+    #
+    #     # The dest lane leader is placed ahead of the lane changing vehicle
+    #     lc_vehicle_ref_gap = lc_vehicle.compute_lane_keeping_desired_gap()
+    #     x0_ld = (lc_vehicle_x + lc_vehicle_ref_gap + delta_x_ld)
+    #     ld = vehicle_group.get_vehicle_by_name('ld')
+    #     ld.set_initial_state(x0_ld, configuration.LANE_WIDTH, 0., v0_ld)
+    #
+    #     vehicle_group.get_full_initial_state_vector()
+    #     initial_state = vehicle_group.get_full_initial_state_vector()
+    #
+    #     return self.state_quantizer.quantize_state(initial_state)
 
     def _create_first_mover_node_from_scratch(
             self, vehicle_group: vg.VehicleGroup, v0_lo: float,
@@ -779,8 +787,6 @@ class VehicleStatesGraph:
                 if cost < opt_cost:
                     opt_cost = cost
                     opt_strategy = strategy
-        if opt_strategy is None:
-            pass  # figure out
         return opt_strategy, opt_cost
 
     def get_maneuver_order_from_path(self, path) -> configuration.Strategy:

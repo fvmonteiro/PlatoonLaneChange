@@ -348,11 +348,13 @@ class SimulationScenario(ABC):
             p_i.set_free_flow_speed(v_ff_platoon)
             p_i.set_initial_state(x0, y_orig, 0., v0_platoon)
             self.vehicle_group.add_vehicle(p_i)
-            x0 -= p_i.compute_lane_keeping_desired_gap(v0_platoon)
+            x0 -= p_i.compute_initial_reference_gap_to(p_i)  # since platoon
+            # vehicles have the same parameters, the gap reference gap from a
+            # vehicle to itself is the same as between any two platoon vehicles
 
         # Origin lane ahead
         p1 = self.vehicle_group.get_vehicle_by_name('p1')
-        x0 = p1.get_x() + p1.compute_lane_keeping_desired_gap() - delta_x_lo
+        x0 = p1.get_x() + p1.compute_non_connected_reference_gap() - delta_x_lo
         v0_lo = v_ff_lo
         for i in range(n_orig_ahead):
             lo = fsv.ClosedLoopVehicle(False, False,
@@ -361,7 +363,7 @@ class SimulationScenario(ABC):
             lo.set_free_flow_speed(v_ff_lo)
             lo.set_initial_state(x0, y_orig, 0., v0_lo)
             self.vehicle_group.add_vehicle(lo)
-            x0 += lo.compute_lane_keeping_desired_gap(v0_lo)
+            x0 += lo.compute_non_connected_reference_gap(v0_lo)
 
         # Origin lane behind
         x0 = self.vehicle_group.get_vehicle_by_name(
@@ -371,7 +373,7 @@ class SimulationScenario(ABC):
                                         self._are_vehicles_cooperative)
             veh.set_name('fo' + str(i))
             veh.set_free_flow_speed(v_ff_lo)
-            x0 -= veh.compute_lane_keeping_desired_gap(v0_lo)
+            x0 -= veh.compute_non_connected_reference_gap(v0_lo)
             veh.set_initial_state(x0, y_orig, 0., v0_lo)
             self.vehicle_group.add_vehicle(veh)
 
@@ -382,7 +384,8 @@ class SimulationScenario(ABC):
             n_ahead: int, n_behind: int):
         y_dest = configuration.LANE_WIDTH
         p1 = self.vehicle_group.get_vehicle_by_name('p1')
-        x0 = p1.get_x() + p1.compute_lane_keeping_desired_gap() - delta_x['ld']
+        x0 = (p1.get_x() + p1.compute_non_connected_reference_gap()
+              - delta_x['ld'])
         for i in range(n_ahead):
             veh = fsv.ClosedLoopVehicle(False, False,
                                         self._are_vehicles_cooperative)
@@ -390,7 +393,7 @@ class SimulationScenario(ABC):
             veh.set_free_flow_speed(v_ff)
             veh.set_initial_state(x0, y_dest, 0., v_ff)
             self.vehicle_group.add_vehicle(veh)
-            x0 += veh.compute_lane_keeping_desired_gap(v_ff)
+            x0 += veh.compute_non_connected_reference_gap(v_ff)
 
         x0 = self.vehicle_group.get_vehicle_by_name(
             'p' + str(self._n_platoon)).get_x() + delta_x['fd']
@@ -399,7 +402,7 @@ class SimulationScenario(ABC):
                                         self._are_vehicles_cooperative)
             veh.set_name('fd' + str(i))
             veh.set_free_flow_speed(v_ff)
-            x0 -= veh.compute_lane_keeping_desired_gap(v_ff)
+            x0 -= veh.compute_non_connected_reference_gap(v_ff)
             veh.set_initial_state(x0, y_dest, 0., v_ff)
             self.vehicle_group.add_vehicle(veh)
 
@@ -572,10 +575,11 @@ class LaneChangeScenario(SimulationScenario):
                        / self._lc_intention_time)
 
         # assuming uniform vehicles:
-        reference_gap = center_vehicle.compute_lane_keeping_desired_gap(v_ff)
+        reference_gap = center_vehicle.compute_non_connected_reference_gap(v_ff)
         x_gap = center_vehicle.get_x() + delta_x
         x0 = x_gap + n_ahead * reference_gap
 
+        # Destination lane vehicles
         ld_counter = 0
         fd_counter = 0
         pN = self.vehicle_group.get_vehicle_by_name('p' + str(self._n_platoon))

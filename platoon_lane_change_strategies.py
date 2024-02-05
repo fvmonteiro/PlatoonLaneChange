@@ -423,7 +423,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
         #  possibilities in the graph
         if len(lo_states) == 0:
             lo_states = p1.get_states().copy()
-            lo_states[0] += p1.compute_lane_keeping_desired_gap()
+            lo_states[0] += p1.compute_non_connected_reference_gap()
         else:
             lo_states = np.copy(lo_states)
         if len(ld_states) == 0:
@@ -434,7 +434,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
         if len(fd_states) == 0:
             pN = self.platoon.get_last_platoon_vehicle()
             fd_states = pN.get_states().copy()
-            fd_states[0] -= pN.compute_safe_lane_change_gap()
+            fd_states[0] -= pN.compute_non_connected_reference_gap()
             fd_states[1] = pN.get_target_y()
         else:
             fd_states = np.copy(fd_states)

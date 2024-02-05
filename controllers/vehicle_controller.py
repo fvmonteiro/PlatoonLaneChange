@@ -50,6 +50,12 @@ class VehicleController(ABC):
     ) -> None:
         self._opt_controller = new_opt_controller
 
+    def update_real_leader_time_headway(self, new_h):
+        self._real_leader_long_controller.set_time_headway(new_h)
+
+    def update_virtual_leader_time_headway(self, new_h):
+        self._virtual_leader_long_controller.set_time_headway(new_h)
+
     def determine_inputs(self, external_controls: np.ndarray,
                          vehicles: Mapping[int, fsv.FourStateVehicle]
                          ) -> (float, float):

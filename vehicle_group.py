@@ -172,17 +172,6 @@ class VehicleGroup:
                 return platoon.get_strategy()
         return None
 
-    def get_initial_desired_gaps(self, v_ref: Sequence[float] = None):
-        gaps = []
-        for veh_id in self.sorted_vehicle_ids:
-            if v_ref is None:
-                v = self.vehicles[veh_id].get_free_flow_speed()
-            else:
-                v = v_ref[veh_id]
-            gaps.append(
-                self.vehicles[veh_id].compute_lane_keeping_desired_gap(v))
-        return gaps
-
     def get_lc_end_times(self) -> list[float]:
         final_times = []
         for veh_id in self.sorted_vehicle_ids:
@@ -424,7 +413,7 @@ class VehicleGroup:
     def simulate_one_time_step(
             self, new_time: float,
             open_loop_controls: Mapping[int, np.ndarray] = None,
-            detect_collision: bool = False):
+            detect_collision: bool = True):
         if open_loop_controls is None:
             open_loop_controls = {}
 
@@ -437,7 +426,7 @@ class VehicleGroup:
         self.update_surrounding_vehicles(detect_collision)
         for veh in self.vehicles.values():
             # veh.update_target_leader(self.vehicles)
-            veh.update_virtual_leader(self.vehicles.values())
+            veh.update_virtual_leader(self.vehicles)
             if veh.has_lane_change_intention():
                 veh.check_surrounding_gaps_safety(self.vehicles)
 
@@ -508,7 +497,7 @@ class VehicleGroup:
 
     def update_surrounding_vehicles(self, detect_collision: bool = False):
         for ego_vehicle in self.vehicles.values():
-            ego_vehicle.update_surrounding_vehicles(self.vehicles.values())
+            ego_vehicle.update_surrounding_vehicles(self.vehicles)
             if detect_collision and ego_vehicle.detect_collision():
                 # TODO: raise error, warning?
                 veh1 = ego_vehicle.get_name()

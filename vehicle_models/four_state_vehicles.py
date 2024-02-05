@@ -183,6 +183,17 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     #         self.h_ref_lk = self.h_safe_lk + configuration.TIME_HEADWAY_MARGIN
     #         self.h_ref_lc = self.h_safe_lc + configuration.TIME_HEADWAY_MARGIN
 
+    def _update_origin_lane_time_headway(self, new_leader: base.BaseVehicle):
+        super()._update_origin_lane_time_headway(new_leader)
+        self._controller.update_real_leader_time_headway(
+            self.h_ref_origin_leader)
+
+    def _update_virtual_leader_time_headway(self, new_leader: base.BaseVehicle):
+        self.h_ref_virtual_leader = (self._get_time_headway(new_leader)
+                                     + configuration.TIME_HEADWAY_MARGIN)
+        self._controller.update_virtual_leader_time_headway(
+            self.h_ref_virtual_leader)
+
     def compute_gap_to_a_leader(self, a_leader: base.BaseVehicle):
         return base.BaseVehicle.compute_a_gap(a_leader, self)
 
