@@ -94,7 +94,7 @@ class LongitudinalController:
 
         # Transition back to cruising
         if new_state == self.States.CRUISE and new_state != self._state:
-            self._velocity_controller.set(v_ego, v_ff)
+            self._velocity_controller.reset(v_ego)
 
         # if new_state != self._state:
         #     print(
@@ -105,7 +105,7 @@ class LongitudinalController:
 
         self._state = new_state
         if self._state == self.States.CRUISE:
-            accel = self._velocity_controller.compute_input(v_ego)
+            accel = self._velocity_controller.compute_input(v_ego, v_ff)
         else:
             leader = vehicles[leader_id]
             accel = self._compute_accel_to_a_leader(leader)
@@ -223,16 +223,15 @@ class VelocityController:
     def get_current_v_ref(self) -> float:
         return self._v_ref
 
-    def set(self, v0: float, v_ff: float):
+    def reset(self, v0: float):
         self._v_ref = v0
-        self._v_ff = v_ff
 
-    def compute_input(self, v_ego: float) -> float:
-        self._apply_filter()
+    def compute_input(self, v_ego: float, v_ff: float) -> float:
+        self._apply_filter(v_ff)
         return self._k * (self._v_ref - v_ego)
 
-    def _apply_filter(self) -> None:
-        variation = self._v_ff - self._v_ref
+    def _apply_filter(self, v_ff: float) -> None:
+        variation = v_ff - self._v_ref
         if (1 - self._alpha) * variation > self._max_variation:
             filtered_variation = self._max_variation
         elif (1 - self._alpha) * variation < self._min_variation:

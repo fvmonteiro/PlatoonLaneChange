@@ -334,6 +334,28 @@ class VehicleStatesGraph:
             pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
         print(f'File {file_name} saved')
 
+    def save_quantization_parameters_to_file(self):
+        file_name = '_'.join(['quantization_parameters_strategies_for',
+                             str(self.n_platoon), 'vehicles.json'])
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 'vehicle_state_graphs',
+                                 file_name + '.pickle')
+        qx0 = np.array([qx for qx in self._initial_states])
+        parameters = {
+            "dx": self.state_quantizer.dx,
+            "dy": self.state_quantizer.dy,
+            "dtheta": self.state_quantizer.dtheta,
+            "dv": self.state_quantizer.dv,
+            "max_x_lo": np.max(qx0[:, 0]),
+            "min_x_lo": np.min(qx0[:, 0]),
+            "max_x_ld": np.max(qx0[:, -4]),
+            "min_x_ld": np.min(qx0[:, -4]),
+            "max_v_lo": np.max(qx0[:, 3]),
+            "min_v_lo": np.min(qx0[:, 3]),
+            "max_v_ld": np.max(qx0[:, -1]),
+            "min_v_ld": np.min(qx0[:, -1]),
+        }
+
     def save_minimum_cost_strategies_to_json(self, cost_name: str):
         dag = self.states_graph
         strategy_map: list[dict] = []
@@ -509,8 +531,6 @@ class VehicleStatesGraph:
         nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque([root])
         while len(nodes) > 0:
             tracker, quantized_state = nodes.pop()
-            if quantized_state == (8, 0, 0, 9, 5, 1, 0, 11, 2, 0, 0, 11, 8, 1, 0, 12):
-                a=1
             if quantized_state in visited_states:
                 continue
             visited_states.add(quantized_state)
@@ -556,6 +576,7 @@ class VehicleStatesGraph:
                         success = self.simulate_till_lane_change(
                             vehicle_group, free_flow_speeds,
                             next_vehs_to_move, next_veh_to_coop)
+                        # vehicle_group.truncate_simulation_history()
                         # data = vehicle_group.to_dataframe()
                         # analysis.plot_trajectory(data)
                         # analysis.plot_platoon_lane_change(data)
@@ -587,9 +608,7 @@ class VehicleStatesGraph:
         tf = 20.
         time = np.arange(0, tf + dt, dt)
 
-        # Set initial state and desired velocities
-        # vehicle_group.set_vehicles_initial_states_from_array(
-        #     initial_state)
+        # Set desired velocities TODO: this should be done elsewhere
         # Due to quantization, we could end up with initial vel above free
         # flow desired vel.
         adjusted_free_flow_speeds = []
@@ -599,7 +618,9 @@ class VehicleStatesGraph:
         vehicle_group.set_free_flow_speeds(adjusted_free_flow_speeds)
 
         vehicle_group.prepare_to_start_simulation(len(time))
-        [veh.set_lane_change_direction(1) for veh in lc_vehicles]
+        [veh.set_lane_change_direction(1) for veh
+         in vehicle_group.vehicles.values()
+         if (veh.is_in_a_platoon() and veh.get_current_lane() == 0)]
         vehicle_group.update_surrounding_vehicles()
 
         if next_to_coop is None:
@@ -624,7 +645,6 @@ class VehicleStatesGraph:
                                                  detect_collision=True)
             i += 1
 
-        vehicle_group.truncate_simulation_history()
         success = [not veh.has_lane_change_intention() for veh in lc_vehicles]
         return np.all(success)
 
@@ -812,32 +832,55 @@ class StateQuantizer:
 
     def __init__(
             self, n_vehicles: int, dx: float, dv: float,
-            dy: float = configuration.DELTA_Y,
-            dtheta: float = None, veh_type: type[base.BaseVehicle] = None):
+            dy: float = configuration.DELTA_Y, dtheta: float = np.pi / 6,
+            max_x: float = np.inf, max_v: float = np.inf,
+            min_x: float = -np.inf, min_v: float = -np.inf,
+            veh_type: type[base.BaseVehicle] = None):
         if veh_type is None:
             veh_type = fsv.FourStateVehicle
         self.dx, self.dv, self.dy, self.dtheta = dx, dv, dy, dtheta
+        self.x_shift, self.y_shift, self.theta_shift, self.v_shift = (
+            0., -2., 0., 0.
+        )
+        self.max_x, self.max_y, self.max_theta, self.max_v = (
+            max_x, 4., 0., max_v
+        )
+        self.min_x, self.min_y, self.min_theta, self.min_v = (
+            min_x, -4., 0., min_v
+        )
+
         intervals = []
         shift = []
-        # veh_type.create_state_vector()
+        all_maximum = []
+        all_minimum = []
         for state in veh_type.get_state_names():
             if state == 'x':
                 intervals.append(dx)
-                shift.append(0.)
+                shift.append(self.x_shift)
+                all_maximum.append(self.max_x)
+                all_minimum.append(self.min_x)
             elif state == 'y':
                 intervals.append(dy)
-                shift.append(-2.)
+                shift.append(self.y_shift)
+                all_maximum.append(self.max_y)
+                all_minimum.append(self.min_y)
             elif state == 'theta':
                 intervals.append(dtheta if dtheta is not None else np.inf)
-                shift.append(-np.pi / 2)
+                shift.append(self.theta_shift)
+                all_maximum.append(self.max_theta)
+                all_minimum.append(self.min_theta)
             elif state == 'v':
                 intervals.append(dv)
-                shift.append(0.)
+                shift.append(self.v_shift)
+                all_maximum.append(self.max_v)
+                all_minimum.append(self.min_v)
             else:
-                raise ValueError(f'Vehicle type {veh_type} has an unknown'
-                                 f' state: {state}.')
+                raise ValueError(f"Vehicle type {veh_type} has an unknown"
+                                 f" state: {state}.")
         self._intervals = np.tile(intervals, n_vehicles)
         self._shift = np.tile(shift, n_vehicles)
+        self._max = np.tile(all_maximum, n_vehicles)
+        self._min = np.tile(all_minimum, n_vehicles)
         self._zero_idx = np.isinf(self._intervals)
 
     def quantize_state(self, full_system_state: Sequence[float]
@@ -849,6 +892,8 @@ class StateQuantizer:
         :return:
         """
         full_system_state = np.array(full_system_state)
+        full_system_state = np.minimum(np.maximum(full_system_state, self._min),
+                                       self._max)
         qx = (full_system_state - self._shift) // self._intervals
         return tuple(qx.astype(int))
 
@@ -873,6 +918,7 @@ class StateQuantizer:
 
         full_quantized_state = np.array(full_quantized_state)
         x = (full_quantized_state + delta) * self._intervals + self._shift
+        x = np.minimum(np.maximum(x, self._min), self._max)
         x[self._zero_idx] = 0.
         return x
 

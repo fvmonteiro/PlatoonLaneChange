@@ -269,26 +269,26 @@ class TemplateStrategy(LaneChangeStrategy):
         if ego_position not in self._lane_changing_order[self._idx]:
             return -1
 
-        # The first vehicles to simultaneously change lanes do so behind the
-        # destination lane leader of the front-most vehicle (same thing for
-        # single vehicle lane change)
-        if self._idx == 0:
-            front_most_veh = max([self.platoon.vehicles[i]
-                                  for i in self._lane_changing_order[0]],
-                                 key=lambda x: x.get_x())
-            dest_lane_leader_id = (
-                front_most_veh.get_suitable_destination_lane_leader_id())
-            self._platoon_dest_lane_leader_id = dest_lane_leader_id
-        else:
-            coop_veh_id = self._cooperating_order[self._idx]
-            if coop_veh_id == -1:
+        coop_veh_id = self._cooperating_order[self._idx]
+        if coop_veh_id == -1:
+            # The first vehicles to simultaneously change lanes do so behind the
+            # destination lane leader of the front-most vehicle (same thing for
+            # single vehicle lane change)
+            if self._idx == 0:
+                front_most_veh = max([self.platoon.vehicles[i]
+                                      for i in self._lane_changing_order[0]],
+                                     key=lambda x: x.get_x())
+                dest_lane_leader_id = (
+                    front_most_veh.get_suitable_destination_lane_leader_id())
+                self._platoon_dest_lane_leader_id = dest_lane_leader_id
+            else:
                 # Merge behind the platoon vehicle farther back in the dest lane
                 dest_lane_leader_id = self.platoon.vehicles[
                     self._last_dest_lane_vehicle_idx].get_id()
-            else:
-                # Get the vehicle ahead the vehicle which helps generate the gap
-                dest_lane_leader_id = self.platoon.vehicles[
-                    coop_veh_id].get_origin_lane_leader_id()
+        else:
+            # Get the vehicle ahead the vehicle which helps generate the gap
+            dest_lane_leader_id = self.platoon.vehicles[
+                coop_veh_id].get_origin_lane_leader_id()
 
         return dest_lane_leader_id
 

@@ -226,7 +226,7 @@ def filter_test():
     v0 = 0.
     max_vel = 20.
     vel_ctrl = long_ctrl.VelocityController(-4, 2)
-    vel_ctrl.set(v0, max_vel)
+    vel_ctrl.reset(v0)
     sim_time = []
     accel = []
     v_ego = []
@@ -241,10 +241,12 @@ def filter_test():
             v_ego.append(v_ego[-1] + accel[-1] * dt)
 
         if np.isclose(sim_time[-1], 5):
-            vel_ctrl.set(v_ego[-1], 25)
-        v_ref.append(vel_ctrl.get_current_v_ref())
+            vel_ctrl.reset(v_ego[-1])
+            v_ref.append(25)
+        else:
+            v_ref.append(max_vel)
         v_ff.append(vel_ctrl.get_v_ff())
-        accel.append(vel_ctrl.compute_input(v_ego[-1]))
+        accel.append(vel_ctrl.compute_input(v_ego[-1], v_ref[-1]))
 
     fig, ax = plt.subplots(2)
     ax[0].grid(visible=True)
@@ -260,19 +262,14 @@ def filter_test():
 
 def test():
     n_platoon = 2
-    starting_node = (8, 0, 0, 9, 5, 1, 0, 11, 2, 0, 0, 11, 8, 1, 0, 12)
+    starting_node = (32, 0, 0, 9, 15, 0, 0, 9, 11, 1, 0, 9, 15, 1, 0, 9)
     vsg = graph_tools.VehicleStatesGraph(n_platoon, False)
-    free_flow_speeds = np.array([70, 80, 80, 90]) / 3.6
+    free_flow_speeds = np.array([70, 110, 110, 70]) / 3.6
     tracker = graph_tools.PlatoonLCTracker(n_platoon)
-    tracker.move_vehicles([0], -1)
+    tracker.move_vehicles([1], -1)
     root = (tracker, starting_node)
     vsg._explore_until_maneuver_completion(root, set(),
                                            free_flow_speeds)
-
-    # state_quantizer = graph_tools.StateQuantizer(4, configuration.DELTA_X,
-    #                                              configuration.DELTA_V)
-    # next_pos_to_coop = 0
-    # next_positions_to_move = {1}
 
 
 def main():
@@ -304,7 +301,7 @@ def main():
     v_orig = [70/3.6]
     v_ff_platoon = 110/3.6  # make 110
     v_dest = np.array([70])/3.6  # make 50, 70, 90
-    max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY  # *3
+    max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY * 3
     print("===== CREATING SMALL-SCALE GRAPHS ONLY ======")
 
     is_acceleration_optimal = True

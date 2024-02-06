@@ -162,27 +162,6 @@ class FourStateVehicle(base.BaseVehicle, ABC):
                 self.get_id())
         self._desired_destination_lane_leader_id[self._iter_counter] = veh_id
 
-    # def update_target_leader(self, vehicles: Mapping[int, FourStateVehicle]
-    #                          ) -> None:
-    #     self._leader_id[self._iter_counter] = (
-    #         self._controller.get_target_leader_id(vehicles))
-    #     is_new_leader_new = (
-    #             self._iter_counter == 0
-    #             or (self._leader_id[self._iter_counter-1]
-    #                 != self._leader_id[self._iter_counter]))
-    #     if self.has_leader() and is_new_leader_new:
-    #         leader = vehicles[self.get_current_leader_id()]
-    #         if self._is_connected and leader.get_is_connected():
-    #             self.h_safe_lk = configuration.SAFE_CONNECTED_TIME_HEADWAY
-    #             self.h_safe_lc = configuration.get_lane_changing_time_headway(
-    #             True)
-    #         else:
-    #             self.h_safe_lk = configuration.SAFE_TIME_HEADWAY
-    #             self.h_safe_lc = configuration.get_lane_changing_time_headway(
-    #             False)
-    #         self.h_ref_lk = self.h_safe_lk + configuration.TIME_HEADWAY_MARGIN
-    #         self.h_ref_lc = self.h_safe_lc + configuration.TIME_HEADWAY_MARGIN
-
     def _update_origin_lane_time_headway(self, new_leader: base.BaseVehicle):
         super()._update_origin_lane_time_headway(new_leader)
         self._controller.update_real_leader_time_headway(
@@ -509,23 +488,16 @@ class ShortSimulationVehicle(ClosedLoopVehicle):
     def set_incoming_vehicle_id(self, value):
         self._fixed_incoming_vehicle_id = value
 
-    def find_cooperation_requests(self, vehicles: Iterable[base.BaseVehicle]
-                                  ) -> None:
-        self._aided_vehicle_id[self._iter_counter] = (
-            self._fixed_incoming_vehicle_id
-        )
-
-    def find_desired_destination_lane_leader(self):
-        self._desired_destination_lane_leader_id[self._iter_counter] = (
-            self._fixed_desired_dest_lane_leader_id
-        )
-
-    # def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]
-    #                           ) -> bool:
-    #     is_safe = self.get_is_lane_change_safe()
-    #     is_my_turn = (self.get_desired_destination_lane_leader_id()
-    #                   == self.get_destination_lane_leader_id())
-    #     return is_safe and is_my_turn
+    # def find_cooperation_requests(self, vehicles: Iterable[base.BaseVehicle]
+    #                               ) -> None:
+    #     self._aided_vehicle_id[self._iter_counter] = (
+    #         self._fixed_incoming_vehicle_id
+    #     )
+    #
+    # def find_desired_destination_lane_leader(self):
+    #     self._desired_destination_lane_leader_id[self._iter_counter] = (
+    #         self._fixed_desired_dest_lane_leader_id
+    #     )
 
     def make_closed_loop_copy(self, initial_state: np.ndarray = None
                               ) -> ShortSimulationVehicle:
