@@ -335,26 +335,29 @@ class VehicleStatesGraph:
         print(f'File {file_name} saved')
 
     def save_quantization_parameters_to_file(self):
-        file_name = '_'.join(['quantization_parameters_strategies_for',
-                             str(self.n_platoon), 'vehicles.json'])
-        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 'vehicle_state_graphs',
-                                 file_name + '.pickle')
         qx0 = np.array([qx for qx in self._initial_states])
         parameters = {
             "dx": self.state_quantizer.dx,
             "dy": self.state_quantizer.dy,
             "dtheta": self.state_quantizer.dtheta,
             "dv": self.state_quantizer.dv,
-            "max_x_lo": np.max(qx0[:, 0]),
-            "min_x_lo": np.min(qx0[:, 0]),
-            "max_x_ld": np.max(qx0[:, -4]),
-            "min_x_ld": np.min(qx0[:, -4]),
-            "max_v_lo": np.max(qx0[:, 3]),
-            "min_v_lo": np.min(qx0[:, 3]),
-            "max_v_ld": np.max(qx0[:, -1]),
-            "min_v_ld": np.min(qx0[:, -1]),
+            "max_x_lo": int(np.max(qx0[:, 0])),
+            "min_x_lo": int(np.min(qx0[:, 0])),
+            "max_x_ld": int(np.max(qx0[:, -4])),
+            "min_x_ld": int(np.min(qx0[:, -4])),
+            "max_v_lo": int(np.max(qx0[:, 3])),
+            "min_v_lo": int(np.min(qx0[:, 3])),
+            "max_v_ld": int(np.max(qx0[:, -1])),
+            "min_v_ld": int(np.min(qx0[:, -1])),
         }
+        json_data = json.dumps(parameters)
+        file_name = '_'.join([str(self.n_platoon), 'vehicles.json'])
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 'quantization_parameters',
+                                 file_name)
+        with open(file_path, 'w') as file:
+            file.write(json_data)
+            print('Saved file ', file_name)
 
     def save_minimum_cost_strategies_to_json(self, cost_name: str):
         dag = self.states_graph
