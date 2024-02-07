@@ -69,12 +69,15 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         ):
             relevant_vehicle_id = (
                 self._platoon.get_platoon_desired_dest_lane_leader_id())
-            if (relevant_vehicle_id > -1
+            if relevant_vehicle_id > -1:  # there is a dest lane leader (ld)
+                gap = self.compute_gap_to_a_leader(
+                    vehicles[relevant_vehicle_id])
+                gap_ref = self.compute_non_connected_reference_gap(
+                    self.get_vel())
+                if (gap - gap_ref < 0  # we're close to ld
                     and (relevant_vehicle_id
                          != self.get_desired_destination_lane_leader_id())):
-                return vehicles[relevant_vehicle_id].get_vel()
-            else:
-                return self._free_flow_speed
+                    return vehicles[relevant_vehicle_id].get_vel()
         return self._free_flow_speed
 
     def get_vel(self):

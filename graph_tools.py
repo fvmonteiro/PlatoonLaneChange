@@ -33,9 +33,9 @@ class PlatoonLCTracker:
         self._cooperating_order: list[int] = []
 
     def __repr__(self):
-        return (f'[{self.__class__.__name__}] remaining|moved|coop_order = '
-                f'{self._remaining_vehicles}|{self._dest_lane_vehicles}|'
-                f'{self._cooperating_order}')
+        return (f"[{self.__class__.__name__}] remaining|moved|coop_order = "
+                f"{self._remaining_vehicles}|{self._dest_lane_vehicles}|"
+                f"{self._cooperating_order}")
 
     def get_remaining_vehicles(self) -> set[int]:
         return self._remaining_vehicles
@@ -82,32 +82,32 @@ class VehicleStatesGraph:
     def load_from_file(n_platoon: int, has_fd: bool) -> VehicleStatesGraph:
         file_name = VehicleStatesGraph.get_graph_file_name(n_platoon, has_fd)
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 'vehicle_state_graphs',
-                                 file_name + '.pickle')
-        with open(file_path, 'rb') as f:
+                                 "vehicle_state_graphs",
+                                 file_name + ".pickle")
+        with open(file_path, "rb") as f:
             vsg: VehicleStatesGraph = pickle.load(f)
         return vsg
 
     @staticmethod
     def get_graph_file_name(n_platoon: int, has_fd: bool) -> str:
-        return f'graph_{n_platoon}_vehicles_with{"" if has_fd else "out"}_fd'
+        return f"graph_{n_platoon}_vehicles_with{'' if has_fd else 'out'}_fd"
 
     @staticmethod
     def load_strategies(n_platoon: int, cost_name: str
                         ) -> configuration.StrategyMap:
-        file_name = '_'.join(['min', cost_name, 'strategies_for',
-                              str(n_platoon), 'vehicles.json'])
+        file_name = "_".join(["min", cost_name, "strategies_for",
+                              str(n_platoon), "vehicles.json"])
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 'strategy_maps', file_name)
+                                 "strategy_maps", file_name)
 
         with open(file_path) as f:
             raw_data: list[dict] = json.load(f)
             strategy_map: configuration.StrategyMap = defaultdict(dict)
             for d in raw_data:
-                key1 = tuple(d['root'])
-                key2 = frozenset(d['first_mover_set'])
-                lc_order = [set(i) for i in d['lc_order']]
-                strategy_map[key1][key2] = ((lc_order, d['coop_order']),
+                key1 = tuple(d["root"])
+                key2 = frozenset(d["first_mover_set"])
+                lc_order = [set(i) for i in d["lc_order"]]
+                strategy_map[key1][key2] = ((lc_order, d["coop_order"]),
                                             d[cost_name])
         return strategy_map
 
@@ -130,21 +130,21 @@ class VehicleStatesGraph:
         :param max_dist: The maximum distance between the platoon leader and
          its origin and destination lane leaders. The method creates nodes
          with initial leader positions up to the way to max_dist.
-        :param mode: 'w': ignores any existing file (so saving this object
-         will overwrite existing graphs); 'ao': appends to an existing graph
+        :param mode: "w": ignores any existing file (so saving this object
+         will overwrite existing graphs); "ao": appends to an existing graph
          (previously saved to a file) and overwrites previous results if
-         there are repeated initial nodes; 'as': appends to an existing graph
+         there are repeated initial nodes; "as": appends to an existing graph
          and skips any repeated initial nodes.
         :return:
         """
-        print(f'Creating graph ')
+        print(f"Creating graph ")
 
-        if mode not in {'w', 'ao', 'as'}:
+        if mode not in {"w", "ao", "as"}:
             raise ValueError(
                 "[VehicleStatesGraph] Chosen mode is not valid. Must be "
                 "'w', 'ao' or 'as'")
 
-        if mode.startswith('a'):
+        if mode.startswith("a"):
             other_object = VehicleStatesGraph.load_from_file(self.n_platoon,
                                                              self._has_fd)
             self._initial_states = other_object.get_initial_states()
@@ -164,35 +164,47 @@ class VehicleStatesGraph:
             # change)
             initial_states = self._create_initial_states(
                 v0_lo, v0_p, v0_dest, v0_dest, max_dist)
-            print(f'  {len(initial_states)} roots')
+            print(f"  {len(initial_states)} roots")
 
             free_flow_speeds = self._order_values(
                 v0_lo, vel_ff_platoon, v0_dest, v0_dest)
             # nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque()
             for x0 in initial_states:
-                if x0 in self._initial_states:
-                    repeated_initial_states_counter += 1
-                    if mode.endswith('s'):
-                        continue
-                    elif mode.endswith('o'):
-                        self._delete_successor_nodes(x0)
-                    else:
-                        warnings.warn(
-                            "[VehicleStatesGraph] found a repeated initial "
-                            "state in writing mode. Overwriting it...")
-                        self._delete_successor_nodes(x0)
-                self.states_graph.add_node(x0)
-                root = (PlatoonLCTracker(self.n_platoon), x0)
-                # nodes.appendleft((PlatoonLCTracker(self.n_platoon), x0))
-                # print(np.array(x0).reshape([-1, 4]).transpose())
-                # BFS exploration of each initial state node
-                self._explore_until_maneuver_completion(
-                    root, visited_states, free_flow_speeds)
-            self._initial_states |= initial_states
+                n_new = self.add_initial_state_to_graph(x0, visited_states,
+                                                        free_flow_speeds, mode)
+                repeated_initial_states_counter += 1 if n_new == 0 else 0
+
         print(f"Total initial states: {len(self._initial_states)}")
         if repeated_initial_states_counter > 0:
-            print(("skipped" if mode.endswith('s') else "overwrote")
+            print(("skipped" if mode.endswith("s") else "overwrote")
                   + f" initial states: {repeated_initial_states_counter}")
+
+    def add_initial_state_to_graph(
+            self, initial_state: tuple[int], visited_states: set[tuple],
+            free_flow_speeds: Sequence[float], mode: str):
+        """
+        Adds the node relative to the given initial state and explores all
+        succeeding states.
+        :return: Number of new nodes
+        """
+        if initial_state in self._initial_states:
+            if mode.endswith("s"):
+                return 0
+            elif mode.endswith("o"):
+                self._delete_all_successors(initial_state)
+            else:
+                warnings.warn(
+                    "[VehicleStatesGraph] found a repeated initial "
+                    "state in writing mode. Overwriting it...")
+                self._delete_all_successors(initial_state)
+        n1 = self.states_graph.number_of_nodes()
+        self._initial_states.add(initial_state)
+        self.states_graph.add_node(initial_state)
+        root = (PlatoonLCTracker(self.n_platoon), initial_state)
+        # BFS exploration
+        self._explore_until_maneuver_completion(
+            root, visited_states, free_flow_speeds)
+        return self.states_graph.number_of_nodes() - n1
 
     def create_all_initial_speeds(
             self, v_orig: Sequence[float], v_ff_platoon: float,
@@ -200,7 +212,7 @@ class VehicleStatesGraph:
         min_step_v = configuration.DELTA_V
         all_combinations = []
         for vo in v_orig:
-            # print('')
+            # print("")
             v_platoon = [vo]
             while v_platoon[-1] < v_ff_platoon:
                 v_platoon.append(v_platoon[-1] + min_step_v)
@@ -215,22 +227,12 @@ class VehicleStatesGraph:
             fd_states: Sequence[float]):
         # print("[GraphTools] set_maneuver_initial_state for veh at",
         #       ego_position_in_platoon)
-        states = np.round(
+        states = (
             self._order_values(lo_states, platoon_states, ld_states, fd_states))
         quantized_states = self.state_quantizer.quantize_state(states)
-        if quantized_states not in self._initial_states:
-            # not int set(self.states_graph.nodes):
-            print(f'State {quantized_states} not in graph. '
-                  f'Waiting for next iteration...')
-            # self._initial_state_per_vehicle[ego_position_in_platoon] = (
-            #     self._empty_initial_state)
-            # print('Adding it now...')
-            # self._add_new_tree_to_graph(quantized_states, lo_states[-1],
-            #                             ld_states[-1], fd_states[-1])
-        else:
-            self._initial_state_per_vehicle[ego_position_in_platoon] = (
-                quantized_states
-            )
+        self._initial_state_per_vehicle[ego_position_in_platoon] = (
+            quantized_states
+        )
 
     def set_empty_maneuver_initial_state(self, ego_position_in_platoon: int):
         self._initial_state_per_vehicle[ego_position_in_platoon] = (
@@ -241,15 +243,15 @@ class VehicleStatesGraph:
         root = self._initial_state_per_vehicle[vehicle_position]
         node = None
         for neighbor in dag.successors(root):
-            if dag[root][neighbor]['lc_vehicle'] == vehicle_position:
+            if dag[root][neighbor]["lc_vehicle"] == vehicle_position:
                 node = neighbor
                 break
         if node is not None:
-            dag[root][node]['weight'] = cost
+            dag[root][node]["weight"] = cost
         elif cost < np.inf:
-            raise ValueError('Graph does not offer the possibility of '
-                             f'starting the maneuver by veh position '
-                             f'{vehicle_position}')
+            raise ValueError("Graph does not offer the possibility of "
+                             f"starting the maneuver by veh position "
+                             f"{vehicle_position}")
 
     def find_minimum_cost_maneuver(
             self, cost_name: str) -> tuple[configuration.Strategy, float]:
@@ -278,15 +280,31 @@ class VehicleStatesGraph:
         initial_state_candidates = {self._initial_state_per_vehicle[p]
                                     for p in first_mover_platoon_positions}
         if len(initial_state_candidates) > 1:
-            # If multiple first-movers, they should all 'see' the same initial
+            # If multiple first-movers, they should all "see" the same initial
             # state, i.e., the same position for ld
-            raise RuntimeError('More than one possible initial state')
+            raise RuntimeError("More than one possible initial state")
         initial_state = initial_state_candidates.pop()
+
+        if initial_state not in self._initial_states:
+            # not int set(self.states_graph.nodes):
+            print(f"State {initial_state} not in graph. "
+                  f"Waiting for next iteration...")
+            # print("Adding it now...")
+            # v_ff_lo = self.state_quantizer.dequantize_free_flow_velocities(
+            #     quantized_states[3], possible_vel_dest)
+            # v_ff_ld = self.state_quantizer.dequantize_free_flow_velocities(
+            #     quantized_states[-1], possible_vel_dest)
+            # free_flow_speeds = ([v_ff_lo] + [v_ff_platoon] * n_platoon
+            #                     + [v_ff_ld])
+            # self.add_initial_state_to_graph(
+            #     quantized_states, set(self.states_graph.nodes),
+            #     free_flow_speeds, mode="as")
+            raise nx.NetworkXNoPath
 
         # Get the node after the first-movers have changed lanes
         first_move_state = None
         for node in dag.successors(initial_state):
-            if (dag[initial_state][node]['lc_vehicles']
+            if (dag[initial_state][node]["lc_vehicles"]
                     == first_mover_platoon_positions):
                 first_move_state = node
                 break
@@ -312,15 +330,21 @@ class VehicleStatesGraph:
         initial_state_candidates = {self._initial_state_per_vehicle[p]
                                     for p in first_mover_platoon_positions}
         if len(initial_state_candidates) > 1:
-            # If multiple first-movers, they should all 'see' the same initial
+            # If multiple first-movers, they should all "see" the same initial
             # state, i.e., the same position for ld
-            raise RuntimeError('More than one possible initial state')
+            raise RuntimeError("More than one possible initial state")
         initial_state = initial_state_candidates.pop()
 
+        # try:
         opt_strategy = strategy_map[initial_state][
             frozenset(first_mover_platoon_positions)][0]
         opt_cost = strategy_map[initial_state][
             frozenset(first_mover_platoon_positions)][1]
+        # except KeyError:
+        #     print(f"State {initial_state} not in map. "
+        #           f"Waiting for next iteration...")
+        #     opt_strategy = None
+        #     opt_cost = None
 
         return opt_strategy, opt_cost
 
@@ -328,11 +352,11 @@ class VehicleStatesGraph:
         file_name = VehicleStatesGraph.get_graph_file_name(self.n_platoon,
                                                            self._has_fd)
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 'vehicle_state_graphs',
-                                 file_name + '.pickle')
-        with open(file_path, 'wb') as f:
+                                 "vehicle_state_graphs",
+                                 file_name + ".pickle")
+        with open(file_path, "wb") as f:
             pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
-        print(f'File {file_name} saved')
+        print(f"File {file_name} saved")
 
     def save_quantization_parameters_to_file(self):
         qx0 = np.array([qx for qx in self._initial_states])
@@ -351,21 +375,33 @@ class VehicleStatesGraph:
             "min_v_ld": int(np.min(qx0[:, -1])),
         }
         json_data = json.dumps(parameters)
-        file_name = '_'.join([str(self.n_platoon), 'vehicles.json'])
+        file_name = "_".join([str(self.n_platoon), "vehicles.json"])
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 'quantization_parameters',
+                                 "quantization_parameters",
                                  file_name)
-        with open(file_path, 'w') as file:
+        with open(file_path, "w") as file:
             file.write(json_data)
-            print('Saved file ', file_name)
+            print("Saved file ", file_name)
 
     def save_minimum_cost_strategies_to_json(self, cost_name: str):
+        strategy_map = self.create_strategies_map(cost_name)
+        json_data = json.dumps(strategy_map, indent=2)
+        file_name = "_".join(["min", cost_name, "strategies_for",
+                             str(self.n_platoon), "vehicles.json"])
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 "strategy_maps", file_name)
+        with open(file_path, "w") as file:
+            file.write(json_data)
+            print("Saved file ", file_name)
+
+    def create_strategies_map(self, cost_name: str) -> list[dict]:
         dag = self.states_graph
         strategy_map: list[dict] = []
 
+        roots_with_issues = []
         for root in self._initial_states:
             for next_node in dag.successors(root):
-                first_mover_set = dag[root][next_node]['lc_vehicles'].copy()
+                first_mover_set = dag[root][next_node]["lc_vehicles"].copy()
                 strategy = ([first_mover_set], [-1])
                 strategy_from_node, cost = (
                     self.find_minimum_cost_strategy_from_node(
@@ -375,34 +411,32 @@ class VehicleStatesGraph:
                     warnings.warn(f"Could not find a strategy from root "
                                   f"{root} with first mover set "
                                   f"{first_mover_set}")
+                    roots_with_issues.append(root)
                     continue
                 strategy[0].extend(strategy_from_node[0])
                 strategy[1].extend(strategy_from_node[1])
                 strategy_map.append(
-                    {'root': [int(i) for i in root],
-                     'first_mover_set': list(first_mover_set),
-                     'lc_order': [list(s) for s in strategy[0]],
-                     'coop_order': strategy[1], cost_name: cost}
+                    {"root": [int(i) for i in root],
+                     "first_mover_set": list(first_mover_set),
+                     "lc_order": [list(s) for s in strategy[0]],
+                     "coop_order": strategy[1], cost_name: cost}
                 )
-
-        json_data = json.dumps(strategy_map, indent=2)
-        file_name = '_'.join(['min', cost_name, 'strategies_for',
-                             str(self.n_platoon), 'vehicles.json'])
-        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 'strategy_maps', file_name)
-        with open(file_path, 'w') as file:
-            file.write(json_data)
-            print('Saved file ', file_name)
+        # if len(roots_with_issues) > 0:
+        file_name = "unsolved_root_nodes.pickle"
+        with open(file_name, "wb") as f:
+            pickle.dump(roots_with_issues, f, pickle.HIGHEST_PROTOCOL)
+            print(f"File {file_name} saved")
+        return strategy_map
 
     def _create_vehicle_group(self, include_ld: bool = True
                               ) -> vg.ShortSimulationVehicleGroup:
         base.BaseVehicle.reset_vehicle_counter()
         lo = fsv.ShortSimulationVehicle(False)
-        lo.set_name('lo')
+        lo.set_name("lo")
         platoon_vehicles = []
         for i in range(self.n_platoon):
             veh = fsv.ShortSimulationVehicle(True, is_connected=True)
-            veh.set_name('p' + str(i + 1))
+            veh.set_name("p" + str(i + 1))
             platoon_vehicles.append(veh)
 
         # TODO: improve strategy setting method.
@@ -415,12 +449,12 @@ class VehicleStatesGraph:
 
         if include_ld:
             ld = fsv.ShortSimulationVehicle(False)
-            ld.set_name('ld')
+            ld.set_name("ld")
         else:
             ld = []
         if self._has_fd:
             fd = fsv.ShortSimulationVehicle(False)
-            fd.set_name('fd')
+            fd.set_name("fd")
         else:
             fd = []
         all_vehicles = self._order_values(lo, platoon_vehicles, ld, fd)
@@ -439,7 +473,7 @@ class VehicleStatesGraph:
 
     @staticmethod
     def split_values(values: Sequence[Any]) -> dict[str, Any]:
-        return {'lo': values[0], 'platoon': values[1:-1], 'ld': values[-1]}
+        return {"lo": values[0], "platoon": values[1:-1], "ld": values[-1]}
 
     def _create_initial_states(
             self, v0_lo: float, v0_platoon: float, v0_ld: float, v0_fd: float,
@@ -460,18 +494,18 @@ class VehicleStatesGraph:
         # Platoon vehicles (fixed positions given the speed)
         x0_platoon_vehicle = 0
         for i in range(self.n_platoon):
-            p_i = vehicle_group.get_vehicle_by_name('p' + str(i+1))
+            p_i = vehicle_group.get_vehicle_by_name("p" + str(i+1))
             p_i.set_initial_state(x0_platoon_vehicle, 0., 0., v0_platoon)
             x0_platoon_vehicle -= p_i.compute_initial_reference_gap_to(
                 p_i, v0_platoon)  # since all platoon vehicles have the same
             # parameters, the gap reference gap from a vehicle to itself is
             # the same as between any two platoon vehicles
-        p1 = vehicle_group.get_vehicle_by_name('p1')
-        pN = vehicle_group.get_vehicle_by_name('p' + str(self.n_platoon))
+        p1 = vehicle_group.get_vehicle_by_name("p1")
+        pN = vehicle_group.get_vehicle_by_name("p" + str(self.n_platoon))
 
         # Surrounding vehicles (variable positions)
-        lo = vehicle_group.get_vehicle_by_name('lo')
-        ld = vehicle_group.get_vehicle_by_name('ld')
+        lo = vehicle_group.get_vehicle_by_name("lo")
+        ld = vehicle_group.get_vehicle_by_name("ld")
         x0_lo = p1.compute_initial_reference_gap_to(lo, v0_platoon)
         dx = configuration.DELTA_X
         quantized_initial_states: set[configuration.QuantizedState] = set()
@@ -480,12 +514,12 @@ class VehicleStatesGraph:
             x0_ld = pN.get_x()
             while x0_ld < max_leader_dist:
                 ld.set_initial_state(x0_ld, configuration.LANE_WIDTH, 0., v0_ld)
-                # it's not conceptually right to use ld when computing fd's
+                # it"s not conceptually right to use ld when computing fd"s
                 # safe gap, but we know fd and ld have the same characteristics
                 x0_fd = pN.get_x() - ld.compute_initial_reference_gap_to(
                     pN, v0_fd)
                 while self._has_fd and x0_fd > pN.get_x() - max_leader_dist:
-                    fd = vehicle_group.get_vehicle_by_name('fd')
+                    fd = vehicle_group.get_vehicle_by_name("fd")
                     fd.set_initial_state(x0_fd, configuration.LANE_WIDTH,
                                          0., v0_fd)
                     quantized_initial_states.add(
@@ -504,7 +538,7 @@ class VehicleStatesGraph:
         # for ld_x in possible_ld_x:
         #     ld.set_initial_state(ld_x, configuration.LANE_WIDTH, 0., v0_ld)
         #     if self._has_fd:
-        #         fd = vehicle_group.get_vehicle_by_name('fd')
+        #         fd = vehicle_group.get_vehicle_by_name("fd")
         #         fd_safe_gap = fd.compute_lane_keeping_desired_gap(v0_fd)
         #         possible_fd_x = np.arange(
         #             ld_x - fd_safe_gap, pN.get_x() - fd_safe_gap - dx, -dx)
@@ -545,7 +579,7 @@ class VehicleStatesGraph:
             initial_state = self.state_quantizer.dequantize_state(
                 quantized_state)
             # print(tracker)
-            # print('x0=', np.array(initial_state).reshape(-1, 4).transpose())
+            # print("x0=", np.array(initial_state).reshape(-1, 4).transpose())
             for next_pos_to_coop in tracker.get_possible_cooperative_vehicles():
                 for starting_next_pos_to_move in remaining_vehicles:
                     next_positions_to_move = set()
@@ -561,19 +595,18 @@ class VehicleStatesGraph:
                             [next_positions_to_move], [next_pos_to_coop])
                         platoon_veh_ids = (
                             vehicle_group.get_lane_changing_vehicle_ids())
-                        if next_pos_to_coop >= 0:
-                            next_veh_to_coop = vehicle_group.vehicles[
-                                platoon_veh_ids[next_pos_to_coop]]
-                        else:
-                            next_veh_to_coop = None
+                        next_veh_to_coop = (
+                            None if next_pos_to_coop < 0
+                            else vehicle_group.vehicles[platoon_veh_ids[
+                                next_pos_to_coop]])
                         next_vehs_to_move = [
                             vehicle_group.vehicles[platoon_veh_ids[pos]]
                             for pos in next_positions_to_move]
 
-                        # print('  Coop veh:', vehicle_group.vehicles[
+                        # print("  Coop veh:", vehicle_group.vehicles[
                         #     platoon_veh_ids[next_pos_to_coop]].get_name() if
                         #       next_pos_to_coop >= 0 else str(-1))
-                        # print('  Next to move:',
+                        # print("  Next to move:",
                         #       [veh.get_name() for veh in next_vehs_to_move])
 
                         success = self.simulate_till_lane_change(
@@ -608,12 +641,13 @@ class VehicleStatesGraph:
             next_to_coop: fsv.ShortSimulationVehicle) -> bool:
 
         dt = 1.0e-2
-        tf = 20.
+        tf = 30.
         time = np.arange(0, tf + dt, dt)
 
         # Set desired velocities TODO: this should be done elsewhere
         # Due to quantization, we could end up with initial vel above free
-        # flow desired vel.
+        # flow desired vel. To prevent vehicles from decelerating, we allow
+        # these slightly higher free-flow speeds
         adjusted_free_flow_speeds = []
         for i, veh in enumerate(vehicle_group.get_all_vehicles_in_order()):
             adjusted_free_flow_speeds.append(
@@ -629,7 +663,7 @@ class VehicleStatesGraph:
         if next_to_coop is None:
             front_most_vehicle = max([veh for veh in lc_vehicles],
                                      key=lambda x: x.get_x())
-            ld = vehicle_group.get_vehicle_by_name('ld')
+            ld = vehicle_group.get_vehicle_by_name("ld")
             if ld.get_x() < front_most_vehicle.get_x():
                 return False
             desired_leader_id = ld.get_id()
@@ -666,27 +700,38 @@ class VehicleStatesGraph:
 
         n_nodes = self.states_graph.number_of_nodes()
         if n_nodes % 50 == 0:
-            print(f'\t{n_nodes} nodes created')
+            print(f"\t{n_nodes} nodes created")
         # percentage = n_nodes * 100 / self.n_nodes_per_root
         # if percentage % 10 < 0.5:
-        #     print(f'{percentage:.1f}% done')
+        #     print(f"{percentage:.1f}% done")
 
     def _mark_terminal_node(self, node: configuration.QuantizedState) -> None:
-        self.states_graph.nodes[node]['is_terminal'] = True
+        self.states_graph.nodes[node]["is_terminal"] = True
 
-    def _delete_successor_nodes(self, node: configuration.QuantizedState
-                                ) -> None:
+    def _delete_all_successors(self, node: configuration.QuantizedState):
         """
-        Recursively deletes all children of the given node if they don't have
+        Deletes all children of the given node if they don't have
         any other ancestors
-        :param node:
+        """
+        nodes_to_delete = set()
+        self._get_all_successor_nodes(node, nodes_to_delete)
+        self.states_graph.remove_nodes_from(nodes_to_delete)
+
+    def _get_all_successor_nodes(self, node: configuration.QuantizedState,
+                                 result: set[configuration.QuantizedState]
+                                 ) -> None:
+        """
+        Recursively finds all successor nodes
+        :param node: 'root' from where to start looking
+        :param result: Set that will contain all successor nodes
         :return:
         """
-        if len(self.states_graph.predecessors(node)) > 1:
+        if len(list(self.states_graph.predecessors(node))) > 1:
             return
+        result.add(node)
         for successor in self.states_graph.successors(node):
-            self._delete_successor_nodes(successor)
-        self.states_graph.remove_node(node)
+            self._get_all_successor_nodes(successor, result)
+        # self.states_graph.remove_node(node)
 
     # def _add_all_first_mover_nodes(
     #         self, nodes: deque[tuple[PlatoonLCTracker, tuple]],
@@ -705,12 +750,12 @@ class VehicleStatesGraph:
     #     tracker, quantized_state = nodes.pop()
     #     root_state = self.state_quantizer.dequantize_state(quantized_state)
     #     # print(tracker)
-    #     # print('x0=\n', np.array(quantized_state).reshape(
+    #     # print("x0=\n", np.array(quantized_state).reshape(
     #     #     -1, 4).transpose())
     #     for first_pos_to_move in tracker.get_remaining_vehicles():
     #         vehicle_group = self._create_vehicle_group()
     #         vehicle_group.set_vehicles_initial_states_from_array(root_state)
-    #         # print('First to move:', vehicle_group.vehicles[
+    #         # print("First to move:", vehicle_group.vehicles[
     #         #     platoon_veh_ids[first_pos_to_move]].get_name())
     #         next_quantized_state = self._create_first_mover_node(
     #             copy.deepcopy(vehicle_group), v0_ld, delta_x_ld,
@@ -737,7 +782,7 @@ class VehicleStatesGraph:
     #     # The dest lane leader is placed ahead of the lane changing vehicle
     #     lc_vehicle_ref_gap = lc_vehicle.compute_lane_keeping_desired_gap()
     #     x0_ld = (lc_vehicle_x + lc_vehicle_ref_gap + delta_x_ld)
-    #     ld = vehicle_group.get_vehicle_by_name('ld')
+    #     ld = vehicle_group.get_vehicle_by_name("ld")
     #     ld.set_initial_state(x0_ld, configuration.LANE_WIDTH, 0., v0_ld)
     #
     #     vehicle_group.get_full_initial_state_vector()
@@ -760,7 +805,7 @@ class VehicleStatesGraph:
             self._order_values(v0_lo, v0_platoon, v0_ld, v0_fd))
         x0_platoon = np.zeros(self.n_platoon)
         y0_platoon = np.zeros(self.n_platoon)
-        # Loop goes from p_2 to p_N because p1's position is already set to zero
+        # Loop goes from p_2 to p_N because p1"s position is already set to zero
         for i in range(1, self.n_platoon):
             x0_platoon[i] = x0_platoon[i - 1] - ref_gaps[i]
         idx_p1 = 1  # platoon leader idx in the vehicle array
@@ -768,20 +813,20 @@ class VehicleStatesGraph:
         y0_platoon[first_move_pos_in_platoon] = configuration.LANE_WIDTH
         theta0_platoon = np.array([0.] * self.n_platoon)
         platoon_states = np.vstack((x0_platoon, y0_platoon, theta0_platoon,
-                                    v0_platoon)).reshape(-1, order='F')
+                                    v0_platoon)).reshape(-1, order="F")
         # Ahead of the platoon in origin lane
-        x0_lo = x0_platoon[0] + ref_gaps[idx_p1] + delta_x['lo']
+        x0_lo = x0_platoon[0] + ref_gaps[idx_p1] + delta_x["lo"]
         y0_lo = 0
         lo_states = np.hstack((x0_lo, y0_lo, 0., v0_lo))
         # Ahead of the platoon in dest lane
         x0_ld = (x0_platoon[first_move_pos_in_platoon]
-                 + ref_gaps[idx_lc] + delta_x['ld'])
+                 + ref_gaps[idx_lc] + delta_x["ld"])
         y0_d = configuration.LANE_WIDTH
         ld_states = np.hstack((x0_ld, y0_d, 0., v0_ld))
         # Behind ld
         if self._has_fd:
             x0_fd = (x0_platoon[first_move_pos_in_platoon]
-                     - ref_gaps[-1] + delta_x['ld'])
+                     - ref_gaps[-1] + delta_x["ld"])
             fd_states = np.hstack((x0_fd, y0_d, 0., v0_fd))
         else:
             fd_states = []
@@ -797,11 +842,11 @@ class VehicleStatesGraph:
         opt_cost = np.inf
         opt_strategy = None
 
-        if dag.nodes[starting_node].get('is_terminal', False):
+        if dag.nodes[starting_node].get("is_terminal", False):
             return ([], []), 0
 
         for node in nx.descendants(dag, starting_node):
-            if dag.nodes[node].get('is_terminal', False):
+            if dag.nodes[node].get("is_terminal", False):
                 cost, path = nx.single_source_dijkstra(
                     dag, starting_node, node, weight=cost_name)
                 strategy = self.get_maneuver_order_from_path(path)
@@ -817,8 +862,8 @@ class VehicleStatesGraph:
         coop_order = []
         for source_node, target_node in nx.utils.pairwise(path):
             edge = self.states_graph[source_node][target_node]
-            lc_order.append(edge['lc_vehicles'])
-            coop_order.append(edge['coop_vehicle'])
+            lc_order.append(edge["lc_vehicles"])
+            coop_order.append(edge["coop_vehicle"])
         return lc_order, coop_order
 
 
@@ -830,7 +875,7 @@ class StateQuantizer:
     # Possible changes for speed or maintainability:
     # - Transform everything in numpy arrays and try to vectorize the
     #  quantize and dequantize operations in case this becomes a bottleneck
-    # - Make the methods work with vehicle objects if that's better
+    # - Make the methods work with vehicle objects if that"s better
     # - Set n_vehicles in constructor
 
     def __init__(
@@ -857,22 +902,22 @@ class StateQuantizer:
         all_maximum = []
         all_minimum = []
         for state in veh_type.get_state_names():
-            if state == 'x':
+            if state == "x":
                 intervals.append(dx)
                 shift.append(self.x_shift)
                 all_maximum.append(self.max_x)
                 all_minimum.append(self.min_x)
-            elif state == 'y':
+            elif state == "y":
                 intervals.append(dy)
                 shift.append(self.y_shift)
                 all_maximum.append(self.max_y)
                 all_minimum.append(self.min_y)
-            elif state == 'theta':
+            elif state == "theta":
                 intervals.append(dtheta if dtheta is not None else np.inf)
                 shift.append(self.theta_shift)
                 all_maximum.append(self.max_theta)
                 all_minimum.append(self.min_theta)
-            elif state == 'v':
+            elif state == "v":
                 intervals.append(dv)
                 shift.append(self.v_shift)
                 all_maximum.append(self.max_v)
@@ -901,7 +946,7 @@ class StateQuantizer:
         return tuple(qx.astype(int))
 
     def dequantize_state(self, full_quantized_state: Sequence[float],
-                         mode: str = 'mean') -> np.ndarray:
+                         mode: str = "mean") -> np.ndarray:
         """
         Estimates the continuous system state given the quantized state. The
         estimate is done based on the mode.
@@ -910,20 +955,35 @@ class StateQuantizer:
         :return:
         """
 
-        if mode == 'min':
+        if mode == "min":
             delta = 0
-        elif mode == 'mean':
+        elif mode == "mean":
             delta = 0.5
-        elif mode == 'max':
+        elif mode == "max":
             delta = 1.
         else:
-            raise ValueError('Parameter mode must be "min", "mean", or "max"')
+            raise ValueError("Parameter mode must be 'min', 'mean', or 'max'")
 
         full_quantized_state = np.array(full_quantized_state)
         x = (full_quantized_state + delta) * self._intervals + self._shift
         x = np.minimum(np.maximum(x, self._min), self._max)
         x[self._zero_idx] = 0.
         return x
+
+    def dequantize_free_flow_velocities(self, quantized_vel: float,
+                                        possible_values: Iterable[float]):
+        """
+        Useful while debugging. We get a quantized initial velocity, assume it
+        to be the free flow value and map it to one of the expected possible
+        values
+        :param quantized_vel:
+        :param possible_values:
+        :return:
+        """
+        vel = quantized_vel * self.dv
+        possible_values = np.array(possible_values)
+        idx = np.argmin(np.abs(possible_values - vel))
+        return possible_values[idx]
 
     # def quantize_free_flow_velocities(self, velocities):
     #     qv = []

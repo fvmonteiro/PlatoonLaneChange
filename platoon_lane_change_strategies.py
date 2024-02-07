@@ -358,6 +358,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
             self._load_data()
 
         self._set_maneuver_initial_state_for_all_vehicles(vehicles)
+
         start_time = time.time()
         opt_strategy_from_graph = self._find_best_strategy_from_graph()
         if opt_strategy_from_graph is not None:
@@ -490,6 +491,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
             while (pos2 < len(self.platoon.vehicles)
                    and self.platoon.vehicles[pos2].get_is_lane_change_safe()):
                 first_movers.add(pos2)
+                pos2 += 1
                 try:
                     strategy, cost = (
                         self._lane_change_graph.
@@ -499,7 +501,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
                     all_strategies.append(strategy)
                 except nx.NetworkXNoPath:
                     continue
-                pos2 += 1
+
                 if cost < opt_cost:
                     opt_cost = cost
                     opt_strategy = strategy
@@ -535,13 +537,17 @@ class GraphLaneChangeApproach(TemplateStrategy):
             while (pos2 < len(self.platoon.vehicles)
                    and self.platoon.vehicles[pos2].get_is_lane_change_safe()):
                 first_movers.add(pos2)
-                strategy, cost = (
-                    self._lane_change_graph.
-                    find_minimum_cost_maneuver_order_given_first_mover_2(
-                        first_movers, self._strategy_map))
+                pos2 += 1
+                try:
+                    strategy, cost = (
+                        self._lane_change_graph.
+                        find_minimum_cost_maneuver_order_given_first_mover_2(
+                            first_movers, self._strategy_map))
+                except KeyError:
+                    continue
+
                 all_costs_from_map.append(opt_cost)
                 all_strategies_from_map.append(opt_strategy)
-                pos2 += 1
                 if cost < opt_cost:
                     opt_cost = cost
                     opt_strategy = strategy
@@ -552,10 +558,13 @@ class GraphLaneChangeApproach(TemplateStrategy):
             for veh_pos in range(len(self.platoon.vehicles)):
                 veh = self.platoon.vehicles[veh_pos]
                 if veh.get_is_lane_change_gap_suitable():
-                    strategy, cost = (
-                        self._lane_change_graph.
-                        find_minimum_cost_maneuver_order_given_first_mover_2(
-                            {veh_pos}, self._strategy_map))
+                    try:
+                        strategy, cost = (
+                            self._lane_change_graph.
+                            find_minimum_cost_maneuver_order_given_first_mover_2(
+                                {veh_pos}, self._strategy_map))
+                    except KeyError:
+                        continue
                     if cost < opt_cost:
                         opt_cost = cost
                         opt_strategy = strategy
