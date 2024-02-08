@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 import pickle
 import warnings
 from collections.abc import Iterable, Mapping, Sequence
@@ -12,12 +13,204 @@ from typing import Any
 import networkx as nx
 import numpy as np
 
-import analysis
 import configuration
 import platoon
+import scenarios
 import vehicle_group as vg
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
+
+
+class VehicleStateGraph:
+    """
+    Data class to contain the DAG with vehicle states along with some important
+    information regarding the graph
+    """
+
+    def __init__(self):
+        self.states_graph = nx.DiGraph()
+        self._initial_states = set()
+        self._quantization_parameters = {
+            "dx": configuration.DELTA_X, "dy": configuration.DELTA_Y,
+            "dtheta": 1,  # irrelevant for current approach
+            "dv": configuration.DELTA_V,
+            "max_x_lo": np.inf, "min_x_lo": -np.inf,
+            "max_x_ld": np.inf, "min_x_ld": -np.inf,
+            "max_v_lo": np.inf, "min_v_lo": -np.inf,
+            "max_v_ld": np.inf, "min_v_ld": -np.inf,
+        }
+
+    @staticmethod
+    def load_from_file(n_platoon: int, has_fd: bool
+                       ) -> VehicleStateGraph:
+        file_name = VehicleStateGraph.get_graph_file_name(n_platoon,
+                                                          has_fd)
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 "vehicle_state_graphs",
+                                 file_name + ".pickle")
+        with open(file_path, "rb") as f:
+            vsg: VehicleStateGraph = pickle.load(f)
+        return vsg
+
+    @staticmethod
+    def get_graph_file_name(n_platoon: int, has_fd: bool) -> str:
+        return f"graph_{n_platoon}_vehicles_with{'' if has_fd else 'out'}_fd"
+
+    @staticmethod
+    def order_values(lo_value: Any, platoon_value: Iterable[Any],
+                     ld_value: Any, fd_value: Any = None) -> np.ndarray:
+        """
+        Used to ensure any stacked vectors always places the vehicles in the
+        same order
+        :param lo_value:
+        :param platoon_value:
+        :param ld_value:
+        :param fd_value:
+        :return:
+        """
+        if fd_value is None:
+            fd_value = []
+        return np.hstack((lo_value, platoon_value, ld_value, fd_value))
+
+    @staticmethod
+    def split_state_vector(values: Sequence[Any]) -> dict[str, Any]:
+        # TODO remove hard coded indices?
+        return {"lo": values[:4], "platoon": values[4:-4], "ld": values[-4:]}
+
+    @staticmethod
+    def split_matrix(matrix: Iterable[Sequence[Any]]) -> dict[str, Any]:
+        ret = defaultdict(list)
+        for array in matrix:
+            for key, split_array in (VehicleStateGraph.
+                                     split_state_vector(array).items()):
+                ret[key] += split_array
+        return ret
+
+    def get_initial_states(self) -> set[configuration.QuantizedState]:
+        return self._initial_states
+
+    def get_quantization_parameters(self) -> dict[str, float]:
+        return self._quantization_parameters
+
+    def get_state_quantizer(self, n_vehicles: int) -> StateQuantizer:
+        return StateQuantizer(
+            n_vehicles, self._quantization_parameters)
+
+    def get_successor_given_first_movers(
+            self, source: configuration.QuantizedState,
+            first_mover_set: set[int]):
+        dag: nx.DiGraph = self.states_graph
+        for node in dag.successors(source):
+            if dag[source][node]["lc_vehicles"] == first_mover_set:
+                return node
+        raise nx.NetworkXNoPath
+
+    def add_initial_node(self, initial_state: configuration.QuantizedState):
+        """
+        Adds the given state to the list of nodes without any predecessors
+        and to the graph's nodes list
+        :param initial_state:
+        :return:
+        """
+        self._initial_states.add(initial_state)
+        self.states_graph.add_node(initial_state)
+
+    def update_graph(
+            self, source_state: configuration.QuantizedState,
+            dest_state: configuration.QuantizedState,
+            transition_time: float, accel_cost: float,
+            lc_vehicles: Iterable[int], coop_vehicle: int):
+        """
+        Updates all tracking graphs with the same weight
+        """
+        self.states_graph.add_edge(source_state, dest_state,
+                                   time=transition_time, accel=accel_cost,
+                                   lc_vehicles=lc_vehicles,
+                                   coop_vehicle=coop_vehicle)
+
+        n_nodes = self.states_graph.number_of_nodes()
+        if n_nodes % 100 == 0:
+            print(f"\t{n_nodes} nodes created")
+
+    def mark_terminal_node(self, node: configuration.QuantizedState) -> None:
+        self.states_graph.nodes[node]["is_terminal"] = True
+
+    def delete_all_successors(self, node: configuration.QuantizedState):
+        """
+        Deletes all children of the given node if they don't have
+        any other ancestors
+        """
+        nodes_to_delete = set()
+        self._get_all_successor_nodes(node, nodes_to_delete)
+        self.states_graph.remove_nodes_from(nodes_to_delete)
+
+    def find_minimum_cost_strategy_from_node(
+            self, starting_node: configuration.QuantizedState, cost_name: str
+    ) -> tuple[configuration.Strategy, float]:
+        dag: nx.DiGraph = self.states_graph
+        all_costs = []  # for debugging
+        all_strategies = []  # for debugging
+        opt_cost = np.inf
+        opt_strategy = None
+
+        if dag.nodes[starting_node].get("is_terminal", False):
+            return ([], []), 0
+
+        for node in nx.descendants(dag, starting_node):
+            if dag.nodes[node].get("is_terminal", False):
+                cost, path = nx.single_source_dijkstra(
+                    dag, starting_node, node, weight=cost_name)
+                strategy = self.get_maneuver_order_from_path(path)
+                all_costs.append(cost)
+                all_strategies.append(strategy)
+                if cost < opt_cost:
+                    opt_cost = cost
+                    opt_strategy = strategy
+        return opt_strategy, opt_cost
+
+    def get_maneuver_order_from_path(self, path) -> configuration.Strategy:
+        lc_order = []
+        coop_order = []
+        for source_node, target_node in nx.utils.pairwise(path):
+            edge = self.states_graph[source_node][target_node]
+            lc_order.append(edge["lc_vehicles"])
+            coop_order.append(edge["coop_vehicle"])
+        return lc_order, coop_order
+
+    def register_quantization_boundaries(self):
+        qx0 = self._initial_states
+        qx0_split = VehicleStateGraph.split_matrix(qx0)
+        x_lo = qx0_split["lo"][fsv.FourStateVehicle.get_idx_of_state("x")]
+        x_ld = qx0_split["ld"][fsv.FourStateVehicle.get_idx_of_state("x")]
+        v_lo = qx0_split["lo"][fsv.FourStateVehicle.get_idx_of_state("v")]
+        v_ld = qx0_split["ld"][fsv.FourStateVehicle.get_idx_of_state("v")]
+        bounds = {
+            "max_x_lo": int(np.max(x_lo)),
+            "min_x_lo": int(np.min(x_lo)),
+            "max_x_ld": int(np.max(x_ld)),
+            "min_x_ld": int(np.min(x_ld)),
+            "max_v_lo": int(np.max(v_lo)),
+            "min_v_lo": int(np.min(v_lo)),
+            "max_v_ld": int(np.max(v_ld)),
+            "min_v_ld": int(np.min(v_ld)),
+        }
+        for key, value in bounds.items():
+            self._quantization_parameters[key] = value
+
+    def _get_all_successor_nodes(self, node: configuration.QuantizedState,
+                                 result: set[configuration.QuantizedState]
+                                 ) -> None:
+        """
+        Recursively finds all successor nodes
+        :param node: 'root' from where to start looking
+        :param result: Set that will contain all successor nodes
+        :return:
+        """
+        if len(list(self.states_graph.predecessors(node))) > 1:
+            return
+        result.add(node)
+        for successor in self.states_graph.successors(node):
+            self._get_all_successor_nodes(successor, result)
 
 
 class PlatoonLCTracker:
@@ -62,57 +255,57 @@ class PlatoonLCTracker:
             self._remaining_vehicles.add(p)
 
 
-class VehicleStatesGraph:
-
-    _empty_initial_state: configuration.QuantizedState = (0,)
+class GraphCreator:
 
     def __init__(self, n_platoon: int, has_fd: bool):
-        n_vehicles = n_platoon + 2 + has_fd
-        self.state_quantizer = StateQuantizer(
-            n_vehicles, dx=configuration.DELTA_X, dv=configuration.DELTA_V)
-        self.n_platoon = n_platoon
+        self._n_platoon = n_platoon
         self._has_fd = has_fd
+        self.vehicle_state_graph = VehicleStateGraph()
+        self.state_quantizer: StateQuantizer = (
+            self.vehicle_state_graph.get_state_quantizer(
+            self.get_n_vehicles_per_state()))
 
-        self.states_graph = nx.DiGraph()
-        self._initial_states: set[configuration.QuantizedState] = set()
-        self._initial_state_per_vehicle: \
-            dict[int, configuration.QuantizedState] = dict()
+    def get_n_vehicles_per_state(self):
+        return self._n_platoon + 2 + self._has_fd
 
-    @staticmethod
-    def load_from_file(n_platoon: int, has_fd: bool) -> VehicleStatesGraph:
-        file_name = VehicleStatesGraph.get_graph_file_name(n_platoon, has_fd)
+    def load_a_graph(self):
+        vsg = VehicleStateGraph.load_from_file(self._n_platoon, self._has_fd)
+        self.vehicle_state_graph = vsg
+        self.state_quantizer = self.vehicle_state_graph.get_state_quantizer(
+            self.get_n_vehicles_per_state())
+
+    def save_vehicle_state_graph_to_file(self):
+        file_name = VehicleStateGraph.get_graph_file_name(self._n_platoon,
+                                                          self._has_fd)
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                                  "vehicle_state_graphs",
                                  file_name + ".pickle")
-        with open(file_path, "rb") as f:
-            vsg: VehicleStatesGraph = pickle.load(f)
-        return vsg
+        with open(file_path, "wb") as f:
+            pickle.dump(self.vehicle_state_graph, f, pickle.HIGHEST_PROTOCOL)
+        print(f"File {file_name} saved")
 
-    @staticmethod
-    def get_graph_file_name(n_platoon: int, has_fd: bool) -> str:
-        return f"graph_{n_platoon}_vehicles_with{'' if has_fd else 'out'}_fd"
+    def save_quantization_parameters_to_file(self):
+        self.vehicle_state_graph.register_quantization_boundaries()
+        json_data = json.dumps(
+            self.vehicle_state_graph.get_quantization_parameters())
+        file_name = "_".join([str(self._n_platoon), "vehicles.json"])
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 "quantization_parameters",
+                                 file_name)
+        with open(file_path, "w") as file:
+            file.write(json_data)
+            print("Saved file ", file_name)
 
-    @staticmethod
-    def load_strategies(n_platoon: int, cost_name: str
-                        ) -> configuration.StrategyMap:
+    def save_minimum_cost_strategies_to_json(self, cost_name: str):
+        strategy_map = self.create_strategies_map(cost_name)
+        json_data = json.dumps(strategy_map, indent=2)
         file_name = "_".join(["min", cost_name, "strategies_for",
-                              str(n_platoon), "vehicles.json"])
+                              str(self._n_platoon), "vehicles.json"])
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                                  "strategy_maps", file_name)
-
-        with open(file_path) as f:
-            raw_data: list[dict] = json.load(f)
-            strategy_map: configuration.StrategyMap = defaultdict(dict)
-            for d in raw_data:
-                key1 = tuple(d["root"])
-                key2 = frozenset(d["first_mover_set"])
-                lc_order = [set(i) for i in d["lc_order"]]
-                strategy_map[key1][key2] = ((lc_order, d["coop_order"]),
-                                            d[cost_name])
-        return strategy_map
-
-    def get_initial_states(self) -> set[configuration.QuantizedState]:
-        return self._initial_states
+        with open(file_path, "w") as file:
+            file.write(json_data)
+            print("Saved file ", file_name)
 
     def create_graph(self, vel_orig_lane: Sequence[float],
                      vel_ff_platoon: float, vel_dest_lane: Sequence[float],
@@ -145,14 +338,10 @@ class VehicleStatesGraph:
                 "'w', 'ao' or 'as'")
 
         if mode.startswith("a"):
-            other_object = VehicleStatesGraph.load_from_file(self.n_platoon,
-                                                             self._has_fd)
-            self._initial_states = other_object.get_initial_states()
-            self.states_graph = other_object.states_graph
-            del other_object
+            self.load_a_graph()
 
         visited_states = set()
-        all_velocities = self.create_all_initial_speeds(
+        all_velocities = self._create_all_initial_speeds(
             vel_orig_lane, vel_ff_platoon, vel_dest_lane)
         repeated_initial_states_counter = 0
         counter = 0
@@ -166,20 +355,23 @@ class VehicleStatesGraph:
                 v0_lo, v0_p, v0_dest, v0_dest, max_dist)
             print(f"  {len(initial_states)} roots")
 
-            free_flow_speeds = self._order_values(
-                v0_lo, vel_ff_platoon, v0_dest, v0_dest)
-            # nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque()
+            v0_fd = v0_dest if self._has_fd else None
+            free_flow_speeds = VehicleStateGraph.order_values(
+                v0_lo, [vel_ff_platoon] * self._n_platoon, v0_dest, v0_fd)
             for x0 in initial_states:
-                n_new = self.add_initial_state_to_graph(x0, visited_states,
-                                                        free_flow_speeds, mode)
+                n_new = self.add_all_from_initial_state_to_graph(
+                    x0, visited_states, free_flow_speeds, mode)
                 repeated_initial_states_counter += 1 if n_new == 0 else 0
 
-        print(f"Total initial states: {len(self._initial_states)}")
+        print(f"Total initial states: "
+              f"{len(self.vehicle_state_graph.get_initial_states())}")
+        print(f"Total nodes: "
+              f"{self.vehicle_state_graph.states_graph.number_of_nodes()}")
         if repeated_initial_states_counter > 0:
             print(("skipped" if mode.endswith("s") else "overwrote")
                   + f" initial states: {repeated_initial_states_counter}")
 
-    def add_initial_state_to_graph(
+    def add_all_from_initial_state_to_graph(
             self, initial_state: tuple[int], visited_states: set[tuple],
             free_flow_speeds: Sequence[float], mode: str):
         """
@@ -187,225 +379,34 @@ class VehicleStatesGraph:
         succeeding states.
         :return: Number of new nodes
         """
-        if initial_state in self._initial_states:
+        if initial_state in self.vehicle_state_graph.get_initial_states():
             if mode.endswith("s"):
                 return 0
             elif mode.endswith("o"):
-                self._delete_all_successors(initial_state)
+                self.vehicle_state_graph.delete_all_successors(initial_state)
             else:
                 warnings.warn(
                     "[VehicleStatesGraph] found a repeated initial "
                     "state in writing mode. Overwriting it...")
-                self._delete_all_successors(initial_state)
-        n1 = self.states_graph.number_of_nodes()
-        self._initial_states.add(initial_state)
-        self.states_graph.add_node(initial_state)
-        root = (PlatoonLCTracker(self.n_platoon), initial_state)
+                self.vehicle_state_graph.delete_all_successors(initial_state)
+        n1 = self.vehicle_state_graph.states_graph.number_of_nodes()
+        self.vehicle_state_graph.add_initial_node(initial_state)
         # BFS exploration
         self._explore_until_maneuver_completion(
-            root, visited_states, free_flow_speeds)
-        return self.states_graph.number_of_nodes() - n1
-
-    def create_all_initial_speeds(
-            self, v_orig: Sequence[float], v_ff_platoon: float,
-            v_dest: Sequence[float]) -> list[tuple[float, float, float]]:
-        min_step_v = configuration.DELTA_V
-        all_combinations = []
-        for vo in v_orig:
-            # print("")
-            v_platoon = [vo]
-            while v_platoon[-1] < v_ff_platoon:
-                v_platoon.append(v_platoon[-1] + min_step_v)
-            for vp in v_platoon:
-                for vd in v_dest:
-                    all_combinations.append((vo, vp, vd))
-        return all_combinations
-
-    def set_maneuver_initial_state(
-            self, ego_position_in_platoon: int, lo_states: Sequence[float],
-            platoon_states: Iterable[float], ld_states: Sequence[float],
-            fd_states: Sequence[float]):
-        # print("[GraphTools] set_maneuver_initial_state for veh at",
-        #       ego_position_in_platoon)
-        states = (
-            self._order_values(lo_states, platoon_states, ld_states, fd_states))
-        quantized_states = self.state_quantizer.quantize_state(states)
-        self._initial_state_per_vehicle[ego_position_in_platoon] = (
-            quantized_states
-        )
-
-    def set_empty_maneuver_initial_state(self, ego_position_in_platoon: int):
-        self._initial_state_per_vehicle[ego_position_in_platoon] = (
-            self._empty_initial_state)
-
-    def set_first_mover_cost(self, vehicle_position: int, cost: float):
-        dag = self.states_graph
-        root = self._initial_state_per_vehicle[vehicle_position]
-        node = None
-        for neighbor in dag.successors(root):
-            if dag[root][neighbor]["lc_vehicle"] == vehicle_position:
-                node = neighbor
-                break
-        if node is not None:
-            dag[root][node]["weight"] = cost
-        elif cost < np.inf:
-            raise ValueError("Graph does not offer the possibility of "
-                             f"starting the maneuver by veh position "
-                             f"{vehicle_position}")
-
-    def find_minimum_cost_maneuver(
-            self, cost_name: str) -> tuple[configuration.Strategy, float]:
-        initial_states = set(self._initial_state_per_vehicle.values())
-        initial_states.discard(self._empty_initial_state)
-
-        all_costs = []  # for debugging
-        all_strategies = []  # for debugging
-        opt_cost = np.inf
-        opt_strategy = None
-        for root in initial_states:
-            strategy, cost = self.find_minimum_cost_strategy_from_node(
-                root, cost_name)
-            all_costs.append(cost)
-            all_strategies.append(strategy)
-            if cost < opt_cost:
-                opt_cost = cost
-                opt_strategy = strategy
-        return opt_strategy, opt_cost
-
-    def find_minimum_cost_maneuver_order_given_first_mover(
-            self, first_mover_platoon_positions: set[int], cost_name: str
-    ) -> tuple[configuration.Strategy, float]:
-        # Get the initial state as seen by the first mover group
-        dag: nx.DiGraph = self.states_graph
-        initial_state_candidates = {self._initial_state_per_vehicle[p]
-                                    for p in first_mover_platoon_positions}
-        if len(initial_state_candidates) > 1:
-            # If multiple first-movers, they should all "see" the same initial
-            # state, i.e., the same position for ld
-            raise RuntimeError("More than one possible initial state")
-        initial_state = initial_state_candidates.pop()
-
-        if initial_state not in self._initial_states:
-            # not int set(self.states_graph.nodes):
-            print(f"State {initial_state} not in graph. "
-                  f"Waiting for next iteration...")
-            # print("Adding it now...")
-            # v_ff_lo = self.state_quantizer.dequantize_free_flow_velocities(
-            #     quantized_states[3], possible_vel_dest)
-            # v_ff_ld = self.state_quantizer.dequantize_free_flow_velocities(
-            #     quantized_states[-1], possible_vel_dest)
-            # free_flow_speeds = ([v_ff_lo] + [v_ff_platoon] * n_platoon
-            #                     + [v_ff_ld])
-            # self.add_initial_state_to_graph(
-            #     quantized_states, set(self.states_graph.nodes),
-            #     free_flow_speeds, mode="as")
-            raise nx.NetworkXNoPath
-
-        # Get the node after the first-movers have changed lanes
-        first_move_state = None
-        for node in dag.successors(initial_state):
-            if (dag[initial_state][node]["lc_vehicles"]
-                    == first_mover_platoon_positions):
-                first_move_state = node
-                break
-        if first_move_state is None:
-            raise nx.NetworkXNoPath
-
-        opt_strategy = ([first_mover_platoon_positions.copy()], [-1])
-        opt_strategy_from_first, opt_cost_from_first = (
-            self.find_minimum_cost_strategy_from_node(first_move_state,
-                                                      cost_name)
-        )
-        opt_strategy[0].extend(opt_strategy_from_first[0])
-        opt_strategy[1].extend(opt_strategy_from_first[1])
-        opt_cost = opt_cost_from_first
-
-        return opt_strategy, opt_cost
-
-    def find_minimum_cost_maneuver_order_given_first_mover_2(
-            self, first_mover_platoon_positions: set[int],
-            strategy_map: configuration.StrategyMap
-    ) -> tuple[configuration.Strategy, float]:
-        # Get the initial state as seen by the first mover group
-        initial_state_candidates = {self._initial_state_per_vehicle[p]
-                                    for p in first_mover_platoon_positions}
-        if len(initial_state_candidates) > 1:
-            # If multiple first-movers, they should all "see" the same initial
-            # state, i.e., the same position for ld
-            raise RuntimeError("More than one possible initial state")
-        initial_state = initial_state_candidates.pop()
-
-        # try:
-        opt_strategy = strategy_map[initial_state][
-            frozenset(first_mover_platoon_positions)][0]
-        opt_cost = strategy_map[initial_state][
-            frozenset(first_mover_platoon_positions)][1]
-        # except KeyError:
-        #     print(f"State {initial_state} not in map. "
-        #           f"Waiting for next iteration...")
-        #     opt_strategy = None
-        #     opt_cost = None
-
-        return opt_strategy, opt_cost
-
-    def save_self_to_file(self):
-        file_name = VehicleStatesGraph.get_graph_file_name(self.n_platoon,
-                                                           self._has_fd)
-        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 "vehicle_state_graphs",
-                                 file_name + ".pickle")
-        with open(file_path, "wb") as f:
-            pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
-        print(f"File {file_name} saved")
-
-    def save_quantization_parameters_to_file(self):
-        qx0 = np.array([qx for qx in self._initial_states])
-        parameters = {
-            "dx": self.state_quantizer.dx,
-            "dy": self.state_quantizer.dy,
-            "dtheta": self.state_quantizer.dtheta,
-            "dv": self.state_quantizer.dv,
-            "max_x_lo": int(np.max(qx0[:, 0])),
-            "min_x_lo": int(np.min(qx0[:, 0])),
-            "max_x_ld": int(np.max(qx0[:, -4])),
-            "min_x_ld": int(np.min(qx0[:, -4])),
-            "max_v_lo": int(np.max(qx0[:, 3])),
-            "min_v_lo": int(np.min(qx0[:, 3])),
-            "max_v_ld": int(np.max(qx0[:, -1])),
-            "min_v_ld": int(np.min(qx0[:, -1])),
-        }
-        json_data = json.dumps(parameters)
-        file_name = "_".join([str(self.n_platoon), "vehicles.json"])
-        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 "quantization_parameters",
-                                 file_name)
-        with open(file_path, "w") as file:
-            file.write(json_data)
-            print("Saved file ", file_name)
-
-    def save_minimum_cost_strategies_to_json(self, cost_name: str):
-        strategy_map = self.create_strategies_map(cost_name)
-        json_data = json.dumps(strategy_map, indent=2)
-        file_name = "_".join(["min", cost_name, "strategies_for",
-                             str(self.n_platoon), "vehicles.json"])
-        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 "strategy_maps", file_name)
-        with open(file_path, "w") as file:
-            file.write(json_data)
-            print("Saved file ", file_name)
+            initial_state, visited_states, free_flow_speeds)
+        return self.vehicle_state_graph.states_graph.number_of_nodes() - n1
 
     def create_strategies_map(self, cost_name: str) -> list[dict]:
-        dag = self.states_graph
         strategy_map: list[dict] = []
-
         roots_with_issues = []
-        for root in self._initial_states:
+        dag = self.vehicle_state_graph.states_graph
+        for root in self.vehicle_state_graph.get_initial_states():
             for next_node in dag.successors(root):
                 first_mover_set = dag[root][next_node]["lc_vehicles"].copy()
                 strategy = ([first_mover_set], [-1])
                 strategy_from_node, cost = (
-                    self.find_minimum_cost_strategy_from_node(
-                        next_node, cost_name)
+                    self.vehicle_state_graph.
+                    find_minimum_cost_strategy_from_node(next_node, cost_name)
                 )
                 if strategy_from_node is None:
                     warnings.warn(f"Could not find a strategy from root "
@@ -428,52 +429,21 @@ class VehicleStatesGraph:
             print(f"File {file_name} saved")
         return strategy_map
 
-    def _create_vehicle_group(self, include_ld: bool = True
-                              ) -> vg.ShortSimulationVehicleGroup:
-        base.BaseVehicle.reset_vehicle_counter()
-        lo = fsv.ShortSimulationVehicle(False)
-        lo.set_name("lo")
-        platoon_vehicles = []
-        for i in range(self.n_platoon):
-            veh = fsv.ShortSimulationVehicle(True, is_connected=True)
-            veh.set_name("p" + str(i + 1))
-            platoon_vehicles.append(veh)
-
-        # TODO: improve strategy setting method.
-        #  Setting by int is hard to maintain and read
-        leader_platoon = platoon.ClosedLoopPlatoon(platoon_vehicles[0], 2)
-        platoon_vehicles[0].set_platoon(leader_platoon)
-        for i in range(1, len(platoon_vehicles)):
-            leader_platoon.append_vehicle(platoon_vehicles[i])
-            platoon_vehicles[i].set_platoon(leader_platoon)
-
-        if include_ld:
-            ld = fsv.ShortSimulationVehicle(False)
-            ld.set_name("ld")
-        else:
-            ld = []
-        if self._has_fd:
-            fd = fsv.ShortSimulationVehicle(False)
-            fd.set_name("fd")
-        else:
-            fd = []
-        all_vehicles = self._order_values(lo, platoon_vehicles, ld, fd)
-        vehicle_group = vg.ShortSimulationVehicleGroup()
-        vehicle_group.fill_vehicle_array(all_vehicles)
-
-        return vehicle_group
-
-    def _order_values(self, lo_value: Any, platoon_value: Any, ld_value: Any,
-                      fd_value: Any) -> np.ndarray:
-        if np.isscalar(platoon_value):
-            platoon_value = [platoon_value] * self.n_platoon
-        if not self._has_fd:
-            fd_value = []
-        return np.hstack((lo_value, platoon_value, ld_value, fd_value))
-
     @staticmethod
-    def split_values(values: Sequence[Any]) -> dict[str, Any]:
-        return {"lo": values[0], "platoon": values[1:-1], "ld": values[-1]}
+    def _create_all_initial_speeds(
+            v_orig: Sequence[float], v_ff_platoon: float,
+            v_dest: Sequence[float]) -> list[tuple[float, float, float]]:
+        min_step_v = configuration.DELTA_V
+        all_combinations = []
+        for vo in v_orig:
+            # print("")
+            v_platoon = [vo]
+            while v_platoon[-1] < v_ff_platoon:
+                v_platoon.append(v_platoon[-1] + min_step_v)
+            for vp in v_platoon:
+                for vd in v_dest:
+                    all_combinations.append((vo, vp, vd))
+        return all_combinations
 
     def _create_initial_states(
             self, v0_lo: float, v0_platoon: float, v0_ld: float, v0_fd: float,
@@ -493,7 +463,7 @@ class VehicleStatesGraph:
 
         # Platoon vehicles (fixed positions given the speed)
         x0_platoon_vehicle = 0
-        for i in range(self.n_platoon):
+        for i in range(self._n_platoon):
             p_i = vehicle_group.get_vehicle_by_name("p" + str(i+1))
             p_i.set_initial_state(x0_platoon_vehicle, 0., 0., v0_platoon)
             x0_platoon_vehicle -= p_i.compute_initial_reference_gap_to(
@@ -501,7 +471,7 @@ class VehicleStatesGraph:
             # parameters, the gap reference gap from a vehicle to itself is
             # the same as between any two platoon vehicles
         p1 = vehicle_group.get_vehicle_by_name("p1")
-        pN = vehicle_group.get_vehicle_by_name("p" + str(self.n_platoon))
+        pN = vehicle_group.get_vehicle_by_name("p" + str(self._n_platoon))
 
         # Surrounding vehicles (variable positions)
         lo = vehicle_group.get_vehicle_by_name("lo")
@@ -533,38 +503,53 @@ class VehicleStatesGraph:
                 x0_ld += dx
             x0_lo += dx
         return quantized_initial_states
-        # possible_ld_x = np.arange(pN.get_x(), lo.get_x() + 2*dx, dx)
-        #
-        # for ld_x in possible_ld_x:
-        #     ld.set_initial_state(ld_x, configuration.LANE_WIDTH, 0., v0_ld)
-        #     if self._has_fd:
-        #         fd = vehicle_group.get_vehicle_by_name("fd")
-        #         fd_safe_gap = fd.compute_lane_keeping_desired_gap(v0_fd)
-        #         possible_fd_x = np.arange(
-        #             ld_x - fd_safe_gap, pN.get_x() - fd_safe_gap - dx, -dx)
-        #         for fd_x in possible_fd_x:
-        #             fd.set_initial_state(fd_x, configuration.LANE_WIDTH, 0.,
-        #                                  v0_fd)
-        #             initial_state = (
-        #                 vehicle_group.get_full_initial_state_vector())
-        #             quantized_initial_states.append(
-        #                 self.state_quantizer.quantize_state(initial_state))
-        #     else:
-        #         initial_state = vehicle_group.get_full_initial_state_vector()
-        #         quantized_initial_states.append(
-        #             self.state_quantizer.quantize_state(initial_state))
-        # return quantized_initial_states
+
+    def _create_vehicle_group(self, include_ld: bool = True
+                              ) -> vg.ShortSimulationVehicleGroup:
+        base.BaseVehicle.reset_vehicle_counter()
+        lo = fsv.ShortSimulationVehicle(False)
+        lo.set_name("lo")
+        platoon_vehicles = []
+        for i in range(self._n_platoon):
+            veh = fsv.ShortSimulationVehicle(True, is_connected=True)
+            veh.set_name("p" + str(i + 1))
+            platoon_vehicles.append(veh)
+
+        # TODO: improve strategy setting method.
+        #  Setting by int is hard to maintain and read
+        leader_platoon = platoon.ClosedLoopPlatoon(platoon_vehicles[0], 2)
+        platoon_vehicles[0].set_platoon(leader_platoon)
+        for i in range(1, len(platoon_vehicles)):
+            leader_platoon.append_vehicle(platoon_vehicles[i])
+            platoon_vehicles[i].set_platoon(leader_platoon)
+
+        if include_ld:
+            ld = fsv.ShortSimulationVehicle(False)
+            ld.set_name("ld")
+        else:
+            ld = []
+        if self._has_fd:
+            fd = fsv.ShortSimulationVehicle(False)
+            fd.set_name("fd")
+        else:
+            fd = None
+        all_vehicles = VehicleStateGraph.order_values(lo, platoon_vehicles, ld, fd)
+        vehicle_group = vg.ShortSimulationVehicleGroup()
+        vehicle_group.fill_vehicle_array(all_vehicles)
+
+        return vehicle_group
 
     def _explore_until_maneuver_completion(
-            self, root: tuple[PlatoonLCTracker, tuple],
+            self, initial_state: configuration.QuantizedState,
             visited_states: set[tuple], free_flow_speeds: Sequence[float]):
         """
-        Given a list of nodes containing all the first move states, explore
-        until maneuver completion
-        :param root: initial no lane changes state
+        Given an initial state, explore all possibilities until maneuver
+         completion
+        :param initial_state: state before any lane changes
         :param free_flow_speeds:
         :return:
         """
+        root = (PlatoonLCTracker(self._n_platoon), initial_state)
         nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque([root])
         while len(nodes) > 0:
             tracker, quantized_state = nodes.pop()
@@ -573,45 +558,23 @@ class VehicleStatesGraph:
             visited_states.add(quantized_state)
             remaining_vehicles = tracker.get_remaining_vehicles()
             if len(remaining_vehicles) == 0:
-                self._mark_terminal_node(quantized_state)
+                self.vehicle_state_graph.mark_terminal_node(quantized_state)
                 continue
 
             initial_state = self.state_quantizer.dequantize_state(
                 quantized_state)
-            # print(tracker)
-            # print("x0=", np.array(initial_state).reshape(-1, 4).transpose())
             for next_pos_to_coop in tracker.get_possible_cooperative_vehicles():
                 for starting_next_pos_to_move in remaining_vehicles:
                     next_positions_to_move = set()
-                    for p in range(starting_next_pos_to_move, self.n_platoon):
+                    for p in range(starting_next_pos_to_move, self._n_platoon):
                         if p not in remaining_vehicles:
                             continue
                         next_positions_to_move = next_positions_to_move | {p}
                         vehicle_group = self._create_vehicle_group()
-                        vehicle_group.set_verbose(False)
-                        vehicle_group.set_vehicles_initial_states_from_array(
-                            initial_state)
-                        vehicle_group.set_platoon_lane_change_order(
-                            [next_positions_to_move], [next_pos_to_coop])
-                        platoon_veh_ids = (
-                            vehicle_group.get_lane_changing_vehicle_ids())
-                        next_veh_to_coop = (
-                            None if next_pos_to_coop < 0
-                            else vehicle_group.vehicles[platoon_veh_ids[
-                                next_pos_to_coop]])
-                        next_vehs_to_move = [
-                            vehicle_group.vehicles[platoon_veh_ids[pos]]
-                            for pos in next_positions_to_move]
-
-                        # print("  Coop veh:", vehicle_group.vehicles[
-                        #     platoon_veh_ids[next_pos_to_coop]].get_name() if
-                        #       next_pos_to_coop >= 0 else str(-1))
-                        # print("  Next to move:",
-                        #       [veh.get_name() for veh in next_vehs_to_move])
-
-                        success = self.simulate_till_lane_change(
-                            vehicle_group, free_flow_speeds,
-                            next_vehs_to_move, next_veh_to_coop)
+                        success = scenarios.simulate_till_lane_change(
+                            vehicle_group, initial_state, free_flow_speeds,
+                            next_positions_to_move, next_pos_to_coop
+                        )
                         # vehicle_group.truncate_simulation_history()
                         # data = vehicle_group.to_dataframe()
                         # analysis.plot_trajectory(data)
@@ -627,244 +590,179 @@ class VehicleStatesGraph:
                             transition_time = vehicle_group.get_current_time()
                             accel_cost = (
                                 vehicle_group.compute_acceleration_cost())
-                            self._update_graphs(
+                            self.vehicle_state_graph.update_graph(
                                 quantized_state, next_quantized_state,
                                 transition_time, accel_cost,
                                 next_positions_to_move, next_pos_to_coop)
                             nodes.appendleft((next_tracker,
                                               next_quantized_state))
 
-    def simulate_till_lane_change(
-            self, vehicle_group: vg.ShortSimulationVehicleGroup,
-            free_flow_speeds: Sequence[float],
-            lc_vehicles: Iterable[fsv.ShortSimulationVehicle],
-            next_to_coop: fsv.ShortSimulationVehicle) -> bool:
 
-        dt = 1.0e-2
-        tf = 30.
-        time = np.arange(0, tf + dt, dt)
+class LaneChangeStrategyManager:
 
-        # Set desired velocities TODO: this should be done elsewhere
-        # Due to quantization, we could end up with initial vel above free
-        # flow desired vel. To prevent vehicles from decelerating, we allow
-        # these slightly higher free-flow speeds
-        adjusted_free_flow_speeds = []
-        for i, veh in enumerate(vehicle_group.get_all_vehicles_in_order()):
-            adjusted_free_flow_speeds.append(
-                max(free_flow_speeds[i], veh.get_vel()))
-        vehicle_group.set_free_flow_speeds(adjusted_free_flow_speeds)
+    _empty_initial_state: configuration.QuantizedState = (0,)
 
-        vehicle_group.prepare_to_start_simulation(len(time))
-        [veh.set_lane_change_direction(1) for veh
-         in vehicle_group.vehicles.values()
-         if (veh.is_in_a_platoon() and veh.get_current_lane() == 0)]
-        vehicle_group.update_surrounding_vehicles()
+    def __init__(self, n_platoon: int, has_fd: bool):
+        n_vehicles = n_platoon + 2 + has_fd
+        self.vehicle_state_graph = VehicleStateGraph.load_from_file(
+            n_platoon, has_fd)
+        self.state_quantizer = self.vehicle_state_graph.get_state_quantizer(
+            n_vehicles)
+        self._initial_state_per_vehicle: \
+            dict[int, configuration.QuantizedState] = dict()
 
-        if next_to_coop is None:
-            front_most_vehicle = max([veh for veh in lc_vehicles],
-                                     key=lambda x: x.get_x())
-            ld = vehicle_group.get_vehicle_by_name("ld")
-            if ld.get_x() < front_most_vehicle.get_x():
-                return False
-            desired_leader_id = ld.get_id()
-        else:
-            rear_most_vehicle = min([veh for veh in lc_vehicles],
-                                    key=lambda x: x.get_x())
-            desired_leader_id = next_to_coop.get_origin_lane_leader_id()
-            next_to_coop.set_incoming_vehicle_id(rear_most_vehicle.get_id())
+    @staticmethod
+    def load_strategy_map(n_platoon: int, cost_name: str
+                          ) -> configuration.StrategyMap:
+        file_name = "_".join(["min", cost_name, "strategies_for",
+                              str(n_platoon), "vehicles.json"])
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 "strategy_maps", file_name)
 
-        [veh.set_fixed_desired_dest_lane_leader_id(desired_leader_id) for veh
-         in lc_vehicles]
-        i = 0
-        while i < len(time) - 1 and np.any(
-                [veh.has_lane_change_intention() for veh in lc_vehicles]):
-            vehicle_group.simulate_one_time_step(time[i + 1],
-                                                 detect_collision=True)
-            i += 1
+        with open(file_path) as f:
+            raw_data: list[dict] = json.load(f)
+            strategy_map: configuration.StrategyMap = defaultdict(dict)
+            for d in raw_data:
+                key1 = tuple(d["root"])
+                key2 = frozenset(d["first_mover_set"])
+                lc_order = [set(i) for i in d["lc_order"]]
+                strategy_map[key1][key2] = ((lc_order, d["coop_order"]),
+                                            d[cost_name])
+        return strategy_map
 
-        success = [not veh.has_lane_change_intention() for veh in lc_vehicles]
-        return np.all(success)
+    def set_maneuver_initial_state(
+            self, ego_position_in_platoon: int, lo_states: Sequence[float],
+            platoon_states: Iterable[float], ld_states: Sequence[float],
+            fd_states: Sequence[float]):
+        # print("[GraphTools] set_maneuver_initial_state for veh at",
+        #       ego_position_in_platoon)
+        states = (VehicleStateGraph.order_values(
+            lo_states, platoon_states, ld_states, fd_states)
+        )
+        quantized_states = self.state_quantizer.quantize_state(states)
+        self._initial_state_per_vehicle[ego_position_in_platoon] = (
+            quantized_states
+        )
 
-    def _update_graphs(
-            self, source_state: configuration.QuantizedState,
-            dest_state: configuration.QuantizedState,
-            transition_time: float, accel_cost: float,
-            lc_vehicles: Iterable[int], coop_vehicle: int):
-        """
-        Updates all tracking graphs with the same weight
-        """
-        self.states_graph.add_edge(source_state, dest_state,
-                                   time=transition_time, accel=accel_cost,
-                                   lc_vehicles=lc_vehicles,
-                                   coop_vehicle=coop_vehicle)
+    def set_empty_maneuver_initial_state(self, ego_position_in_platoon: int):
+        self._initial_state_per_vehicle[ego_position_in_platoon] = (
+            self._empty_initial_state)
 
-        n_nodes = self.states_graph.number_of_nodes()
-        if n_nodes % 50 == 0:
-            print(f"\t{n_nodes} nodes created")
-        # percentage = n_nodes * 100 / self.n_nodes_per_root
-        # if percentage % 10 < 0.5:
-        #     print(f"{percentage:.1f}% done")
+    def find_minimum_cost_maneuver_from_root(
+            self, cost_name: str) -> tuple[configuration.Strategy, float]:
+        initial_states = set(self._initial_state_per_vehicle.values())
+        initial_states.discard(self._empty_initial_state)
 
-    def _mark_terminal_node(self, node: configuration.QuantizedState) -> None:
-        self.states_graph.nodes[node]["is_terminal"] = True
-
-    def _delete_all_successors(self, node: configuration.QuantizedState):
-        """
-        Deletes all children of the given node if they don't have
-        any other ancestors
-        """
-        nodes_to_delete = set()
-        self._get_all_successor_nodes(node, nodes_to_delete)
-        self.states_graph.remove_nodes_from(nodes_to_delete)
-
-    def _get_all_successor_nodes(self, node: configuration.QuantizedState,
-                                 result: set[configuration.QuantizedState]
-                                 ) -> None:
-        """
-        Recursively finds all successor nodes
-        :param node: 'root' from where to start looking
-        :param result: Set that will contain all successor nodes
-        :return:
-        """
-        if len(list(self.states_graph.predecessors(node))) > 1:
-            return
-        result.add(node)
-        for successor in self.states_graph.successors(node):
-            self._get_all_successor_nodes(successor, result)
-        # self.states_graph.remove_node(node)
-
-    # def _add_all_first_mover_nodes(
-    #         self, nodes: deque[tuple[PlatoonLCTracker, tuple]],
-    #         platoon_veh_ids: Sequence[int],
-    #         v0_ld: float, delta_x_ld: float) -> None:
-    #     """
-    #     Adds to nodes all the states after a single platoon vehicle has moved
-    #     to the destination lane. The method puts the destination lane leader
-    #     at a safe distance in front of the first platoon vehicle to move
-    #     :param nodes:
-    #     :param platoon_veh_ids:
-    #     :param v0_ld:
-    #     :param delta_x_ld:
-    #     :return:
-    #     """
-    #     tracker, quantized_state = nodes.pop()
-    #     root_state = self.state_quantizer.dequantize_state(quantized_state)
-    #     # print(tracker)
-    #     # print("x0=\n", np.array(quantized_state).reshape(
-    #     #     -1, 4).transpose())
-    #     for first_pos_to_move in tracker.get_remaining_vehicles():
-    #         vehicle_group = self._create_vehicle_group()
-    #         vehicle_group.set_vehicles_initial_states_from_array(root_state)
-    #         # print("First to move:", vehicle_group.vehicles[
-    #         #     platoon_veh_ids[first_pos_to_move]].get_name())
-    #         next_quantized_state = self._create_first_mover_node(
-    #             copy.deepcopy(vehicle_group), v0_ld, delta_x_ld,
-    #             platoon_veh_ids[first_pos_to_move]
-    #         )
-    #         next_tracker = copy.deepcopy(tracker)
-    #         next_tracker.move_vehicles([first_pos_to_move], -1)
-    #         nodes.appendleft((next_tracker, next_quantized_state))
-    #         self._update_graphs(
-    #             quantized_state, next_quantized_state, 1., 0.,
-    #             [first_pos_to_move], -1)
-
-    # def _create_first_mover_node(
-    #         self, vehicle_group: vg.VehicleGroup, v0_ld: float,
-    #         delta_x_ld: float, first_to_move_id: int
-    # ) -> tuple:
-    #
-    #     lc_vehicle = vehicle_group.get_vehicle_by_id(first_to_move_id)
-    #     lc_vehicle_x = lc_vehicle.get_x()  # move veh to the dest lane
-    #     lc_vehicle.set_initial_state(
-    #         lc_vehicle_x, configuration.LANE_WIDTH, lc_vehicle.get_theta(),
-    #         lc_vehicle.get_vel())
-    #
-    #     # The dest lane leader is placed ahead of the lane changing vehicle
-    #     lc_vehicle_ref_gap = lc_vehicle.compute_lane_keeping_desired_gap()
-    #     x0_ld = (lc_vehicle_x + lc_vehicle_ref_gap + delta_x_ld)
-    #     ld = vehicle_group.get_vehicle_by_name("ld")
-    #     ld.set_initial_state(x0_ld, configuration.LANE_WIDTH, 0., v0_ld)
-    #
-    #     vehicle_group.get_full_initial_state_vector()
-    #     initial_state = vehicle_group.get_full_initial_state_vector()
-    #
-    #     return self.state_quantizer.quantize_state(initial_state)
-
-    def _create_first_mover_node_from_scratch(
-            self, vehicle_group: vg.VehicleGroup, v0_lo: float,
-            v0_platoon: Sequence[float], v0_ld: float, v0_fd: float,
-            delta_x: Mapping[str, float], first_move_pos_in_platoon: int
-    ) -> tuple:
-        """
-        Creates the state after one platoon vehicle has changed lane from basic
-        parameters (as opposed to requiring that the vehicle group have an
-        initial state)
-        :return:
-        """
-        ref_gaps = vehicle_group.get_initial_desired_gaps(
-            self._order_values(v0_lo, v0_platoon, v0_ld, v0_fd))
-        x0_platoon = np.zeros(self.n_platoon)
-        y0_platoon = np.zeros(self.n_platoon)
-        # Loop goes from p_2 to p_N because p1"s position is already set to zero
-        for i in range(1, self.n_platoon):
-            x0_platoon[i] = x0_platoon[i - 1] - ref_gaps[i]
-        idx_p1 = 1  # platoon leader idx in the vehicle array
-        idx_lc = first_move_pos_in_platoon + idx_p1  # idx in the vehicle array
-        y0_platoon[first_move_pos_in_platoon] = configuration.LANE_WIDTH
-        theta0_platoon = np.array([0.] * self.n_platoon)
-        platoon_states = np.vstack((x0_platoon, y0_platoon, theta0_platoon,
-                                    v0_platoon)).reshape(-1, order="F")
-        # Ahead of the platoon in origin lane
-        x0_lo = x0_platoon[0] + ref_gaps[idx_p1] + delta_x["lo"]
-        y0_lo = 0
-        lo_states = np.hstack((x0_lo, y0_lo, 0., v0_lo))
-        # Ahead of the platoon in dest lane
-        x0_ld = (x0_platoon[first_move_pos_in_platoon]
-                 + ref_gaps[idx_lc] + delta_x["ld"])
-        y0_d = configuration.LANE_WIDTH
-        ld_states = np.hstack((x0_ld, y0_d, 0., v0_ld))
-        # Behind ld
-        if self._has_fd:
-            x0_fd = (x0_platoon[first_move_pos_in_platoon]
-                     - ref_gaps[-1] + delta_x["ld"])
-            fd_states = np.hstack((x0_fd, y0_d, 0., v0_fd))
-        else:
-            fd_states = []
-        return self.state_quantizer.quantize_state(
-            self._order_values(lo_states, platoon_states, ld_states, fd_states))
-
-    def find_minimum_cost_strategy_from_node(
-            self, starting_node: configuration.QuantizedState, cost_name: str
-    ) -> tuple[configuration.Strategy, float]:
-        dag: nx.DiGraph = self.states_graph
         all_costs = []  # for debugging
         all_strategies = []  # for debugging
         opt_cost = np.inf
         opt_strategy = None
-
-        if dag.nodes[starting_node].get("is_terminal", False):
-            return ([], []), 0
-
-        for node in nx.descendants(dag, starting_node):
-            if dag.nodes[node].get("is_terminal", False):
-                cost, path = nx.single_source_dijkstra(
-                    dag, starting_node, node, weight=cost_name)
-                strategy = self.get_maneuver_order_from_path(path)
-                all_costs.append(cost)
-                all_strategies.append(strategy)
-                if cost < opt_cost:
-                    opt_cost = cost
-                    opt_strategy = strategy
+        for root in initial_states:
+            strategy, cost = (
+                self.vehicle_state_graph.find_minimum_cost_strategy_from_node(
+                    root, cost_name))
+            all_costs.append(cost)
+            all_strategies.append(strategy)
+            if cost < opt_cost:
+                opt_cost = cost
+                opt_strategy = strategy
         return opt_strategy, opt_cost
 
-    def get_maneuver_order_from_path(self, path) -> configuration.Strategy:
-        lc_order = []
-        coop_order = []
-        for source_node, target_node in nx.utils.pairwise(path):
-            edge = self.states_graph[source_node][target_node]
-            lc_order.append(edge["lc_vehicles"])
-            coop_order.append(edge["coop_vehicle"])
-        return lc_order, coop_order
+    def find_min_cost_strategy_given_first_mover(
+            self, first_mover_platoon_positions: set[int], cost_name: str
+    ) -> tuple[configuration.Strategy, float]:
+        # Get the initial state as seen by the first mover group
+        initial_state_candidates = {self._initial_state_per_vehicle[p]
+                                    for p in first_mover_platoon_positions}
+        if len(initial_state_candidates) > 1:
+            # If multiple first-movers, they should all "see" the same initial
+            # state, i.e., the same position for ld
+            raise RuntimeError("More than one possible initial state")
+        initial_state = initial_state_candidates.pop()
+
+        if initial_state not in self.vehicle_state_graph.get_initial_states():
+            print(f"State {initial_state} not in graph. "
+                  f"Waiting for next iteration...")
+            # print("Adding it now...")
+            # v_ff_lo = self.state_quantizer.dequantize_free_flow_velocities(
+            #     quantized_states[3], possible_vel_dest)
+            # v_ff_ld = self.state_quantizer.dequantize_free_flow_velocities(
+            #     quantized_states[-1], possible_vel_dest)
+            # free_flow_speeds = ([v_ff_lo] + [v_ff_platoon] * n_platoon
+            #                     + [v_ff_ld])
+            # self.add_initial_state_to_graph(
+            #     quantized_states, set(self.states_graph.nodes),
+            #     free_flow_speeds, mode="as")
+            raise nx.NetworkXNoPath
+
+        # Get the node after the first-movers have changed lanes
+        first_move_state = (
+            self.vehicle_state_graph.get_successor_given_first_movers(
+                initial_state, first_mover_platoon_positions))
+
+        opt_strategy = ([first_mover_platoon_positions.copy()], [-1])
+        opt_strategy_from_first, opt_cost_from_first = (
+            self.vehicle_state_graph.find_minimum_cost_strategy_from_node(
+                first_move_state, cost_name)
+        )
+        opt_strategy[0].extend(opt_strategy_from_first[0])
+        opt_strategy[1].extend(opt_strategy_from_first[1])
+        opt_cost = opt_cost_from_first
+
+        return opt_strategy, opt_cost
+
+    def find_minimum_cost_maneuver_order_given_first_mover_2(
+            self, first_mover_platoon_positions: set[int],
+            strategy_map: configuration.StrategyMap
+    ) -> tuple[configuration.Strategy, float]:
+        # Get the initial state as seen by the first mover group
+        initial_state_candidates = {self._initial_state_per_vehicle[p]
+                                    for p in first_mover_platoon_positions}
+        if len(initial_state_candidates) > 1:
+            # If multiple first-movers, they should all "see" the same initial
+            # state, i.e., the same position for ld
+            raise RuntimeError("More than one possible initial state")
+        initial_state = initial_state_candidates.pop()
+
+        opt_strategy = strategy_map[initial_state][
+            frozenset(first_mover_platoon_positions)][0]
+        opt_cost = strategy_map[initial_state][
+            frozenset(first_mover_platoon_positions)][1]
+
+        return opt_strategy, opt_cost
+
+    # def find_minimum_cost_strategy_from_node(
+    #         self, starting_node: configuration.QuantizedState, cost_name: str
+    # ) -> tuple[configuration.Strategy, float]:
+    #     dag: nx.DiGraph = self.vehicle_state_graph
+    #     all_costs = []  # for debugging
+    #     all_strategies = []  # for debugging
+    #     opt_cost = np.inf
+    #     opt_strategy = None
+    #
+    #     if dag.nodes[starting_node].get("is_terminal", False):
+    #         return ([], []), 0
+    #
+    #     for node in nx.descendants(dag, starting_node):
+    #         if dag.nodes[node].get("is_terminal", False):
+    #             cost, path = nx.single_source_dijkstra(
+    #                 dag, starting_node, node, weight=cost_name)
+    #             strategy = self.get_maneuver_order_from_path(path)
+    #             all_costs.append(cost)
+    #             all_strategies.append(strategy)
+    #             if cost < opt_cost:
+    #                 opt_cost = cost
+    #                 opt_strategy = strategy
+    #     return opt_strategy, opt_cost
+    #
+    # def get_maneuver_order_from_path(self, path) -> configuration.Strategy:
+    #     lc_order = []
+    #     coop_order = []
+    #     for source_node, target_node in nx.utils.pairwise(path):
+    #         edge = self.vehicle_state_graph[source_node][target_node]
+    #         lc_order.append(edge["lc_vehicles"])
+    #         coop_order.append(edge["coop_vehicle"])
+    #     return lc_order, coop_order
 
 
 class StateQuantizer:
@@ -878,24 +776,35 @@ class StateQuantizer:
     # - Make the methods work with vehicle objects if that"s better
     # - Set n_vehicles in constructor
 
-    def __init__(
-            self, n_vehicles: int, dx: float, dv: float,
-            dy: float = configuration.DELTA_Y, dtheta: float = np.pi / 6,
-            max_x: float = np.inf, max_v: float = np.inf,
-            min_x: float = -np.inf, min_v: float = -np.inf,
-            veh_type: type[base.BaseVehicle] = None):
+    def __init__(self, n_vehicles: int, parameters: dict[str, float] = None,
+                 veh_type: type[base.BaseVehicle] = None):
+        if parameters is None:
+            pass
+            # dx: float, dv: float,
+            # dy: float = configuration.DELTA_Y, dtheta: float = np.pi / 6,
+            # max_x: float = np.inf, max_v: float = np.inf,
+            # min_x: float = -np.inf, min_v: float = -np.inf,
+            #
         if veh_type is None:
             veh_type = fsv.FourStateVehicle
-        self.dx, self.dv, self.dy, self.dtheta = dx, dv, dy, dtheta
+        self.dx = parameters["dx"]
+        self.dy = parameters["dy"]
+        self.dtheta = parameters["dtheta"]
+        self.dv = parameters["dv"]
+
         self.x_shift, self.y_shift, self.theta_shift, self.v_shift = (
             0., -2., 0., 0.
         )
-        self.max_x, self.max_y, self.max_theta, self.max_v = (
-            max_x, 4., 0., max_v
-        )
-        self.min_x, self.min_y, self.min_theta, self.min_v = (
-            min_x, -4., 0., min_v
-        )
+
+        # TODO: differentiate between lo and ld?
+        self.max_x = max(parameters["max_x_lo"], parameters["max_x_ld"])
+        self.max_y = 1
+        self.max_theta = 0
+        self.max_v = max(parameters["max_v_lo"], parameters["max_v_ld"])
+        self.min_x = min(parameters["min_x_lo"], parameters["min_x_ld"])
+        self.min_y = -1
+        self.min_theta = 0
+        self.min_v = min(parameters["min_v_lo"], parameters["min_v_ld"])
 
         intervals = []
         shift = []
@@ -903,22 +812,23 @@ class StateQuantizer:
         all_minimum = []
         for state in veh_type.get_state_names():
             if state == "x":
-                intervals.append(dx)
+                intervals.append(self.dx)
                 shift.append(self.x_shift)
                 all_maximum.append(self.max_x)
                 all_minimum.append(self.min_x)
             elif state == "y":
-                intervals.append(dy)
+                intervals.append(self.dy)
                 shift.append(self.y_shift)
                 all_maximum.append(self.max_y)
                 all_minimum.append(self.min_y)
             elif state == "theta":
-                intervals.append(dtheta if dtheta is not None else np.inf)
+                intervals.append(self.dtheta if self.dtheta is not None
+                                 else np.inf)
                 shift.append(self.theta_shift)
                 all_maximum.append(self.max_theta)
                 all_minimum.append(self.min_theta)
             elif state == "v":
-                intervals.append(dv)
+                intervals.append(self.dv)
                 shift.append(self.v_shift)
                 all_maximum.append(self.max_v)
                 all_minimum.append(self.min_v)
@@ -940,9 +850,8 @@ class StateQuantizer:
         :return:
         """
         full_system_state = np.array(full_system_state)
-        full_system_state = np.minimum(np.maximum(full_system_state, self._min),
-                                       self._max)
         qx = (full_system_state - self._shift) // self._intervals
+        qx = np.minimum(np.maximum(qx, self._min), self._max)
         return tuple(qx.astype(int))
 
     def dequantize_state(self, full_quantized_state: Sequence[float],
@@ -965,8 +874,9 @@ class StateQuantizer:
             raise ValueError("Parameter mode must be 'min', 'mean', or 'max'")
 
         full_quantized_state = np.array(full_quantized_state)
+        full_quantized_state = np.minimum(
+            np.maximum(full_quantized_state, self._min), self._max)
         x = (full_quantized_state + delta) * self._intervals + self._shift
-        x = np.minimum(np.maximum(x, self._min), self._max)
         x[self._zero_idx] = 0.
         return x
 

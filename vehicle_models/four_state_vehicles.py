@@ -482,25 +482,6 @@ class ShortSimulationVehicle(ClosedLoopVehicle):
                  is_connected: bool = False):
         super().__init__(can_change_lanes, has_open_loop_acceleration,
                          is_connected)
-        self._fixed_desired_dest_lane_leader_id = -1
-        self._fixed_incoming_vehicle_id = -1
-
-    def set_fixed_desired_dest_lane_leader_id(self, value):
-        self._fixed_desired_dest_lane_leader_id = value
-
-    def set_incoming_vehicle_id(self, value):
-        self._fixed_incoming_vehicle_id = value
-
-    # def find_cooperation_requests(self, vehicles: Iterable[base.BaseVehicle]
-    #                               ) -> None:
-    #     self._aided_vehicle_id[self._iter_counter] = (
-    #         self._fixed_incoming_vehicle_id
-    #     )
-    #
-    # def find_desired_destination_lane_leader(self):
-    #     self._desired_destination_lane_leader_id[self._iter_counter] = (
-    #         self._fixed_desired_dest_lane_leader_id
-    #     )
 
     def make_closed_loop_copy(self, initial_state: np.ndarray = None
                               ) -> ShortSimulationVehicle:

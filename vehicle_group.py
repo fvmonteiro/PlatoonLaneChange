@@ -595,3 +595,23 @@ class ShortSimulationVehicleGroup(VehicleGroup):
 
     def get_vehicle_by_id(self, veh_id: int) -> fsv.ShortSimulationVehicle:
         return self.vehicles[veh_id]
+
+    def get_next_vehicles_to_change_lane(
+            self, vehicles_positions_in_platoon: Iterable[int]
+    ) -> list[fsv.ShortSimulationVehicle]:
+        # We're working with scenarios where only platoon vehicles can change
+        # lanes
+        platoon_veh_ids = self.get_lane_changing_vehicle_ids()
+        return [self.vehicles[platoon_veh_ids[pos]]
+                for pos in vehicles_positions_in_platoon]
+
+    def get_next_vehicle_to_cooperate(
+            self, vehicle_position_in_platoon: int
+    ) -> Union[None, fsv.ShortSimulationVehicle]:
+        # We're working with scenarios where only platoon vehicles can change
+        # lanes
+        platoon_veh_ids = self.get_lane_changing_vehicle_ids()
+        return (
+            None if vehicle_position_in_platoon < 0
+            else self.vehicles[platoon_veh_ids[vehicle_position_in_platoon]]
+        )

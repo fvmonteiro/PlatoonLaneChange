@@ -205,17 +205,17 @@ def load_and_plot_latest_scenario():
 
 
 def create_graph(n_platoon: int, has_fd: bool, vel_orig_lane: Sequence[float],
-                 vel_ff_platoon: float, delta_v_dest_lane: Sequence[float],
+                 vel_ff_platoon: float, v_dest_lane: Sequence[float],
                  max_dist: float, mode: str = "as"):
-    vsg = graph_tools.VehicleStatesGraph(n_platoon, has_fd)
-    vsg.create_graph(vel_orig_lane, vel_ff_platoon, delta_v_dest_lane,
-                     max_dist, mode)
-    print(f'#nodes={vsg.states_graph.number_of_nodes()}')
-    vsg.save_self_to_file()
-    create_and_save_strategy_maps(vsg)
+    graph_creator = graph_tools.GraphCreator(n_platoon, has_fd)
+    graph_creator.create_graph(vel_orig_lane, vel_ff_platoon, v_dest_lane,
+                               max_dist, mode)
+    graph_creator.save_vehicle_state_graph_to_file()
+    graph_creator.save_quantization_parameters_to_file()
+    create_and_save_strategy_maps(graph_creator)
 
 
-def create_and_save_strategy_maps(vsg: graph_tools.VehicleStatesGraph):
+def create_and_save_strategy_maps(vsg: graph_tools.GraphCreator):
     for cost_name in ['time', 'accel']:
         vsg.save_minimum_cost_strategies_to_json(cost_name)
 
@@ -271,8 +271,9 @@ def test_1():
     with open("unsolved_root_nodes.pickle", "rb") as f:
         unsolved_initial_states = pickle.load(f)
 
-    vsg = graph_tools.VehicleStatesGraph.load_from_file(2, False)
-    vsg._initial_states |= set(unsolved_initial_states)
+    graph_creator = graph_tools.GraphCreator(2, False)
+    graph_creator.load_a_graph()
+    # graph_creator._initial_states |= set(unsolved_initial_states)
     visited_nodes = set()
 
     free_flow_speeds = np.array([70.] + [110.]*n_platoon + [0.]) / 3.6
@@ -281,19 +282,20 @@ def test_1():
     for i in range(n):
         x0 = unsolved_initial_states[i]
         free_flow_speeds[-1] = (
-            vsg.state_quantizer.dequantize_free_flow_velocities(
+            graph_creator.state_quantizer.dequantize_free_flow_velocities(
                 x0[-1], possible_vel_dest))
         print(f"{i+1}/{n}")
-        vsg.add_initial_state_to_graph(x0, visited_nodes, free_flow_speeds,
-                                       "ao")
+        graph_creator.add_all_from_initial_state_to_graph(
+            x0, visited_nodes, free_flow_speeds, "ao")
         # tracker = graph_tools.PlatoonLCTracker(n_platoon)
         # tracker.move_vehicles([0], -1)
         # root = (tracker, x0)
         # vsg._explore_until_maneuver_completion(root, visited_nodes,
         #                                        free_flow_speeds)
     if n > 0:
-        vsg.save_self_to_file()
-        create_and_save_strategy_maps(vsg)
+        graph_creator.save_vehicle_state_graph_to_file()
+        graph_creator.save_quantization_parameters_to_file()
+        create_and_save_strategy_maps(graph_creator)
 
 
 def main():
@@ -325,7 +327,7 @@ def main():
     v_orig = [70/3.6]
     v_ff_platoon = 110/3.6  # make 110
     v_dest = np.array([50, 70, 90])/3.6  # make 50, 70, 90
-    max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY * 3
+    max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY * 1.5
 
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
@@ -333,16 +335,17 @@ def main():
 
     start_time = time.time()
 
-    # print("===== CREATING SMALL-SCALE GRAPHS ONLY ======")
-    # graph_t0 = time.time()
-    # create_graph(n_platoon, graph_includes_fd, v_orig, v_ff_platoon,
-    #              v_dest, max_dist, "as")
-    # print(f"Time to create graph: {time.time() - graph_t0}")
+    print("===== CREATING SMALL-SCALE GRAPHS ONLY ======")
+    graph_t0 = time.time()
+    for vd in v_dest:
+        create_graph(n_platoon, graph_includes_fd, v_orig, v_ff_platoon,
+                     [vd], max_dist, "ao")
+    print(f"Time to create graph: {time.time() - graph_t0}")
 
-    delta_x = {'ld': -200., 'lo': 0., 'fd': 0.}
-    run_closed_loop_test(n_platoon, are_vehicles_cooperative,
-                         v_orig[0], v_ff_platoon, v_dest[0], delta_x,
-                         [6], plot_results=True)
+    # delta_x = {'ld': -200., 'lo': 0., 'fd': 0.}
+    # run_closed_loop_test(n_platoon, are_vehicles_cooperative,
+    #                      v_orig[0], v_ff_platoon, v_dest[0], delta_x,
+    #                      [6], plot_results=True)
 
     # run_scenarios_for_comparison(
     #     n_platoon, v_orig[0], v_ff_platoon, are_vehicles_cooperative,

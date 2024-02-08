@@ -25,6 +25,68 @@ import vehicle_models.four_state_vehicles as fsv
 config = configuration.Configuration
 
 
+def simulate_till_lane_change(
+        vehicle_group: vg.ShortSimulationVehicleGroup,
+        initial_state: np.ndarray,
+        free_flow_speeds: Sequence[float],
+        next_platoon_positions_to_move: set[int],
+        next_platoon_position_to_coop: int
+) -> bool:
+    """
+    Simulates the vehicle group until all listed platoon vehicles have finished
+    lane changing. When there is no cooperation, only simulates if the
+    front-most lane changing vehicle is behind the destination lane leader.
+    :param vehicle_group:
+    :param initial_state:
+    :param free_flow_speeds:
+    :param next_platoon_positions_to_move:
+    :param next_platoon_position_to_coop:
+    :return:
+    """
+
+    vehicle_group.set_verbose(False)
+    vehicle_group.set_vehicles_initial_states_from_array(
+        initial_state)
+    vehicle_group.set_platoon_lane_change_order(
+        [next_platoon_positions_to_move], [next_platoon_position_to_coop])
+    # Due to quantization, we could end up with initial vel above free
+    # flow desired vel. To prevent vehicles from decelerating, we allow
+    # these slightly higher free-flow speeds
+    adjusted_free_flow_speeds = []
+    for i, veh in enumerate(vehicle_group.get_all_vehicles_in_order()):
+        adjusted_free_flow_speeds.append(
+            max(free_flow_speeds[i], veh.get_vel()))
+    vehicle_group.set_free_flow_speeds(adjusted_free_flow_speeds)
+
+    dt = 1.0e-2
+    tf = 40.
+    time = np.arange(0, tf + dt, dt)
+    vehicle_group.prepare_to_start_simulation(len(time))
+    [veh.set_lane_change_direction(1) for veh
+     in vehicle_group.vehicles.values()
+     if (veh.is_in_a_platoon() and veh.get_current_lane() == 0)]
+    vehicle_group.update_surrounding_vehicles()
+
+    next_vehs_to_move = (vehicle_group.get_next_vehicles_to_change_lane(
+        next_platoon_positions_to_move))
+    if next_platoon_position_to_coop < 0:
+        front_most_vehicle = max([veh for veh in next_vehs_to_move],
+                                 key=lambda x: x.get_x())
+        ld = vehicle_group.get_vehicle_by_name("ld")
+        if ld.get_x() < front_most_vehicle.get_x():
+            return False
+
+    i = 0
+    success = False
+    while i < len(time) - 1 and not success:
+        i += 1
+        vehicle_group.simulate_one_time_step(time[i],
+                                             detect_collision=True)
+        success = np.all([not veh.has_lane_change_intention()
+                          for veh in next_vehs_to_move])
+    return success
+
+
 class LaneChangeScenarioManager:
 
     # scenario: LaneChangeScenario

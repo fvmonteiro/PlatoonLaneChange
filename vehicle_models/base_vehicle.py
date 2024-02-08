@@ -103,8 +103,13 @@ class BaseVehicle(ABC):
             setattr(vehicle_to, attr_name, getattr(vehicle_from, attr_name))
         vehicle_to.copy_initial_state(vehicle_from.get_states())
 
-    def get_idx_of_input(self, name: str) -> int:
-        return self._input_idx[name]
+    @classmethod
+    def get_idx_of_input(cls, name: str) -> int:
+        return cls._input_idx[name]
+
+    @classmethod
+    def get_idx_of_state(cls, name: str) -> int:
+        return cls._state_idx[name]
 
     def get_id(self) -> int:
         return self._id
