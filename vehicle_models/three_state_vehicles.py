@@ -15,10 +15,12 @@ class ThreeStateVehicle(base.BaseVehicle, ABC):
     """ States: [x, y, theta], inputs: [v, phi] """
     _state_names = ['x', 'y', 'theta']
     _input_names = ['v', 'phi']
+    _n_states, _n_inputs, _state_idx, _input_idx = base.BaseVehicle._set_model(
+        _state_names, _input_names)
 
     def __init__(self):
         super().__init__()
-        self._set_model()
+        # self._set_model()
         self._can_change_lanes = True
 
     def set_ocp_leader_sequence(self, leader_sequence):

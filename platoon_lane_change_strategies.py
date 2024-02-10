@@ -408,63 +408,76 @@ class GraphLaneChangeApproach(TemplateStrategy):
                     fd_states = fd.get_states()
                 else:
                     fd_states = []
-                self._set_maneuver_initial_state(pos, lo_states,
-                                                 ld_states, fd_states)
+                self._set_maneuver_initial_state(
+                    pos, lo_states, ld_states, fd_states)
             else:
                 self._set_empty_maneuver_initial_state(veh.get_id())
 
     def _set_maneuver_initial_state(
             self, ego_position_in_platoon: int, lo_states: Sequence[float],
             ld_states: Sequence[float], fd_states: Sequence[float]) -> None:
+        """
+
+        :param ego_position_in_platoon: The position (number) of the ego vehicle
+        in the platoon
+        :param lo_states:
+        :param ld_states:
+        :param fd_states:
+        :return: True if the combination of vehicle states exists in the graph,
+         False otherwise
+        """
         # print("[GraphApproach] set_maneuver_initial_state for veh at",
         #       ego_position_in_platoon)
         p1 = self.platoon.get_platoon_leader()
         leader_x = p1.get_x()
         leader_y = p1.get_y()
+        x_idx = fsv.FourStateVehicle.get_idx_of_state("x")
+        y_idx = fsv.FourStateVehicle.get_idx_of_state("y")
 
         # We center all around the leader
-        # TODO: avoid hard coding array indices
-        platoon_states = []
+        states = dict()
         for veh in self.platoon.vehicles:
             veh_states = veh.get_states().copy()
-            veh_states[0] -= leader_x
-            veh_states[1] -= leader_y
-            platoon_states.extend(veh_states)
+            veh_states[x_idx] -= leader_x
+            veh_states[y_idx] -= leader_y
+            states[veh.get_name()] = veh_states
 
         # TODO: lazy workaround. We need to include the no leader
         #  possibilities in the graph
         if len(lo_states) == 0:
             lo_states = p1.get_states().copy()
-            lo_states[0] += p1.compute_non_connected_reference_gap()
+            lo_states[x_idx] += p1.compute_non_connected_reference_gap()
         else:
             lo_states = np.copy(lo_states)
-        lo_states[0] -= leader_x
-        lo_states[1] -= leader_y
+        lo_states[x_idx] -= leader_x
+        lo_states[y_idx] -= leader_y
+        states["lo"] = lo_states
 
         if len(ld_states) == 0:
             ld_states = lo_states.copy()
-            ld_states[1] = p1.get_target_y()
+            ld_states[y_idx] = p1.get_target_y()
         else:
             ld_states = np.copy(ld_states)
-        ld_states[0] -= leader_x
-        ld_states[1] -= leader_y
+        ld_states[x_idx] -= leader_x
+        ld_states[y_idx] -= leader_y
+        states["ld"] = ld_states
 
         if self._includes_fd:
             if len(fd_states) == 0:
                 pN = self.platoon.get_last_platoon_vehicle()
                 fd_states = pN.get_states().copy()
-                fd_states[0] -= pN.compute_non_connected_reference_gap()
-                fd_states[1] = pN.get_target_y()
+                fd_states[x_idx] -= pN.compute_non_connected_reference_gap()
+                fd_states[y_idx] = pN.get_target_y()
             else:
                 fd_states = np.copy(fd_states)
-            fd_states[0] -= leader_x
-            fd_states[1] -= leader_y
-        else:
-            fd_states = None
+            fd_states[x_idx] -= leader_x
+            fd_states[y_idx] -= leader_y
+            states["fd"] = fd_states
+        # else:
+        #     fd_states = None
 
         self._lane_change_strategy_manager.set_maneuver_initial_state(
-            ego_position_in_platoon, lo_states, platoon_states, ld_states,
-            fd_states)
+                ego_position_in_platoon, states)
 
     def _set_empty_maneuver_initial_state(self, ego_position_in_platoon: int):
         """
@@ -544,7 +557,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
                 try:
                     strategy, cost = (
                         self._lane_change_strategy_manager.
-                        find_minimum_cost_maneuver_order_given_first_mover_2(
+                        find_min_cost_strategy_given_first_mover_2(
                             first_movers, self._strategy_map))
                 except KeyError:
                     continue
@@ -564,7 +577,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
                     try:
                         strategy, cost = (
                             self._lane_change_strategy_manager.
-                            find_minimum_cost_maneuver_order_given_first_mover_2(
+                            find_min_cost_strategy_given_first_mover_2(
                                 {veh_pos}, self._strategy_map))
                     except KeyError:
                         continue
@@ -577,8 +590,8 @@ class GraphLaneChangeApproach(TemplateStrategy):
         # To be used if we include fd's state in the graph node's state
         # representation.
         path, min_cost = (
-            self._lane_change_strategy_manager.find_minimum_cost_maneuver_from_root(
-                cost_name=cost_name)
+            self._lane_change_strategy_manager
+            .find_minimum_cost_maneuver_from_root(cost_name=cost_name)
         )
         if path is not None:
             self.set_maneuver_order(path[0], path[1])

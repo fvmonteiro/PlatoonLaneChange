@@ -137,7 +137,8 @@ def run_all_scenarios_for_comparison(
         are_vehicles_cooperative: bool):
     run_scenarios_for_comparison(
         n_platoon, v_orig, v_ff_platoon, are_vehicles_cooperative,
-        [5, 6, 12, 13], [0, -5, 5], has_plots=False, save=True)
+        [5, 6, 12, 13], np.array([50, 70, 90]) / 3.6,
+        has_plots=False, save=True)
 
 
 def run_scenarios_for_comparison(
@@ -299,7 +300,7 @@ def test_1():
 
 
 def main():
-
+    # test_1()
     n_platoon = 2
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
@@ -335,17 +336,20 @@ def main():
 
     start_time = time.time()
 
-    print("===== CREATING SMALL-SCALE GRAPHS ONLY ======")
-    graph_t0 = time.time()
-    for vd in v_dest:
-        create_graph(n_platoon, graph_includes_fd, v_orig, v_ff_platoon,
-                     [vd], max_dist, "ao")
-    print(f"Time to create graph: {time.time() - graph_t0}")
+    # print("===== CREATING SMALL-SCALE GRAPHS ONLY ======")
+    # graph_t0 = time.time()
+    # for vd in v_dest:
+    #     create_graph(n_platoon, graph_includes_fd, v_orig, v_ff_platoon,
+    #                  [vd], max_dist, "as")
+    # print(f"Time to create graph: {time.time() - graph_t0}")
 
-    # delta_x = {'ld': -200., 'lo': 0., 'fd': 0.}
-    # run_closed_loop_test(n_platoon, are_vehicles_cooperative,
-    #                      v_orig[0], v_ff_platoon, v_dest[0], delta_x,
-    #                      [6], plot_results=True)
+    v_dest_idx = 2
+    lc_time = 1
+    delta_x = {'ld': 0., 'lo': 0., 'fd': 0.}
+    delta_x["ld"] += (v_dest[v_dest_idx] - v_orig[0]) / lc_time
+    run_closed_loop_test(n_platoon, are_vehicles_cooperative,
+                         v_orig[0], v_ff_platoon, v_dest[v_dest_idx], delta_x,
+                         [6], plot_results=True)
 
     # run_scenarios_for_comparison(
     #     n_platoon, v_orig[0], v_ff_platoon, are_vehicles_cooperative,

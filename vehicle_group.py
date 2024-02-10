@@ -53,11 +53,21 @@ class VehicleGroup:
         except IndexError:
             return som.SystemMode({})
 
+    def get_all_vehicles(self) -> Iterable[base.BaseVehicle]:
+        return self.vehicles.values()
+
+    def get_all_vehicles_in_order(self) -> list[base.BaseVehicle]:
+        return [self.vehicles[veh_id] for veh_id in self.sorted_vehicle_ids]
+
     def get_free_flow_speeds(self):
         v_ff = np.zeros(self.get_n_vehicles())
         for veh_id in self.sorted_vehicle_ids:
             v_ff[veh_id] = self.vehicles[veh_id].get_free_flow_speed()
         return v_ff
+
+    def yield_vehicles_in_order(self) -> Iterable[base.BaseVehicle]:
+        for veh_id in self.sorted_vehicle_ids:
+            yield self.vehicles[veh_id]
 
     def get_full_initial_state_vector(self) -> np.ndarray:
         initial_state = []
@@ -65,21 +75,23 @@ class VehicleGroup:
             initial_state.extend(self.vehicles[veh_id].get_initial_state())
         return np.array(initial_state)
 
-    def get_all_vehicles(self) -> Iterable[base.BaseVehicle]:
-        return self.vehicles.values()
+    def get_initial_state_by_vehicle(self) -> dict[str, np.ndarray]:
+        initial_state = dict()
+        for veh in self.vehicles.values():
+            initial_state[veh.get_name()] = veh.get_initial_state()
+        return initial_state
 
-    def get_all_vehicles_in_order(self) -> list[base.BaseVehicle]:
-        return [self.vehicles[veh_id] for veh_id in self.sorted_vehicle_ids]
-
-    def yield_vehicles_in_order(self) -> Iterable[base.BaseVehicle]:
-        for veh_id in self.sorted_vehicle_ids:
-            yield self.vehicles[veh_id]
-
-    def get_current_state(self) -> np.ndarray:
+    def get_state(self) -> np.ndarray:
         states = []
         for veh_id in self.sorted_vehicle_ids:
             states.append(self.vehicles[veh_id].get_states())
         return np.hstack(states)
+
+    def get_state_by_vehicle(self) -> dict[str, np.ndarray]:
+        initial_state = dict()
+        for veh in self.vehicles.values():
+            initial_state[veh.get_name()] = veh.get_states()
+        return initial_state
 
     def get_current_time(self) -> float:
         return self.vehicles[self.sorted_vehicle_ids[0]].get_current_time()
@@ -384,6 +396,10 @@ class VehicleGroup:
             full_state.extend(vehicle.create_state_vector(
                 x[veh_id], y[veh_id], theta[veh_id], v[veh_id]))
         return np.array(full_state)
+
+    def reset_platoons(self):
+        for veh in self.vehicles.values():
+            veh.reset_platoon()
 
     def initialize_platoons(self):
         """

@@ -26,6 +26,8 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     _state_names = ['x', 'y', 'theta', 'v']
     _input_names = ['a', 'phi']
     _is_model_defined: bool = False
+    _n_states, _n_inputs, _state_idx, _input_idx = base.BaseVehicle._set_model(
+        _state_names, _input_names)
 
     static_attribute_names = base.BaseVehicle.static_attribute_names.union(
         {'brake_max', 'accel_max'}
@@ -35,11 +37,11 @@ class FourStateVehicle(base.BaseVehicle, ABC):
                  has_open_loop_acceleration: bool,
                  is_connected: bool):
         super().__init__(is_connected)
-        if not FourStateVehicle._is_model_defined:
-            FourStateVehicle._set_model()
-            FourStateVehicle._is_model_defined = True
-            FourStateVehicle._ocp_interface_type = FourStateVehicleInterface
-
+        # TODO: red flag
+        # if not FourStateVehicle._is_model_defined:
+        #     FourStateVehicle._set_model()
+        #     FourStateVehicle._is_model_defined = True
+        #     FourStateVehicle._ocp_interface_type = FourStateVehicleInterface
         self._can_change_lanes = can_change_lanes
         self._has_open_loop_acceleration = has_open_loop_acceleration
         # TODO: bad naming.
@@ -185,6 +187,15 @@ class FourStateVehicle(base.BaseVehicle, ABC):
 
     def is_platoon_leader(self) -> bool:
         return self.get_id() == self._platoon.get_platoon_leader_id()
+
+    def reset_platoon(self):
+        self._platoon = None
+
+    def initialize_platoons(
+            self, vehicles: Mapping[int, base.BaseVehicle],
+            platoon_lane_change_strategy: int
+    ) -> None:
+        self.update_platoons(vehicles, platoon_lane_change_strategy)
 
     def update_platoons(
             self, vehicles: Mapping[int, base.BaseVehicle],

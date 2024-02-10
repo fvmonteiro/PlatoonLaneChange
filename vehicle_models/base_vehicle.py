@@ -781,17 +781,12 @@ class BaseVehicle(ABC):
     #         following_vehicle.get_vel())
     #     return gap + margin >= safe_gap
 
+    def reset_platoon(self):
+        pass
+
     def initialize_platoons(
             self, vehicles: Mapping[int, BaseVehicle],
             platoon_lane_change_strategy: int
-    ) -> None:
-        # [Nov 20] not yet sure there'll be any difference between initializing
-        # and updating platoons
-        self.update_platoons(vehicles, platoon_lane_change_strategy)
-
-    def update_platoons(
-            self, vehicles: Mapping[int, BaseVehicle],
-            platoon_lane_change_strategy: int,
     ) -> None:
         pass
 
@@ -961,9 +956,9 @@ class BaseVehicle(ABC):
     def create_state_vector_2(cls, x: float, y: float, theta: float,
                               v: float = None):
         state_vector = np.zeros(cls._n_states)
-        state_vector[cls._state_idx['x']] = x
-        state_vector[cls._state_idx['y']] = y
-        state_vector[cls._state_idx['theta']] = theta
+        state_vector[cls.get_idx_of_state('x')] = x
+        state_vector[cls.get_idx_of_state('y')] = y
+        state_vector[cls.get_idx_of_state('theta')] = theta
         cls._set_speed(v, state_vector)
         return state_vector
 
@@ -996,20 +991,34 @@ class BaseVehicle(ABC):
         self._lc_start_time = self.get_current_time()
         self._set_up_lane_change_control()
 
-    @classmethod
-    def _set_model(cls) -> None:
+    # @classmethod
+    # def _set_model(cls) -> None:
+    #     """
+    #     Must be called in the constructor of every derived class to set the
+    #     variables that define which vehicle model is implemented.
+    #     :return:
+    #     """
+    #     cls._n_states = len(cls._state_names)
+    #     cls._n_inputs = len(cls._input_names)
+    #     cls._state_idx = {cls._state_names[i]: i for i
+    #                       in range(cls._n_states)}
+    #     cls._input_idx = {cls._input_names[i]: i for i
+    #                       in range(cls._n_inputs)}
+
+    @staticmethod
+    def _set_model(state_names, input_names
+                   ) -> tuple[int, int, dict[str, int], dict[str, int]]:
         """
-        Must be called in the constructor of every derived class to set the
-        variables that define which vehicle model is implemented.
+        Must be called by every derived class to set their class variables
+        :param state_names:
+        :param input_names:
         :return:
         """
-        cls._n_states = len(cls._state_names)
-        cls._n_inputs = len(cls._input_names)
-        cls._state_idx = {cls._state_names[i]: i for i
-                          in range(cls._n_states)}
-        cls._input_idx = {cls._input_names[i]: i for i
-                          in range(cls._n_inputs)}
-
+        _n_states = len(state_names)
+        _n_inputs = len(input_names)
+        _state_idx = {state_names[i]: i for i in range(_n_states)}
+        _input_idx = {input_names[i]: i for i in range(_n_inputs)}
+        return _n_states, _n_inputs, _state_idx, _input_idx
     # def follow_origin_lane_leader(self) -> None:
     #     self._set_current_leader_id(self.get_origin_lane_leader_id())
 
