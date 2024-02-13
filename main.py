@@ -213,12 +213,7 @@ def create_graph(n_platoon: int, has_fd: bool, vel_orig_lane: Sequence[float],
                                max_dist, mode)
     graph_creator.save_vehicle_state_graph_to_file()
     graph_creator.save_quantization_parameters_to_file()
-    create_and_save_strategy_maps(graph_creator)
-
-
-def create_and_save_strategy_maps(vsg: graph_tools.GraphCreator):
-    for cost_name in ['time', 'accel']:
-        vsg.save_minimum_cost_strategies_to_json(cost_name)
+    graph_creator.save_minimum_cost_strategies_to_json()
 
 
 def filter_test():
@@ -296,7 +291,7 @@ def test_1():
     if n > 0:
         graph_creator.save_vehicle_state_graph_to_file()
         graph_creator.save_quantization_parameters_to_file()
-        create_and_save_strategy_maps(graph_creator)
+        graph_creator.save_minimum_cost_strategies_to_json()
 
 
 def main():
@@ -343,9 +338,12 @@ def main():
     #                  [vd], max_dist, "as")
     # print(f"Time to create graph: {time.time() - graph_t0}")
 
+    # graph_tools.GraphCreator.explore_unsolved_nodes(n_platoon,
+    #                                                 graph_includes_fd)
+
     v_dest_idx = 2
     lc_time = 1
-    delta_x = {'ld': 0., 'lo': 0., 'fd': 0.}
+    delta_x = {'ld': -40., 'lo': -90., 'fd': -10.}
     delta_x["ld"] += (v_dest[v_dest_idx] - v_orig[0]) / lc_time
     run_closed_loop_test(n_platoon, are_vehicles_cooperative,
                          v_orig[0], v_ff_platoon, v_dest[v_dest_idx], delta_x,

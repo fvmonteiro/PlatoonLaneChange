@@ -21,12 +21,15 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     """
 
     _controller_type: type[veh_ctrl.VehicleController]
-    _platoon: platoon.Platoon
+    _platoon: Union[platoon.Platoon, None]
 
     _state_names = ['x', 'y', 'theta', 'v']
     _input_names = ['a', 'phi']
     _is_model_defined: bool = False
-    _n_states, _n_inputs, _state_idx, _input_idx = base.BaseVehicle._set_model(
+    (_n_states,
+     _n_inputs,
+     _state_idx,
+     _input_idx) = base.BaseVehicle._set_model(
         _state_names, _input_names)
 
     static_attribute_names = base.BaseVehicle.static_attribute_names.union(

@@ -11,6 +11,7 @@ from typing import Any, Union
 
 import networkx as nx
 import numpy as np
+import pandas as pd
 
 import configuration
 import platoon
@@ -151,6 +152,7 @@ class VehicleStateGraph:
 
     def save_to_file(self, n_platoon: int, has_fd: bool):
         self.register_quantization_boundaries()
+
         file_name = VehicleStateGraph.get_graph_file_name(n_platoon, has_fd)
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                                  "vehicle_state_graphs",
@@ -340,7 +342,33 @@ class GraphCreator:
         self.vehicle_state_graph = VehicleStateGraph()
         self.state_quantizer: StateQuantizer = (
             self.vehicle_state_graph.get_state_quantizer(
-            self.get_n_vehicles_per_state()))
+                self.get_n_vehicles_per_state()))
+
+    @staticmethod
+    def explore_unsolved_nodes(n_platoon: int, has_fd: bool):
+        file_name = "_".join(["unsolved_x0", str(n_platoon),
+                              "vehicles.csv"])
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 "vehicle_state_graphs", file_name)
+        df: pd.DataFrame = pd.read_csv(file_path)
+        states_idx = [i for i in range(len(df.columns))
+                      if df.columns[i].startswith("x")]
+        graph_creator = GraphCreator(n_platoon, has_fd)
+        graph_creator.load_a_graph()
+        visited_nodes = set(
+            graph_creator.vehicle_state_graph.states_graph.nodes)
+        for index, row in df.iterrows():
+            free_flow_speeds = VehicleStateGraph.order_values(
+                row["orig"], [row["platoon"]] * n_platoon, row["dest"])
+            node = tuple(row.iloc[states_idx].to_numpy(int))
+            graph_creator.add_all_from_initial_state_to_graph(
+                node, visited_nodes, free_flow_speeds, "as")
+        graph_creator.save_vehicle_state_graph_to_file()
+        graph_creator.save_quantization_parameters_to_file()
+        graph_creator.save_minimum_cost_strategies_to_json()
+
+        df = df.iloc[0:0]  # erase data
+        df.to_csv(file_path, index=False)
 
     def get_n_vehicles_per_state(self):
         return self._n_platoon + 2 + self._has_fd
@@ -366,12 +394,36 @@ class GraphCreator:
             file.write(json_data)
             print("Saved quantization parameters file ", file_name)
 
-    def save_minimum_cost_strategies_to_json(self, cost_name: str = None
-                                             ) -> None:
+    def save_minimum_cost_strategies_to_json(self, cost_name: str = None,
+                                             mode: str = "as") -> None:
+        """
+        Computes the minimum cost maneuver for every initial condition and
+        every first mover set, and saves it to a json file.
+        :param cost_name: "accel" or "time". If left empty, computes both
+        :param mode: "w": completely overwrites any existing file;
+         "ao": appends to an existing strategy map (previously saved to a file)
+         and overwrites previous results if there are repeated initial states;
+         "as": appends to an existing graph and skips any repeated initial
+         states. [Not implemented]
+        :return:
+        """
+        # if mode not in {"w", "ao", "as"}:
+        #     raise ValueError(
+        #         "[VehicleStatesGraph] Chosen mode is not valid. Must be "
+        #         "'w', 'ao' or 'as'")
+
         if cost_name is None:
             for c in ["time", "accel"]:
                 self.save_minimum_cost_strategies_to_json(c)
             return
+
+        # if mode.startswith("a"):
+        #     existing_strategy_map = (
+        #         LaneChangeStrategyManager.load_saved_strategies(
+        #             self._n_platoon, cost_name)
+        #     )
+        # else:
+        #     existing_strategy_map = [dict()]
 
         strategy_map = self.create_strategies_map(cost_name)
         json_data = json.dumps(strategy_map, indent=2)
@@ -472,13 +524,17 @@ class GraphCreator:
             initial_state, visited_states, free_flow_speeds)
         return self.vehicle_state_graph.states_graph.number_of_nodes() - n1
 
-    def create_strategies_map(self, cost_name: str) -> list[dict]:
+    def create_strategies_map(
+            self, cost_name: str,  # existing_strategy_map: list[dict],
+            # overwrite_results: bool
+    ) -> list[dict]:
         strategy_map: list[dict] = []
         roots_with_issues = []
         dag = self.vehicle_state_graph.states_graph
         for root in self.vehicle_state_graph.get_initial_states():
             for next_node in dag.successors(root):
                 first_mover_set = dag[root][next_node]["lc_vehicles"].copy()
+                # if not overwrite_results
                 strategy = ([first_mover_set], [-1])
                 strategy_from_node, cost = (
                     self.vehicle_state_graph.
@@ -692,21 +748,28 @@ class LaneChangeStrategyManager:
     @staticmethod
     def load_strategy_map(n_platoon: int, cost_name: str
                           ) -> configuration.StrategyMap:
+        strategy_list = LaneChangeStrategyManager.load_saved_strategies(
+            n_platoon, cost_name)
+        strategy_map: configuration.StrategyMap = defaultdict(dict)
+        for sl in strategy_list:
+            key1 = tuple(sl["root"])
+            key2 = frozenset(sl["first_mover_set"])
+            lc_order = [set(i) for i in sl["lc_order"]]
+            strategy_map[key1][key2] = ((lc_order, sl["coop_order"]),
+                                        sl[cost_name])
+        return strategy_map
+
+    @staticmethod
+    def load_saved_strategies(n_platoon: int, cost_name: str
+                              ) -> list[dict[str, Any]]:
         file_name = "_".join(["min", cost_name, "strategies_for",
                               str(n_platoon), "vehicles.json"])
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                                  "strategy_maps", file_name)
-
         with open(file_path) as f:
-            raw_data: list[dict] = json.load(f)
-            strategy_map: configuration.StrategyMap = defaultdict(dict)
-            for d in raw_data:
-                key1 = tuple(d["root"])
-                key2 = frozenset(d["first_mover_set"])
-                lc_order = [set(i) for i in d["lc_order"]]
-                strategy_map[key1][key2] = ((lc_order, d["coop_order"]),
-                                            d[cost_name])
-        return strategy_map
+            strategy_list: list[dict] = json.load(f)
+        return strategy_list
+
 
     def set_maneuver_initial_state(
             self, ego_position_in_platoon: int, states: dict[str, np.ndarray]
