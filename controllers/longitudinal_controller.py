@@ -109,6 +109,8 @@ class LongitudinalController:
         else:
             leader = vehicles[leader_id]
             accel = self._compute_accel_to_a_leader(leader)
+            if v_ego <= 0 and accel < 0:
+                accel = 0
         accel = self._saturate_accel(accel)
         return accel
 
@@ -129,27 +131,6 @@ class LongitudinalController:
         # accel = self._saturate_accel(accel, v_ego, v_ff)
         accel = self._saturate_accel(accel)
         return accel
-
-    # def get_more_critical_leader(self, vehicles: Mapping[int, base.BaseVehicle]
-    #                              ) -> int:
-    #     """
-    #     Compares the acceleration if following the origin or destination lane
-    #     leaders, and chooses as leader the vehicle which causes the lesser
-    #     acceleration
-    #     :param vehicles:
-    #     :return:
-    #     """
-    #     relevant_ids = self.vehicle.get_possible_target_leader_ids()
-    #
-    #     candidate_accel = {
-    #         veh_id: self._compute_accel_to_a_leader(vehicles[veh_id])
-    #         for veh_id in relevant_ids if veh_id >= 0
-    #     }
-    #
-    #     if len(candidate_accel) > 0:
-    #         return min(candidate_accel, key=candidate_accel.get)
-    #     else:
-    #         return -1
 
     def _is_vehicle_far_ahead(self, other_vehicle: base.BaseVehicle):
         margin = 0.1

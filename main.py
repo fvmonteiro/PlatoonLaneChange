@@ -320,10 +320,10 @@ def main():
     )
 
     # TODO: test values only
-    v_orig = [70/3.6]
+    v_orig = [110/3.6 - 2]
     v_ff_platoon = 110/3.6  # make 110
-    v_dest = np.array([50, 70, 90])/3.6  # make 50, 70, 90
-    max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY * 1.5
+    v_dest = np.array([70])/3.6  # make 50, 70, 90
+    max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY * 1.1
 
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
@@ -332,41 +332,36 @@ def main():
     start_time = time.time()
 
     # print("===== CREATING SMALL-SCALE GRAPHS ONLY ======")
-    # graph_t0 = time.time()
-    # for vd in v_dest:
-    #     create_graph(n_platoon, graph_includes_fd, v_orig, v_ff_platoon,
-    #                  [vd], max_dist, "as")
-    # print(f"Time to create graph: {time.time() - graph_t0}")
 
     # graph_tools.GraphCreator.explore_unsolved_nodes(n_platoon,
     #                                                 graph_includes_fd)
 
-    v_dest_idx = 2
-    lc_time = 1
-    delta_x = {'ld': -40., 'lo': -90., 'fd': -10.}
-    delta_x["ld"] += (v_dest[v_dest_idx] - v_orig[0]) / lc_time
-    run_closed_loop_test(n_platoon, are_vehicles_cooperative,
-                         v_orig[0], v_ff_platoon, v_dest[v_dest_idx], delta_x,
-                         [6], plot_results=True)
+    # v_dest_idx = 2
+    # lc_time = 1
+    # delta_x = {'ld': -40., 'lo': -90., 'fd': -10.}
+    # delta_x["ld"] += (v_dest[v_dest_idx] - v_orig[0]) / lc_time
+    # run_closed_loop_test(n_platoon, are_vehicles_cooperative,
+    #                      v_orig[0], v_ff_platoon, v_dest[v_dest_idx], delta_x,
+    #                      [6], plot_results=True)
 
     # run_scenarios_for_comparison(
     #     n_platoon, v_orig[0], v_ff_platoon, are_vehicles_cooperative,
     #     [5], v_dest, gap_positions=None, has_plots=False, save=False
     # )
 
-    # for n_platoon in [2, 3, 4]:
-    #     print(f'############ N={n_platoon} ############')
-    #     graph_t0 = time.time()
-    #     create_graph(n_platoon, graph_includes_fd, v_orig, v_ff_platoon,
-    #                  v_dest - v_orig[0])
-    #     print(f'Time to create graph: {time.time() - graph_t0}')
-    #     configuration.Configuration.set_scenario_parameters(
-    #         sim_time=20.0 * n_platoon
-    #     )
-    #     sim_t0 = time.time()
-    #     run_all_scenarios_for_comparison(n_platoon, v_orig, v_ff_platoon,
-    #                                      are_vehicles_cooperative)
-    #     print(f'Time simulated: {time.time() - sim_t0}')
+    for n_platoon in [4]:
+        print(f'############ N={n_platoon} ############')
+        graph_t0 = time.time()
+        create_graph(n_platoon, graph_includes_fd, v_orig, v_ff_platoon,
+                     v_dest, max_dist, mode="w")
+        print(f'Time to create graph: {time.time() - graph_t0}')
+        configuration.Configuration.set_scenario_parameters(
+            sim_time=20.0 * n_platoon
+        )
+        sim_t0 = time.time()
+        # run_all_scenarios_for_comparison(n_platoon, v_orig[0], v_ff_platoon,
+        #                                  are_vehicles_cooperative)
+        print(f'Time simulated: {time.time() - sim_t0}')
     # analysis.compare_approaches(save_fig=False)
     # analysis.compare_graph_to_best_heuristic(save_fig=True)
 

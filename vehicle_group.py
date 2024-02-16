@@ -15,6 +15,10 @@ from operating_modes import system_operating_mode as som
 V = TypeVar('V', bound=base.BaseVehicle)
 
 
+class CollisionException(RuntimeError):
+    pass
+
+
 class VehicleGroup:
     """ Class to help manage groups of vehicles """
 
@@ -522,6 +526,7 @@ class VehicleGroup:
                 print(f' ==== COLLISION DETECTED ====\n'
                       f't={self.get_current_time()} between vehicles '
                       f'{veh1} and {veh2}')
+                raise CollisionException
 
     def update_states(self, new_time):
         for vehicle in self.vehicles.values():

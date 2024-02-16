@@ -705,10 +705,16 @@ class GraphCreator:
                             continue
                         next_positions_to_move = next_positions_to_move | {p}
                         vehicle_group = self._create_vehicle_group()
-                        success = _simulate_till_lane_change(
-                            vehicle_group, initial_state, free_flow_speeds,
-                            next_positions_to_move, next_pos_to_coop
-                        )
+                        try:
+                            success = _simulate_till_lane_change(
+                                vehicle_group, initial_state, free_flow_speeds,
+                                next_positions_to_move, next_pos_to_coop
+                            )
+                        except vg.CollisionException:
+                            print(f"Initial state that lead to collision "
+                                  f"{initial_state} with free flow speeds "
+                                  f"{free_flow_speeds}")
+                            success = False
                         # vehicle_group.truncate_simulation_history()
                         # data = vehicle_group.to_dataframe()
                         # analysis.plot_trajectory(data)
@@ -769,7 +775,6 @@ class LaneChangeStrategyManager:
         with open(file_path) as f:
             strategy_list: list[dict] = json.load(f)
         return strategy_list
-
 
     def set_maneuver_initial_state(
             self, ego_position_in_platoon: int, states: dict[str, np.ndarray]
@@ -1036,7 +1041,8 @@ class StateQuantizer:
         n_vehicles = len(full_quantized_state) // self._n_states
         intervals_long_array = np.tile(self._intervals, n_vehicles)
         shift_long_array = np.tile(self._shift, n_vehicles)
-        zero_idx = [self._zero_idx + i * n_vehicles for i in range(n_vehicles)]
+        zero_idx = [self._zero_idx + i * self._n_states
+                    for i in range(n_vehicles)]
 
         full_quantized_state = np.array(full_quantized_state)
         # full_quantized_state = np.minimum(
