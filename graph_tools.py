@@ -13,6 +13,7 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 
+import analysis
 import configuration
 import platoon
 # import scenarios
@@ -241,6 +242,10 @@ class VehicleStateGraph:
                 if cost < opt_cost:
                     opt_cost = cost
                     opt_strategy = strategy
+
+        if opt_strategy is None:
+            raise nx.NetworkXNoPath
+
         return opt_strategy, opt_cost
 
     def get_maneuver_order_from_path(self, path) -> configuration.Strategy:
@@ -303,6 +308,7 @@ class PlatoonLCTracker:
         self._remaining_vehicles: set[int] = set([i for i in range(n_platoon)])
         self._dest_lane_vehicles: list[int] = []
         self._cooperating_order: list[int] = []
+        self._lane_change_order: list[set[int]] = []
 
     def __repr__(self):
         return (f"[{self.__class__.__name__}] remaining|moved|coop_order = "
@@ -320,15 +326,23 @@ class PlatoonLCTracker:
         return (self._dest_lane_vehicles if len(self._dest_lane_vehicles) > 0
                 else [-1])
 
-    def move_vehicles(self, position_in_platoon: Iterable[int],
+    def get_cooperating_order(self) -> list[int]:
+        return self._cooperating_order
+
+    def get_lane_change_order(self) -> list[set[int]]:
+        return self._lane_change_order
+
+    def move_vehicles(self, position_in_platoon: set[int],
                       cooperative_vehicle_position: int):
         for p in position_in_platoon:
             self._remaining_vehicles.remove(p)
             self._dest_lane_vehicles.append(p)
+        self._lane_change_order.append(set(position_in_platoon))
         self._cooperating_order.append(cooperative_vehicle_position)
 
     def bring_back_vehicle(self, position_in_platoon: Iterable[int]):
         self._cooperating_order.pop()
+        self._lane_change_order.pop()
         for p in position_in_platoon:
             self._dest_lane_vehicles.pop()
             self._remaining_vehicles.add(p)
@@ -555,10 +569,10 @@ class GraphCreator:
                      "coop_order": strategy[1], cost_name: cost}
                 )
         # if len(roots_with_issues) > 0:
-        file_name = "unsolved_root_nodes.pickle"
-        with open(file_name, "wb") as f:
+        file_path = os.path.join("data", "unsolved_root_nodes.pickle")
+        with open(file_path, "wb") as f:
             pickle.dump(roots_with_issues, f, pickle.HIGHEST_PROTOCOL)
-            print(f"{len(roots_with_issues)} issues saved in file {file_name}")
+            print(f"{len(roots_with_issues)} issues saved in file {file_path}")
         return strategy_map
 
     @staticmethod
@@ -658,6 +672,7 @@ class GraphCreator:
         if include_ld:
             ld = fsv.ShortSimulationVehicle(False)
             ld.set_name("ld")
+            leader_platoon._dest_lane_leader_id = ld.get_id()
         else:
             ld = []
         if self._has_fd:
@@ -695,7 +710,7 @@ class GraphCreator:
                 self.vehicle_state_graph.mark_terminal_node(quantized_state)
                 continue
 
-            initial_state = self.state_quantizer.dequantize_state(
+            next_initial_state = self.state_quantizer.dequantize_state(
                 quantized_state)
             for next_pos_to_coop in tracker.get_possible_cooperative_vehicles():
                 for starting_next_pos_to_move in remaining_vehicles:
@@ -707,13 +722,16 @@ class GraphCreator:
                         vehicle_group = self._create_vehicle_group()
                         try:
                             success = _simulate_till_lane_change(
-                                vehicle_group, initial_state, free_flow_speeds,
-                                next_positions_to_move, next_pos_to_coop
+                                vehicle_group, next_initial_state,
+                                free_flow_speeds, next_positions_to_move,
+                                next_pos_to_coop
                             )
                         except vg.CollisionException:
-                            print(f"Initial state that lead to collision "
-                                  f"{initial_state} with free flow speeds "
-                                  f"{free_flow_speeds}")
+                            GraphCreator._save_collision_scenario_info(
+                                self._n_platoon, root[1], quantized_state,
+                                tracker, free_flow_speeds,
+                                next_positions_to_move, next_pos_to_coop
+                            )
                             success = False
                         # vehicle_group.truncate_simulation_history()
                         # data = vehicle_group.to_dataframe()
@@ -736,6 +754,103 @@ class GraphCreator:
                                 next_positions_to_move, next_pos_to_coop)
                             nodes.appendleft((next_tracker,
                                               next_quantized_state))
+
+    def explore_given_path(
+            self, root: configuration.QuantizedState,
+            collision_node: configuration.QuantizedState,
+            tracker: PlatoonLCTracker, free_flow_speeds: Sequence[float],
+            last_to_move: set[int], last_to_coop: int):
+        """
+
+        :param root: The root node (before lane changes) being explored
+        :param collision_node: The node (state configuration) that lead to the
+         collision
+        :param tracker:
+        :param free_flow_speeds:
+        :param last_to_move:
+        :param last_to_coop:
+        :return:
+        """
+        # Simulate until the collision state
+        next_node = root
+        for i in range(len(tracker.get_lane_change_order())):
+            next_pos_to_coop = tracker.get_cooperating_order()[i]
+            next_positions_to_move = tracker.get_lane_change_order()[i]
+            next_initial_state = self.state_quantizer.dequantize_state(
+                next_node)
+            vehicle_group = self._create_vehicle_group()
+            success = _simulate_till_lane_change(
+                vehicle_group, next_initial_state,
+                free_flow_speeds, next_positions_to_move,
+                next_pos_to_coop
+            )
+            vehicle_group.truncate_simulation_history()
+            data = vehicle_group.to_dataframe()
+            analysis.plot_trajectory(data)
+            analysis.plot_platoon_lane_change(data)
+            if success:
+                next_node = (
+                    self.state_quantizer.quantize_without_bounds(
+                        vehicle_group.get_state_by_vehicle())
+                )
+            else:
+                raise RuntimeError(
+                    "Given path (previously explored with success) "
+                    "lead to a failure")
+
+        # Double checking:
+        if next_node != collision_node:
+            warnings.warn("Didn't get to collision node")
+        vehicle_group = self._create_vehicle_group()
+        next_initial_state = self.state_quantizer.dequantize_state(
+            next_node)
+        try:
+            _simulate_till_lane_change(
+                vehicle_group, next_initial_state, free_flow_speeds,
+                last_to_move, last_to_coop)
+        except vg.CollisionException:
+            print("collision found")
+        vehicle_group.truncate_simulation_history()
+        data = vehicle_group.to_dataframe()
+        analysis.plot_trajectory(data)
+        analysis.plot_platoon_lane_change(data)
+
+    # sill not sure where to keep this method (or any of the error logging
+    # methods)
+    @staticmethod
+    def _save_collision_scenario_info(
+            platoon_size: int,
+            root: configuration.QuantizedState,
+            collision_node: configuration.QuantizedState,
+            tracker: PlatoonLCTracker,
+            free_flow_speeds: Iterable[float], next_to_move: Iterable[int],
+            next_to_coop: int
+    ):
+        """
+
+        :param platoon_size:
+        :param root: The root node (before lane changes) being explored
+        :param collision_node: The node (state configuration) that lead to the
+         collision
+        :param tracker:
+        :param free_flow_speeds:
+        :param next_to_move:
+        :param next_to_coop:
+        :return:
+        """
+        info = {
+            "platoon_size": platoon_size, "root": root,
+            "collision_node": collision_node, "tracker": tracker,
+            "free_flow_speeds": free_flow_speeds,
+            "next_to_move": next_to_move, "next_to_coop": next_to_coop
+        }
+        file_name = "collisions"
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 "vehicle_state_graphs",
+                                 file_name + ".pickle")
+        with open(file_path, "ab") as f:
+            pickle.dump(info, f, pickle.HIGHEST_PROTOCOL)
+        print(f"File {file_name} saved")
 
 
 class LaneChangeStrategyManager:
@@ -824,6 +939,12 @@ class LaneChangeStrategyManager:
     def find_min_cost_strategy_given_first_mover(
             self, first_mover_platoon_positions: set[int], cost_name: str
     ) -> tuple[configuration.Strategy, float]:
+        """
+        Looks for the best strategy in this instance's graph
+        :param first_mover_platoon_positions:
+        :param cost_name:
+        :return:
+        """
         # Get the initial state as seen by the first mover group
         initial_state_candidates = {self._initial_state_per_vehicle[p]
                                     for p in first_mover_platoon_positions}
@@ -832,21 +953,6 @@ class LaneChangeStrategyManager:
             # state, i.e., the same position for ld
             raise RuntimeError("More than one possible initial state")
         initial_state = initial_state_candidates.pop()
-
-        if initial_state not in self.vehicle_state_graph.get_initial_states():
-            print(f"State {initial_state} not in graph. "
-                  f"Waiting for next iteration...")
-            # print("Adding it now...")
-            # v_ff_lo = self.state_quantizer.dequantize_free_flow_velocities(
-            #     quantized_states[3], possible_vel_dest)
-            # v_ff_ld = self.state_quantizer.dequantize_free_flow_velocities(
-            #     quantized_states[-1], possible_vel_dest)
-            # free_flow_speeds = ([v_ff_lo] + [v_ff_platoon] * n_platoon
-            #                     + [v_ff_ld])
-            # self.add_initial_state_to_graph(
-            #     quantized_states, set(self.states_graph.nodes),
-            #     free_flow_speeds, mode="as")
-            raise nx.NetworkXNoPath
 
         # Get the node after the first-movers have changed lanes
         first_move_state = (
@@ -868,6 +974,12 @@ class LaneChangeStrategyManager:
             self, first_mover_platoon_positions: set[int],
             strategy_map: configuration.StrategyMap
     ) -> tuple[configuration.Strategy, float]:
+        """
+        Looks for the best strategy in the given strategy map
+        :param first_mover_platoon_positions:
+        :param strategy_map:
+        :return:
+        """
         # Get the initial state as seen by the first mover group
         initial_state_candidates = {self._initial_state_per_vehicle[p]
                                     for p in first_mover_platoon_positions}

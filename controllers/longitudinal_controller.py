@@ -78,19 +78,23 @@ class LongitudinalController:
             new_state = self.States.CRUISE
         else:
             leader = vehicles[leader_id]
-            is_leader_too_fast = leader.get_vel() > 1.1 * v_ff
-            if self._state == self.States.VEHICLE_FOLLOWING:
-                if (is_leader_too_fast
-                        or (self.vehicle.has_origin_lane_leader_changed()
-                            and self._is_vehicle_far_ahead(leader))):
-                    new_state = self.States.CRUISE
-                else:
-                    new_state = self.States.VEHICLE_FOLLOWING
+            if (self.vehicle.is_in_a_platoon()
+                    and self.vehicle.get_platoon().contains_vehicle(leader_id)):
+                new_state = self.States.VEHICLE_FOLLOWING
             else:
-                if self._is_vehicle_far_ahead(leader) or is_leader_too_fast:
-                    new_state = self.States.CRUISE
+                is_leader_too_fast = leader.get_vel() > 1.1 * v_ff
+                if self._state == self.States.VEHICLE_FOLLOWING:
+                    if (is_leader_too_fast
+                            or (self.vehicle.has_origin_lane_leader_changed()
+                                and self._is_vehicle_far_ahead(leader))):
+                        new_state = self.States.CRUISE
+                    else:
+                        new_state = self.States.VEHICLE_FOLLOWING
                 else:
-                    new_state = self.States.VEHICLE_FOLLOWING
+                    if self._is_vehicle_far_ahead(leader) or is_leader_too_fast:
+                        new_state = self.States.CRUISE
+                    else:
+                        new_state = self.States.VEHICLE_FOLLOWING
 
         # Transition back to cruising
         if new_state == self.States.CRUISE and new_state != self._state:

@@ -184,9 +184,9 @@ class BaseVehicle(ABC):
 
     def get_states(self) -> np.ndarray:
         try:
-            return self._states_history[:, self._iter_counter]
+            return self._states_history[:, self._iter_counter].copy()
         except AttributeError:  # lazy coding
-            return self._initial_state
+            return self._initial_state.copy()
 
     def get_x_history(self) -> np.ndarray:
         return self.get_a_state_history('x')

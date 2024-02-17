@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
+import os
 import time
 import warnings
 
@@ -96,7 +97,7 @@ class LaneChangeStrategy(ABC):
         #  it clearer that the strategy has access to updated platoon info
         self.platoon = platoon
         self._decision_time = 0.  # only used by Graph-Based.
-        self._platoon_dest_lane_leader_id = -1
+        # self._platoon_dest_lane_leader_id = -1
 
     @classmethod
     def get_id(cls) -> int:
@@ -109,8 +110,8 @@ class LaneChangeStrategy(ABC):
     def get_decision_time(self) -> float:
         return self._decision_time
 
-    def get_platoon_destination_lane_leader(self) -> int:
-        return self._platoon_dest_lane_leader_id
+    # def get_platoon_destination_lane_leader(self) -> int:
+    #     return self._platoon_dest_lane_leader_id
 
     @abstractmethod
     def get_lane_change_order(self) -> configuration.LCOrder:
@@ -280,7 +281,7 @@ class TemplateStrategy(LaneChangeStrategy):
                                      key=lambda x: x.get_x())
                 dest_lane_leader_id = (
                     front_most_veh.get_suitable_destination_lane_leader_id())
-                self._platoon_dest_lane_leader_id = dest_lane_leader_id
+                # self._platoon_dest_lane_leader_id = dest_lane_leader_id
             else:
                 # Merge behind the platoon vehicle farther back in the dest lane
                 dest_lane_leader_id = self.platoon.vehicles[
@@ -386,98 +387,65 @@ class GraphLaneChangeApproach(TemplateStrategy):
         :return:
         """
 
-        # print(f"[GraphApproach] t={all_vehicles[0].get_current_time():.2f} "
-        #       f"setting all possible initial states")
-
+        states = self.platoon.get_centered_vehicles_states()
         platoon_leader = self.platoon.get_platoon_leader()
+        leader_x = platoon_leader.get_x()
+        leader_y = platoon_leader.get_y()
+        x_idx = fsv.FourStateVehicle.get_idx_of_state("x")
+        y_idx = fsv.FourStateVehicle.get_idx_of_state("y")
         if platoon_leader.has_origin_lane_leader():
             lo = all_vehicles[platoon_leader.get_origin_lane_leader_id()]
             lo_states = lo.get_states()
         else:
-            lo_states = []
+            lo_states = platoon_leader.get_states()
+            lo_states[x_idx] += configuration.MAX_DISTANCE
+        lo_states[x_idx] -= leader_x
+        lo_states[y_idx] -= leader_y
+        states["lo"] = lo_states
 
+        error_flag = False
         for pos, veh in enumerate(self.platoon.vehicles):
             if veh.get_is_lane_change_gap_suitable():
                 if veh.has_destination_lane_leader():
                     ld = all_vehicles[veh.get_destination_lane_leader_id()]
                     ld_states = ld.get_states()
                 else:
-                    ld_states = []
-                if veh.has_destination_lane_follower():
-                    fd = all_vehicles[veh.get_destination_lane_follower_id()]
-                    fd_states = fd.get_states()
-                else:
-                    fd_states = []
-                self._set_maneuver_initial_state(
-                    pos, lo_states, ld_states, fd_states)
+                    ld_states = platoon_leader.get_states()
+                    ld_states[x_idx] += configuration.MAX_DISTANCE
+                    ld_states[y_idx] = platoon_leader.get_target_y()
+                ld_states[x_idx] -= leader_x
+                ld_states[y_idx] -= leader_y
+                states["ld"] = ld_states
+
+                if self._includes_fd:
+                    if veh.has_destination_lane_follower():
+                        fd = all_vehicles[
+                            veh.get_destination_lane_follower_id()]
+                        fd_states = fd.get_states()
+                    else:
+                        pN = self.platoon.get_last_platoon_vehicle()
+                        fd_states = pN.get_states()
+                        fd_states[x_idx] -= configuration.MAX_DISTANCE
+                        fd_states[y_idx] = pN.get_target_y()
+                    states["fd"] = fd_states
+
+                try:
+                    (self._lane_change_strategy_manager.
+                     set_maneuver_initial_state(pos, states))
+                except nx.NodeNotFound as error:
+                    # We want to save all errors before stopping the simulation
+                    error_flag = True
+                    missing_node = error.args[0]
+                    v_idx = fsv.FourStateVehicle.get_idx_of_state("v")
+                    v_ref = {"dest": ld_states[v_idx],
+                             "orig": lo_states[v_idx],
+                             "platoon": platoon_leader.get_free_flow_speed()}
+                    self.save_state_info_to_csv(missing_node, v_ref)
             else:
                 self._set_empty_maneuver_initial_state(veh.get_id())
 
-    def _set_maneuver_initial_state(
-            self, ego_position_in_platoon: int, lo_states: Sequence[float],
-            ld_states: Sequence[float], fd_states: Sequence[float]) -> None:
-        """
-
-        :param ego_position_in_platoon: The position (number) of the ego vehicle
-        in the platoon
-        :param lo_states:
-        :param ld_states:
-        :param fd_states:
-        :return: True if the combination of vehicle states exists in the graph,
-         False otherwise
-        """
-        # print("[GraphApproach] set_maneuver_initial_state for veh at",
-        #       ego_position_in_platoon)
-        p1 = self.platoon.get_platoon_leader()
-        leader_x = p1.get_x()
-        leader_y = p1.get_y()
-        x_idx = fsv.FourStateVehicle.get_idx_of_state("x")
-        y_idx = fsv.FourStateVehicle.get_idx_of_state("y")
-
-        # We center all around the leader
-        states = dict()
-        for veh in self.platoon.vehicles:
-            veh_states = veh.get_states().copy()
-            veh_states[x_idx] -= leader_x
-            veh_states[y_idx] -= leader_y
-            states[veh.get_name()] = veh_states
-
-        # TODO: lazy workaround. We need to include the no leader
-        #  possibilities in the graph
-        if len(lo_states) == 0:
-            lo_states = p1.get_states().copy()
-            lo_states[x_idx] += p1.compute_non_connected_reference_gap()
-        else:
-            lo_states = np.copy(lo_states)
-        lo_states[x_idx] -= leader_x
-        lo_states[y_idx] -= leader_y
-        states["lo"] = lo_states
-
-        if len(ld_states) == 0:
-            ld_states = lo_states.copy()
-            ld_states[y_idx] = p1.get_target_y()
-        else:
-            ld_states = np.copy(ld_states)
-        ld_states[x_idx] -= leader_x
-        ld_states[y_idx] -= leader_y
-        states["ld"] = ld_states
-
-        if self._includes_fd:
-            if len(fd_states) == 0:
-                pN = self.platoon.get_last_platoon_vehicle()
-                fd_states = pN.get_states().copy()
-                fd_states[x_idx] -= pN.compute_non_connected_reference_gap()
-                fd_states[y_idx] = pN.get_target_y()
-            else:
-                fd_states = np.copy(fd_states)
-            fd_states[x_idx] -= leader_x
-            fd_states[y_idx] -= leader_y
-            states["fd"] = fd_states
-        # else:
-        #     fd_states = None
-
-        self._lane_change_strategy_manager.set_maneuver_initial_state(
-                ego_position_in_platoon, states)
+        if error_flag:
+            raise nx.NodeNotFound
 
     def _set_empty_maneuver_initial_state(self, ego_position_in_platoon: int):
         """
@@ -597,6 +565,27 @@ class GraphLaneChangeApproach(TemplateStrategy):
             self.set_maneuver_order(path[0], path[1])
             # self._is_initialized = True
             print(f'Path chosen from graph: {path[0]}, {path[1]}')
+
+    def save_state_info_to_csv(
+            self, node: configuration.QuantizedState, v_ref: dict[str: float]
+    ) -> None:
+        print(f"Node {node} was not found in the graph. Adding it "
+              f"'unsolved' file...")
+        n_platoon = self.platoon.get_size()
+        file_name = "_".join(["unsolved_x0", str(n_platoon),
+                              "vehicles.csv"])
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 "vehicle_state_graphs", file_name)
+        new_line = (",".join(
+            [str(v_ref[k]) for k in sorted(v_ref.keys())]
+            + [str(i) for i in node]) + "\n")
+        if not os.path.isfile(file_path):
+            header = (",".join(
+                [str(k) for k in sorted(v_ref.keys())]
+                + ["x" + str(i) for i in range(len(node))]) + "\n")
+            new_line = header + new_line
+        with open(file_path, "a") as file:
+            file.write(new_line)
 
 
 class GraphLaneChangeApproachMinTime(GraphLaneChangeApproach):

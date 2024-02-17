@@ -176,31 +176,13 @@ class LaneChangeScenarioManager:
         scenario.vehicle_group.set_verbose(False)
         try:
             scenario.run(tf)
-        except nx.NodeNotFound as error:
-            node = error.args[0]
-            print(f"Node {node} was not found in the graph. Adding it "
-                  f"'unsolved' file...")
-            self.append_initial_state_to_csv(node)
+        except nx.NodeNotFound:
+            print("Simulation interrupted because some nodes were not "
+                  "found in the graph.")
             return
-            # graph_creator = graph_tools.GraphCreator(self.n_platoon,
-            #                                          has_fd=False)
-            # graph_creator.load_a_graph()
-            # visited_nodes = set(
-            #     graph_creator.vehicle_state_graph.states_graph.nodes)
-            # free_flow_speeds = graph_tools.VehicleStateGraph.order_values(
-            #     self.v_ref["orig"], [self.v_ref["platoon"]] * self.n_platoon,
-            #     self.v_ref["dest"])
-            # graph_creator.add_all_from_initial_state_to_graph(
-            #     node, visited_nodes, free_flow_speeds, "as")
-            # graph_creator.save_vehicle_state_graph_to_file()
-            # graph_creator.save_quantization_parameters_to_file()
-            # graph_creator.save_minimum_cost_strategies_to_json()
-            # print(f"Node successfully added. Running again")
-            # scenario.reset_platoons()
-            # scenario.run(tf)
 
         self.store_results(scenario, gap_position)
-        scenario.save_response_data(self.trajectory_file_name)
+        # scenario.save_response_data(self.trajectory_file_name)
 
         if self._has_plots:
             data = scenario.response_to_dataframe()
@@ -267,22 +249,22 @@ class LaneChangeScenarioManager:
                                header=write_header)
         print(f"File {file_name} saved")
 
-    def append_initial_state_to_csv(
-            self, initial_state: configuration.QuantizedState) -> None:
-        file_name = "_".join(["unsolved_x0", str(self.n_platoon),
-                              "vehicles.csv"])
-        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 "vehicle_state_graphs", file_name)
-        new_line = (",".join([str(self.v_ref[k])
-                              for k in sorted(self.v_ref.keys())]
-                             + [str(i) for i in initial_state]) + "\n")
-        if not os.path.isfile(file_path):
-            header = (",".join(
-                [str(k) for k in sorted(self.v_ref.keys())]
-                + ["x" + str(i) for i in range(len(initial_state))]) + "\n")
-            new_line = header + new_line
-        with open(file_path, "a") as file:
-            file.write(new_line)
+    # def append_initial_state_to_csv(
+    #         self, initial_state: configuration.QuantizedState) -> None:
+    #     file_name = "_".join(["unsolved_x0", str(self.n_platoon),
+    #                           "vehicles.csv"])
+    #     file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+    #                              "vehicle_state_graphs", file_name)
+    #     new_line = (",".join([str(self.v_ref[k])
+    #                           for k in sorted(self.v_ref.keys())]
+    #                          + [str(i) for i in initial_state]) + "\n")
+    #     if not os.path.isfile(file_path):
+    #         header = (",".join(
+    #             [str(k) for k in sorted(self.v_ref.keys())]
+    #             + ["x" + str(i) for i in range(len(initial_state))]) + "\n")
+    #         new_line = header + new_line
+    #     with open(file_path, "a") as file:
+    #         file.write(new_line)
 
     def _create_scenario_name(self, strategy_number: int):
         scenario_name = lc_strategy.strategy_map[strategy_number].get_name()

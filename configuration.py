@@ -19,10 +19,11 @@ SAFE_TIME_HEADWAY = 2.0  # [s]
 SAFE_CONNECTED_TIME_HEADWAY = 1.0  # [s]
 STANDSTILL_DISTANCE = 1.0  # [m]
 TIME_HEADWAY_MARGIN = 0.1  # [s]
+MAX_DISTANCE = 300.  # [m] for when we need to create virtual far away vehicles
 # TODO: read these from a file
 DELTA_X = 9  # quantization interval [m]
 DELTA_V = 2  # quantization interval [m]
-DELTA_Y = 4  # quantization interval [m]
+DELTA_Y = LANE_WIDTH  # quantization interval [m]
 
 UNIT_MAP = {'t': 's', 'x': 'm', 'y': 'm', 'theta': 'rad', 'v': 'm/s',
             'a': 'm/s^2', 'phi': 'rad', 'gap': 'm'}
