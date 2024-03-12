@@ -310,6 +310,7 @@ def explore_collision_scenarios():
             pass
 
     for sc in collision_scenarios:
+        print(f"Exploring initial condition: {sc['root']}")
         graph_creator = graph_tools.GraphCreator(sc["platoon_size"], False)
         graph_creator.explore_given_path(
             sc["root"], sc["collision_node"], sc["tracker"],
@@ -322,7 +323,6 @@ def main():
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
 
-    sim_time = 15.0 * n_platoon
     # time_horizon = sim_time - 2
     # configuration.Configuration.set_solver_parameters(
     #     max_iter=100, discretization_step=0.2,
@@ -337,15 +337,11 @@ def main():
     #     jumpstart_next_solver_call=True, has_initial_mode_guess=True
     # )
 
-    configuration.Configuration.set_scenario_parameters(
-        sim_time=sim_time, increase_lc_time_headway=False
-    )
-
     # TODO: test values only
-    v_orig = [110/3.6 - 2]
-    v_ff_platoon = 110/3.6  # make 110
-    v_dest = np.array([70])/3.6  # make 50, 70, 90
-    max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY * 1.1
+    # v_orig = [110/3.6 - 2]
+    # v_ff_platoon = 110/3.6  # make 110
+    # v_dest = np.array([70])/3.6  # make 50, 70, 90
+    # max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY * 1.1
 
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
@@ -353,12 +349,19 @@ def main():
 
     start_time = time.time()
 
-    # print("===== CREATING SMALL-SCALE GRAPHS ONLY ======")
+    for n_platoon in [2, 4, 6, 8]:
+        print(f" ===== Exploring scenario with platoon size {n_platoon} ==== ")
+        sim_time = 20.0 * n_platoon
+        configuration.Configuration.set_scenario_parameters(
+            sim_time=sim_time, increase_lc_time_headway=False
+        )
+        graph_tools.GraphCreator.explore_initial_states_from_simulations(
+            n_platoon, graph_includes_fd, "vissim", "ao")
 
-    explore_collision_scenarios()
-
-    # graph_tools.GraphCreator.explore_unsolved_nodes(n_platoon,
-    #                                                 graph_includes_fd)
+    # lcsm = scenarios.LaneChangeScenarioManager()
+    # lcsm.set_parameters(n_platoon, False, {}, {})
+    # lcsm.run_scenarios_from_file()
+    # explore_collision_scenarios()
 
     v_dest_idx = 0
     lc_time = 1

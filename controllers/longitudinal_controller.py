@@ -23,51 +23,14 @@ class LongitudinalController:
         self._kv = 0.5
         self._threshold_param = 2.
         self._state = self.States.NOT_INITIALIZED
-        self._velocity_controller = VelocityController(vehicle.brake_max,
-                                                       vehicle.accel_max)
+        self._velocity_controller = VelocityController(
+            vehicle.brake_comfort_max, vehicle.accel_max)
         self._max_brake = max_brake
         self._time_headway = 0
         self._standstill_distance = self.vehicle.c
 
     def set_time_headway(self, value: float) -> None:
         self._time_headway = value
-
-    # def compute_acceleration_old(self,
-    #                              vehicles: Mapping[int, base.BaseVehicle]
-    #                              ) -> float:
-    #     """
-    #     Computes acceleration for the ego vehicle following a leader
-    #     """
-    #     v_ego = self.vehicle.get_vel()
-    #     v_ff = self.vehicle.get_desired_free_flow_speed(vehicles)
-    #
-    #     if not self.vehicle.has_leader():
-    #         new_state = self.States.CRUISE
-    #     else:
-    #         leader = vehicles[self.vehicle.get_current_leader_id()]
-    #         is_leader_too_fast = leader.get_vel() > 1.1 * v_ff
-    #         if self._is_vehicle_far_ahead(leader) or is_leader_too_fast:
-    #             new_state = self.States.CRUISE
-    #         else:
-    #             new_state = self.States.VEHICLE_FOLLOWING
-    #
-    #     # Transition back to cruising
-    #     if new_state == self.States.CRUISE and new_state != self._state:
-    #         self._velocity_controller.set(v_ego, v_ff)
-    #
-    #     self._state = new_state
-    #     if self._state == self.States.CRUISE:
-    #         accel = self._velocity_controller.compute_input(v_ego)
-    #     else:
-    #         leader = vehicles[self.vehicle.get_current_leader_id()]
-    #         accel = self._compute_accel_to_a_leader(leader)
-    #     accel = self._saturate_accel(accel)
-    #     return accel
-
-    # def compute_reference_gap(self, vel: float = None) -> float:
-    #     if vel is None:
-    #         vel = self.vehicle.get_vel()
-    #     return self._time_headway * vel + self._standstill_distance
 
     def compute_acceleration(self, vehicles: Mapping[int, base.BaseVehicle],
                              leader_id: int) -> float:
@@ -78,23 +41,23 @@ class LongitudinalController:
             new_state = self.States.CRUISE
         else:
             leader = vehicles[leader_id]
-            if (self.vehicle.is_in_a_platoon()
-                    and self.vehicle.get_platoon().contains_vehicle(leader_id)):
-                new_state = self.States.VEHICLE_FOLLOWING
-            else:
-                is_leader_too_fast = leader.get_vel() > 1.1 * v_ff
-                if self._state == self.States.VEHICLE_FOLLOWING:
-                    if (is_leader_too_fast
-                            or (self.vehicle.has_origin_lane_leader_changed()
-                                and self._is_vehicle_far_ahead(leader))):
-                        new_state = self.States.CRUISE
-                    else:
-                        new_state = self.States.VEHICLE_FOLLOWING
+            # if (self.vehicle.is_in_a_platoon()
+            #         and self.vehicle.get_platoon().contains_vehicle(leader_id)):
+            #     new_state = self.States.VEHICLE_FOLLOWING
+            # else:
+            is_leader_too_fast = leader.get_vel() > 1.1 * v_ff
+            if self._state == self.States.VEHICLE_FOLLOWING:
+                if (is_leader_too_fast
+                        or (self.vehicle.has_origin_lane_leader_changed()
+                            and self._is_vehicle_far_ahead(leader))):
+                    new_state = self.States.CRUISE
                 else:
-                    if self._is_vehicle_far_ahead(leader) or is_leader_too_fast:
-                        new_state = self.States.CRUISE
-                    else:
-                        new_state = self.States.VEHICLE_FOLLOWING
+                    new_state = self.States.VEHICLE_FOLLOWING
+            else:
+                if self._is_vehicle_far_ahead(leader) or is_leader_too_fast:
+                    new_state = self.States.CRUISE
+                else:
+                    new_state = self.States.VEHICLE_FOLLOWING
 
         # Transition back to cruising
         if new_state == self.States.CRUISE and new_state != self._state:

@@ -283,6 +283,10 @@ class VehicleGroup:
         for vehicle in self.vehicles.values():
             vehicle.make_connected()
 
+    def force_state(self, states_by_vehicle: Mapping[str, np.ndarray]):
+        for veh_id, veh in self.vehicles.items():
+            veh.force_state(states_by_vehicle[veh.get_name()])
+
     def map_values_to_names(self, values) -> dict[str, Any]:
         """
         Receives variables ordered in the same order as the vehicles were
@@ -524,7 +528,7 @@ class VehicleGroup:
                 veh2 = self.vehicles[ego_vehicle.get_origin_lane_leader_id()
                                      ].get_name()
                 print(f' ==== COLLISION DETECTED ====\n'
-                      f't={self.get_current_time()} between vehicles '
+                      f't={self.get_current_time():.2f} between vehicles '
                       f'{veh1} and {veh2}')
                 raise CollisionException
 

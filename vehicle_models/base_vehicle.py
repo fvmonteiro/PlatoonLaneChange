@@ -27,7 +27,7 @@ class BaseVehicle(ABC):
     _input_idx: dict[str, int]
     _can_change_lanes: bool
     _time: np.ndarray
-    _states: np.ndarray
+    # _states: np.ndarray
     _inputs: np.ndarray
     _iter_counter: int
     _states_history: np.ndarray
@@ -342,11 +342,46 @@ class BaseVehicle(ABC):
     #                       else config.SAFE_TIME_HEADWAY)
     #     self.h_safe_lc = config.get_lane_changing_time_headway(are_connected)
 
+    def set_free_flow_speed(self, v_ff: float) -> None:
+        self._free_flow_speed = v_ff
+
+    def set_name(self, value: str) -> None:
+        self._name = value
+
+    def set_verbose(self, value: bool) -> None:
+        self._is_verbose = value
+
+    def set_initial_state(self, x: float = None, y: float = None,
+                          theta: float = None, v: float = None,
+                          full_state: np.ndarray = None) -> None:
+        """
+        We can either provide each state individually or the full state vector
+        directly. In the later case, the caller must ensure the states are in
+        the right order
+        :param x:
+        :param y:
+        :param theta:
+        :param v:
+        :param full_state:
+        :return:
+        """
+        if full_state is None:
+            self._initial_state = self.create_state_vector(x, y, theta, v)
+        else:
+            self._initial_state = full_state
+        # self._states = self._initial_state
+        # self._states_history[:, 0] = self._initial_state
+        self._target_lane = self.get_current_lane()
+
     def target_origin_lane_leader(self):
         self._leader_id[self._iter_counter] = self.get_origin_lane_leader_id()
 
     def target_virtual_leader(self):
         self._leader_id[self._iter_counter] = self.get_virtual_leader_id()
+
+    def force_state(self, states: np.ndarray):
+        # self._states = states
+        self._states_history[:, self._iter_counter] = states
 
     def make_reset_copy(self, initial_state: np.ndarray = None) -> V:
         """
@@ -395,43 +430,14 @@ class BaseVehicle(ABC):
         new_vehicle._target_lane = self._target_lane
         new_vehicle.reset_simulation_logs()
 
-    def set_free_flow_speed(self, v_ff: float) -> None:
-        self._free_flow_speed = v_ff
-
-    def set_name(self, value: str) -> None:
-        self._name = value
-
-    def set_verbose(self, value: bool) -> None:
-        self._is_verbose = value
-
-    def set_initial_state(self, x: float = None, y: float = None,
-                          theta: float = None, v: float = None,
-                          full_state: np.ndarray = None) -> None:
-        """
-        We can either provide each state individually or the full state vector
-        directly. In the later case, the caller must ensure the states are in
-        the right order
-        :param x:
-        :param y:
-        :param theta:
-        :param v:
-        :param full_state:
-        :return:
-        """
-        if full_state is None:
-            self._initial_state = self.create_state_vector(x, y, theta, v)
-        else:
-            self._initial_state = full_state
-        self._states = self._initial_state
-        self._target_lane = self.get_current_lane()
-
     def copy_initial_state(self, initial_state: np.ndarray) -> None:
         if len(initial_state) != self._n_states:
             raise ValueError('Wrong size of initial state vector ({} instead'
                              'of {})'.format(len(initial_state),
                                              self._n_states))
         self._initial_state = initial_state
-        self._states = self._initial_state
+        # self._states_history[:, 0] = initial_state
+        # self._states = self._initial_state
         # self._target_lane = self.get_current_lane()
 
     def set_mode(self, mode: modes.VehicleMode) -> None:
@@ -461,7 +467,7 @@ class BaseVehicle(ABC):
         """
         self._iter_counter += 1
         self._time[self._iter_counter] = time
-        self._states = states
+        # self._states = states
         self._states_history[:, self._iter_counter] = states
         self._inputs = np.zeros(self._n_inputs)
         if len(optimal_inputs) > 0:
@@ -734,15 +740,17 @@ class BaseVehicle(ABC):
             gap_to_lo = np.inf
         is_safe_to_orig_lane_leader = gap_to_lo + margin >= orig_leader_safe_gap
 
-        dest_leader_safe_gap = self.compute_reference_gap(
-            self.h_safe_destination_leader)
         if self.has_destination_lane_leader():
             dest_lane_leader = vehicles[self.get_destination_lane_leader_id()]
             gap_to_ld = BaseVehicle.compute_a_gap(dest_lane_leader, self)
             dest_lane_leader_vel = dest_lane_leader.get_vel()
+            dest_leader_safe_gap = self.compute_safe_lane_change_gap(
+                self.h_safe_destination_leader, dest_lane_leader_vel,
+                dest_lane_leader.brake_max, is_other_ahead=True)
         else:
             gap_to_ld = np.inf
             dest_lane_leader_vel = np.inf
+            dest_leader_safe_gap = 0
         is_safe_to_dest_lane_leader = gap_to_ld + margin >= dest_leader_safe_gap
 
         # is_safe_to_dest_lane_follower = True
@@ -750,8 +758,9 @@ class BaseVehicle(ABC):
             dest_lane_follower = vehicles[
                 self.get_destination_lane_follower_id()]
             gap_from_fd = BaseVehicle.compute_a_gap(self, dest_lane_follower)
-            fd_safe_gap = dest_lane_follower.compute_reference_gap(
-                self.h_safe_destination_follower)
+            fd_safe_gap = dest_lane_follower.compute_safe_lane_change_gap(
+                self.h_safe_destination_follower, dest_lane_follower.get_vel(),
+                dest_lane_follower.brake_max, is_other_ahead=False)
         else:
             gap_from_fd = np.inf
             fd_safe_gap = 0.
@@ -885,6 +894,20 @@ class BaseVehicle(ABC):
             vel = self.get_vel()
         return h_ref * vel + self.c
 
+    def compute_safe_lane_change_gap(
+            self, h_safe: float, other_vel: float, other_max_brake: float,
+            is_other_ahead: bool) -> float:
+        g_ref = self.compute_reference_gap(h_safe)
+        if is_other_ahead:
+            leader_vel, leader_brake = other_vel, other_max_brake
+            follower_vel, follower_brake = self.get_vel(), self.brake_max
+        else:
+            leader_vel, leader_brake = self.get_vel(), self.brake_max
+            follower_vel, follower_brake = other_vel, other_max_brake
+        rel_vel_term = (follower_vel ** 2 / 2 / abs(follower_brake)
+                        - leader_vel ** 2 / 2 / abs(leader_brake))
+        return g_ref + max(rel_vel_term, 0)
+
     def compute_derivatives(self) -> None:
         self._derivatives = np.zeros(self._n_states)
         theta = self.get_theta()
@@ -906,8 +929,10 @@ class BaseVehicle(ABC):
 
     def update_states(self, next_time) -> None:
         dt = next_time - self.get_current_time()
-        self._states = self._states + self._derivatives * dt
-        self._states_history[:, self._iter_counter + 1] = self._states
+        # self._states = self._states + self._derivatives * dt
+        self._states_history[:, self._iter_counter + 1] = (
+            self._states_history[:, self._iter_counter] + self._derivatives * dt
+        )
         self._time[self._iter_counter + 1] = next_time
         # self._iter_counter += 1
 

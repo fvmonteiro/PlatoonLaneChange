@@ -572,7 +572,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
         print(f"Node {node} was not found in the graph. Adding it "
               f"'unsolved' file...")
         n_platoon = self.platoon.get_size()
-        file_name = "_".join(["unsolved_x0", str(n_platoon),
+        file_name = "_".join(["python_x0", str(n_platoon),
                               "vehicles.csv"])
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                                  "vehicle_state_graphs", file_name)
