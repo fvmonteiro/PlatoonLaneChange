@@ -158,6 +158,19 @@ class VehicleGroup:
     def get_vehicle_by_name(self, name: str) -> base.BaseVehicle:
         return self.vehicles[self.name_to_id[name]]
 
+    def get_platoon_vehicle_by_position(self, pos: int) -> base.BaseVehicle:
+        """
+        Gets the vehicle at the given position in the platoon
+        :param pos:
+        :return:
+        """
+        cl_vehicles = self.get_closed_loop_control_vehicles()
+
+        for veh in cl_vehicles:
+            if veh.is_in_a_platoon():
+                return veh.get_platoon().get_vehicle_by_position(pos)
+        raise RuntimeError("There are not platoons in this vehicle group.")
+
     def get_optimal_control_vehicles(self) -> list[fsv.OptimalControlVehicle]:
         return self.get_vehicles_of_type(fsv.OptimalControlVehicle)
 
@@ -183,9 +196,8 @@ class VehicleGroup:
         cl_vehicles = self.get_closed_loop_control_vehicles()
 
         for veh in cl_vehicles:
-            platoon = veh.get_platoon()
-            if platoon is not None:
-                return platoon.get_strategy()
+            if veh.is_in_a_platoon():
+                return veh.get_platoon().get_strategy()
         return None
 
     def get_lc_end_times(self) -> list[float]:

@@ -21,6 +21,7 @@ class LongitudinalController:
         self.vehicle = vehicle
         self._kg = 0.2
         self._kv = 0.5
+        self._ka = 0.1
         self._threshold_param = 2.
         self._state = self.States.NOT_INITIALIZED
         self._velocity_controller = VelocityController(vehicle.brake_max,
@@ -175,17 +176,26 @@ class LongitudinalController:
     ) -> float:
         v_ego = self.vehicle.get_vel()
         gap = base.BaseVehicle.compute_a_gap(other_vehicle, self.vehicle)
-        return self._compute_gap_control(gap, v_ego, other_vehicle.get_vel())
+        if (self.vehicle.is_in_a_platoon() and other_vehicle.is_in_a_platoon()
+            and (self.vehicle.get_platoon().get_id()
+                 == other_vehicle.get_platoon().get_id())):
+            accel_diff = (other_vehicle.get_an_input_by_name("a")
+                          - self.vehicle.get_an_input_by_name("a"))
+        else:
+            accel_diff = 0  # to make the difference zero
+        return self._compute_gap_control(gap, v_ego, other_vehicle.get_vel(),
+                                         accel_diff)
 
     def _compute_velocity_control(self, v_ff: float,
                                   v_ego: float) -> float:
         return self._kv * (v_ff - v_ego)
 
     def _compute_gap_control(self, gap: float, v_ego: float,
-                             v_leader: float) -> float:
+                             v_leader: float, accel_diff: float = 0) -> float:
         gap_ref = self.vehicle.compute_reference_gap(self._time_headway,
                                                      v_ego)
-        return self._kg * (gap - gap_ref) + self._kv * (v_leader - v_ego)
+        return (self._kg * (gap - gap_ref) + self._kv * (v_leader - v_ego)
+                + self._ka * accel_diff)
 
 
 class VelocityController:

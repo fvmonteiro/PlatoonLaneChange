@@ -318,7 +318,7 @@ def explore_collision_scenarios():
 
 def main():
     # test_1()
-    n_platoon = 3
+    n_platoon = 4
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
 
@@ -353,10 +353,7 @@ def main():
 
     start_time = time.time()
 
-    # print("===== CREATING SMALL-SCALE GRAPHS ONLY ======")
-
     explore_collision_scenarios()
-
     # graph_tools.GraphCreator.explore_unsolved_nodes(n_platoon,
     #                                                 graph_includes_fd)
 

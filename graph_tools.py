@@ -40,7 +40,6 @@ def _simulate_till_lane_change(
     :param next_platoon_position_to_coop:
     :return:
     """
-
     vehicle_group.set_verbose(False)
     vehicle_group.set_vehicles_initial_states_from_array(
         initial_state)
@@ -66,9 +65,16 @@ def _simulate_till_lane_change(
 
     next_vehs_to_move = (vehicle_group.get_next_vehicles_to_change_lane(
         next_platoon_positions_to_move))
+
+    # We skip the simulation if no cooperation and the front most lc vehicle
+    # cannot start a lane change
     if next_platoon_position_to_coop < 0:
         front_most_vehicle = max([veh for veh in next_vehs_to_move],
                                  key=lambda x: x.get_x())
+        # front_most_vehicle.check_surrounding_gaps_safety(vehicle_group.vehicles)
+        # front_most_vehicle.get_is_lane_change_gap_suitable()
+        # if not front_most_vehicle.get_is_lane_change_gap_suitable():
+        #     return False
         ld = vehicle_group.get_vehicle_by_name("ld")
         if ld.get_x() < front_most_vehicle.get_x():
             return False
@@ -112,8 +118,11 @@ class VehicleStateGraph:
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                                  "vehicle_state_graphs",
                                  file_name + ".pickle")
-        with open(file_path, "rb") as f:
-            vsg: VehicleStateGraph = pickle.load(f)
+        try:
+            with open(file_path, "rb") as f:
+                vsg: VehicleStateGraph = pickle.load(f)
+        except FileNotFoundError:
+            vsg = VehicleStateGraph()
         return vsg
 
     @staticmethod
@@ -211,7 +220,8 @@ class VehicleStateGraph:
     def mark_terminal_node(self, node: configuration.QuantizedState) -> None:
         self.states_graph.nodes[node]["is_terminal"] = True
 
-    def delete_all_successors(self, node: configuration.QuantizedState):
+    def delete_all_successors(self, node: configuration.QuantizedState,
+                              visited_nodes: set[configuration.QuantizedState]):
         """
         Deletes all children of the given node if they don't have
         any other ancestors
@@ -219,6 +229,7 @@ class VehicleStateGraph:
         nodes_to_delete = set()
         self._get_all_successor_nodes(node, nodes_to_delete)
         self.states_graph.remove_nodes_from(nodes_to_delete)
+        visited_nodes -= nodes_to_delete
 
     def find_minimum_cost_strategy_from_node(
             self, starting_node: configuration.QuantizedState, cost_name: str
@@ -260,14 +271,14 @@ class VehicleStateGraph:
     def register_quantization_boundaries(self):
         qx0 = self._initial_states
         qx0_split = VehicleStateGraph.split_matrix(qx0)
-        x_lo = np.array(qx0_split["lo"])[:,
-               fsv.FourStateVehicle.get_idx_of_state("x")]
-        x_ld = np.array(qx0_split["ld"])[:,
-               fsv.FourStateVehicle.get_idx_of_state("x")]
-        v_lo = np.array(qx0_split["lo"])[:,
-               fsv.FourStateVehicle.get_idx_of_state("v")]
-        v_ld = np.array(qx0_split["ld"])[:,
-               fsv.FourStateVehicle.get_idx_of_state("v")]
+        x_lo = np.array(qx0_split["lo"])[
+               :, fsv.FourStateVehicle.get_idx_of_state("x")]
+        x_ld = np.array(qx0_split["ld"])[
+               :, fsv.FourStateVehicle.get_idx_of_state("x")]
+        v_lo = np.array(qx0_split["lo"])[
+               :, fsv.FourStateVehicle.get_idx_of_state("v")]
+        v_ld = np.array(qx0_split["ld"])[
+               :, fsv.FourStateVehicle.get_idx_of_state("v")]
         bounds = {
             "max_x_lo": int(np.max(x_lo)),
             "min_x_lo": int(np.min(x_lo)),
@@ -347,6 +358,9 @@ class PlatoonLCTracker:
             self._dest_lane_vehicles.pop()
             self._remaining_vehicles.add(p)
 
+    def is_lane_change_done(self):
+        return len(self._remaining_vehicles) == 0
+
 
 class GraphCreator:
 
@@ -364,7 +378,13 @@ class GraphCreator:
                               "vehicles.csv"])
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                                  "vehicle_state_graphs", file_name)
+        # Load the initial states found during simulation, and keep only
+        # unique values in the file
         df: pd.DataFrame = pd.read_csv(file_path)
+        df.drop_duplicates(inplace=True)
+        df.to_csv(file_path, index=False)
+        print(f"{df.shape[0]} initial states")
+
         states_idx = [i for i in range(len(df.columns))
                       if df.columns[i].startswith("x")]
         graph_creator = GraphCreator(n_platoon, has_fd)
@@ -372,6 +392,7 @@ class GraphCreator:
         visited_nodes = set(
             graph_creator.vehicle_state_graph.states_graph.nodes)
         for index, row in df.iterrows():
+            print(index)
             free_flow_speeds = VehicleStateGraph.order_values(
                 row["orig"], [row["platoon"]] * n_platoon, row["dest"])
             node = tuple(row.iloc[states_idx].to_numpy(int))
@@ -381,8 +402,8 @@ class GraphCreator:
         graph_creator.save_quantization_parameters_to_file()
         graph_creator.save_minimum_cost_strategies_to_json()
 
-        df = df.iloc[0:0]  # erase data
-        df.to_csv(file_path, index=False)
+        # df = df.iloc[0:0]  # erase data
+        # df.to_csv(file_path, index=False)
 
     def get_n_vehicles_per_state(self):
         return self._n_platoon + 2 + self._has_fd
@@ -479,10 +500,14 @@ class GraphCreator:
                 "[VehicleStatesGraph] Chosen mode is not valid. Must be "
                 "'w', 'ao' or 'as'")
 
-        if mode.startswith("a"):
+        if mode in {"as", "ao"}:
             self.load_a_graph()
 
-        visited_states = set()
+        if mode == "as":
+            visited_states = set(self.vehicle_state_graph.states_graph.nodes)
+        else:
+            visited_states = set()
+
         all_velocities = self._create_all_initial_speeds(
             vel_orig_lane, vel_ff_platoon, vel_dest_lane)
         repeated_initial_states_counter = 0
@@ -525,12 +550,14 @@ class GraphCreator:
             if mode.endswith("s"):
                 return 0
             elif mode.endswith("o"):
-                self.vehicle_state_graph.delete_all_successors(initial_state)
+                self.vehicle_state_graph.delete_all_successors(initial_state,
+                                                               visited_states)
             else:
                 warnings.warn(
                     "[VehicleStatesGraph] found a repeated initial "
                     "state in writing mode. Overwriting it...")
-                self.vehicle_state_graph.delete_all_successors(initial_state)
+                self.vehicle_state_graph.delete_all_successors(initial_state,
+                                                               visited_states)
         n1 = self.vehicle_state_graph.states_graph.number_of_nodes()
         self.vehicle_state_graph.add_initial_node(initial_state)
         # BFS exploration
@@ -574,6 +601,66 @@ class GraphCreator:
             pickle.dump(roots_with_issues, f, pickle.HIGHEST_PROTOCOL)
             print(f"{len(roots_with_issues)} issues saved in file {file_path}")
         return strategy_map
+
+    def explore_given_path(
+            self, root: configuration.QuantizedState,
+            collision_node: configuration.QuantizedState,
+            tracker: PlatoonLCTracker, free_flow_speeds: Sequence[float],
+            last_to_move: set[int], last_to_coop: int):
+        """
+
+        :param root: The root node (before lane changes) being explored
+        :param collision_node: The node (state configuration) that lead to the
+         collision
+        :param tracker:
+        :param free_flow_speeds:
+        :param last_to_move:
+        :param last_to_coop:
+        :return:
+        """
+        # Simulate until the collision state
+        next_node = root
+        for i in range(len(tracker.get_lane_change_order())):
+            next_pos_to_coop = tracker.get_cooperating_order()[i]
+            next_positions_to_move = tracker.get_lane_change_order()[i]
+            next_initial_state = self.state_quantizer.dequantize_state(
+                next_node)
+            vehicle_group = self._create_vehicle_group()
+            success = _simulate_till_lane_change(
+                vehicle_group, next_initial_state,
+                free_flow_speeds, next_positions_to_move,
+                next_pos_to_coop
+            )
+            vehicle_group.truncate_simulation_history()
+            data = vehicle_group.to_dataframe()
+            analysis.plot_trajectory(data)
+            analysis.plot_platoon_lane_change(data)
+            if success:
+                next_node = (
+                    self.state_quantizer.quantize_without_bounds(
+                        vehicle_group.get_state_by_vehicle())
+                )
+            else:
+                raise RuntimeError(
+                    "Given path (previously explored with success) "
+                    "lead to a failure")
+
+        # Double checking:
+        if next_node != collision_node:
+            warnings.warn("Didn't get to collision node")
+        vehicle_group = self._create_vehicle_group()
+        next_initial_state = self.state_quantizer.dequantize_state(
+            next_node)
+        try:
+            _simulate_till_lane_change(
+                vehicle_group, next_initial_state, free_flow_speeds,
+                last_to_move, last_to_coop)
+        except vg.CollisionException:
+            print("collision found")
+        vehicle_group.truncate_simulation_history()
+        data = vehicle_group.to_dataframe()
+        analysis.plot_trajectory(data)
+        analysis.plot_platoon_lane_change(data)
 
     @staticmethod
     def _create_all_initial_speeds(
@@ -705,115 +792,139 @@ class GraphCreator:
             if quantized_state in visited_states:
                 continue
             visited_states.add(quantized_state)
-            remaining_vehicles = tracker.get_remaining_vehicles()
-            if len(remaining_vehicles) == 0:
+            # remaining_vehicles = tracker.get_remaining_vehicles()
+            if tracker.is_lane_change_done():
                 self.vehicle_state_graph.mark_terminal_node(quantized_state)
                 continue
 
             next_initial_state = self.state_quantizer.dequantize_state(
                 quantized_state)
-            for next_pos_to_coop in tracker.get_possible_cooperative_vehicles():
-                for starting_next_pos_to_move in remaining_vehicles:
-                    next_positions_to_move = set()
-                    for p in range(starting_next_pos_to_move, self._n_platoon):
-                        if p not in remaining_vehicles:
-                            continue
-                        next_positions_to_move = next_positions_to_move | {p}
-                        vehicle_group = self._create_vehicle_group()
-                        try:
-                            success = _simulate_till_lane_change(
-                                vehicle_group, next_initial_state,
-                                free_flow_speeds, next_positions_to_move,
-                                next_pos_to_coop
-                            )
-                        except vg.CollisionException:
-                            GraphCreator._save_collision_scenario_info(
-                                self._n_platoon, root[1], quantized_state,
-                                tracker, free_flow_speeds,
-                                next_positions_to_move, next_pos_to_coop
-                            )
-                            success = False
-                        # vehicle_group.truncate_simulation_history()
-                        # data = vehicle_group.to_dataframe()
-                        # analysis.plot_trajectory(data)
-                        # analysis.plot_platoon_lane_change(data)
-                        if success:
-                            next_tracker = copy.deepcopy(tracker)
-                            next_tracker.move_vehicles(next_positions_to_move,
-                                                       next_pos_to_coop)
-                            next_quantized_state = (
-                                self.state_quantizer.quantize_without_bounds(
-                                    vehicle_group.get_state_by_vehicle())
-                            )
-                            transition_time = vehicle_group.get_current_time()
-                            accel_cost = (
-                                vehicle_group.compute_acceleration_cost())
-                            self.vehicle_state_graph.update_graph(
-                                quantized_state, next_quantized_state,
-                                transition_time, accel_cost,
-                                next_positions_to_move, next_pos_to_coop)
-                            nodes.appendleft((next_tracker,
-                                              next_quantized_state))
+            next_maneuver_steps = self._determine_all_next_maneuver_steps(
+                tracker, next_initial_state)
+            for next_pos_to_coop, next_positions_to_move in next_maneuver_steps:
+                vehicle_group = self._create_vehicle_group()
+                try:
+                    success = _simulate_till_lane_change(
+                        vehicle_group, next_initial_state,
+                        free_flow_speeds, next_positions_to_move,
+                        next_pos_to_coop
+                    )
+                except vg.CollisionException:
+                    GraphCreator._save_collision_scenario_info(
+                        self._n_platoon, root[1], quantized_state,
+                        tracker, free_flow_speeds,
+                        next_positions_to_move, next_pos_to_coop
+                    )
+                    success = False
+                # vehicle_group.truncate_simulation_history()
+                # data = vehicle_group.to_dataframe()
+                # analysis.plot_trajectory(data)
+                # analysis.plot_platoon_lane_change(data)
+                if success:
+                    next_tracker = copy.deepcopy(tracker)
+                    next_tracker.move_vehicles(next_positions_to_move,
+                                               next_pos_to_coop)
+                    next_quantized_state = (
+                        self.state_quantizer.quantize_without_bounds(
+                            vehicle_group.get_state_by_vehicle())
+                    )
+                    transition_time = vehicle_group.get_current_time()
+                    accel_cost = (
+                        vehicle_group.compute_acceleration_cost())
+                    self.vehicle_state_graph.update_graph(
+                        quantized_state, next_quantized_state,
+                        transition_time, accel_cost,
+                        next_positions_to_move, next_pos_to_coop)
+                    nodes.appendleft((next_tracker,
+                                      next_quantized_state))
 
-    def explore_given_path(
-            self, root: configuration.QuantizedState,
-            collision_node: configuration.QuantizedState,
-            tracker: PlatoonLCTracker, free_flow_speeds: Sequence[float],
-            last_to_move: set[int], last_to_coop: int):
-        """
+            # for next_pos_to_coop in tracker.get_possible_cooperative_vehicles():
+            #     for starting_next_pos_to_move in remaining_vehicles:
+            #         next_positions_to_move = set()
+            #         for p in range(starting_next_pos_to_move, self._n_platoon):
+            #             if p not in remaining_vehicles:
+            #                 continue
+            #             next_positions_to_move = next_positions_to_move | {p}
+            #             vehicle_group = self._create_vehicle_group()
+            #             try:
+            #                 success = _simulate_till_lane_change(
+            #                     vehicle_group, next_initial_state,
+            #                     free_flow_speeds, next_positions_to_move,
+            #                     next_pos_to_coop
+            #                 )
+            #             except vg.CollisionException:
+            #                 GraphCreator._save_collision_scenario_info(
+            #                     self._n_platoon, root[1], quantized_state,
+            #                     tracker, free_flow_speeds,
+            #                     next_positions_to_move, next_pos_to_coop
+            #                 )
+            #                 success = False
+            #             # vehicle_group.truncate_simulation_history()
+            #             # data = vehicle_group.to_dataframe()
+            #             # analysis.plot_trajectory(data)
+            #             # analysis.plot_platoon_lane_change(data)
+            #             if success:
+            #                 next_tracker = copy.deepcopy(tracker)
+            #                 next_tracker.move_vehicles(next_positions_to_move,
+            #                                            next_pos_to_coop)
+            #                 next_quantized_state = (
+            #                     self.state_quantizer.quantize_without_bounds(
+            #                         vehicle_group.get_state_by_vehicle())
+            #                 )
+            #                 transition_time = vehicle_group.get_current_time()
+            #                 accel_cost = (
+            #                     vehicle_group.compute_acceleration_cost())
+            #                 self.vehicle_state_graph.update_graph(
+            #                     quantized_state, next_quantized_state,
+            #                     transition_time, accel_cost,
+            #                     next_positions_to_move, next_pos_to_coop)
+            #                 nodes.appendleft((next_tracker,
+            #                                   next_quantized_state))
 
-        :param root: The root node (before lane changes) being explored
-        :param collision_node: The node (state configuration) that lead to the
-         collision
-        :param tracker:
-        :param free_flow_speeds:
-        :param last_to_move:
-        :param last_to_coop:
-        :return:
-        """
-        # Simulate until the collision state
-        next_node = root
-        for i in range(len(tracker.get_lane_change_order())):
-            next_pos_to_coop = tracker.get_cooperating_order()[i]
-            next_positions_to_move = tracker.get_lane_change_order()[i]
-            next_initial_state = self.state_quantizer.dequantize_state(
-                next_node)
-            vehicle_group = self._create_vehicle_group()
-            success = _simulate_till_lane_change(
-                vehicle_group, next_initial_state,
-                free_flow_speeds, next_positions_to_move,
-                next_pos_to_coop
-            )
-            vehicle_group.truncate_simulation_history()
-            data = vehicle_group.to_dataframe()
-            analysis.plot_trajectory(data)
-            analysis.plot_platoon_lane_change(data)
-            if success:
-                next_node = (
-                    self.state_quantizer.quantize_without_bounds(
-                        vehicle_group.get_state_by_vehicle())
-                )
-            else:
-                raise RuntimeError(
-                    "Given path (previously explored with success) "
-                    "lead to a failure")
-
-        # Double checking:
-        if next_node != collision_node:
-            warnings.warn("Didn't get to collision node")
+    def _determine_all_next_maneuver_steps(
+            self, tracker: PlatoonLCTracker, initial_state: np.ndarray
+    ) -> list[tuple[int, set[int]]]:
         vehicle_group = self._create_vehicle_group()
-        next_initial_state = self.state_quantizer.dequantize_state(
-            next_node)
-        try:
-            _simulate_till_lane_change(
-                vehicle_group, next_initial_state, free_flow_speeds,
-                last_to_move, last_to_coop)
-        except vg.CollisionException:
-            print("collision found")
-        vehicle_group.truncate_simulation_history()
-        data = vehicle_group.to_dataframe()
-        analysis.plot_trajectory(data)
-        analysis.plot_platoon_lane_change(data)
+        vehicle_group.set_vehicles_initial_states_from_array(initial_state)
+        vehicle_group.prepare_to_start_simulation(1)
+        vehicle_group.update_surrounding_vehicles()
+        remaining_vehicles = sorted(tracker.get_remaining_vehicles())
+
+        next_maneuver_steps: list[tuple[int, set[int]]] = []
+        for next_pos_to_coop in tracker.get_possible_cooperative_vehicles():
+            if next_pos_to_coop < 0:
+                # We consider fewer cases when there is no cooperation
+                for i in range(len(remaining_vehicles)):
+                    front_most_next_pos_to_move = remaining_vehicles[i]
+                    front_most_vehicle = (
+                        vehicle_group.get_platoon_vehicle_by_position(
+                            front_most_next_pos_to_move)
+                    )
+                    ld = vehicle_group.get_vehicle_by_name("ld")
+                    # We only accept cases where the front most vehicle is
+                    # behind the dest lane leader
+                    if ld.get_x() > front_most_vehicle.get_x():
+                        next_positions_to_move = set()
+                        for j in range(i, len(remaining_vehicles)):
+                            next_positions_to_move = (next_positions_to_move
+                                                      | {remaining_vehicles[j]})
+                            next_maneuver_steps.append(
+                                (next_pos_to_coop, next_positions_to_move))
+                    front_most_vehicle.check_surrounding_gaps_safety(
+                        vehicle_group.vehicles, ignore_orig_lane_leader=True)
+                    # We don't need to include cases that do not include the
+                    # current front most vehicle if it is at a safe position
+                    if front_most_vehicle.get_is_lane_change_safe():
+                        break
+            else:
+                for i in range(len(remaining_vehicles)):
+                    next_positions_to_move = set()
+                    for j in range(i, len(remaining_vehicles)):
+                        next_positions_to_move = (next_positions_to_move
+                                                  | {remaining_vehicles[j]})
+                        next_maneuver_steps.append(
+                            (next_pos_to_coop, next_positions_to_move.copy()))
+        return next_maneuver_steps
 
     # sill not sure where to keep this method (or any of the error logging
     # methods)

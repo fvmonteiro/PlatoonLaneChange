@@ -722,17 +722,22 @@ class BaseVehicle(ABC):
             return config.SAFE_TIME_HEADWAY
 
     def check_surrounding_gaps_safety(
-            self, vehicles: Mapping[int, BaseVehicle]) -> None:
+            self, vehicles: Mapping[int, BaseVehicle],
+            ignore_orig_lane_leader: bool = False) -> None:
         margin = 1e-1
 
-        orig_leader_safe_gap = self.compute_reference_gap(
-            self.h_safe_origin_leader)
-        if self.has_origin_lane_leader():
-            orig_lane_leader = vehicles[self.get_origin_lane_leader_id()]
-            gap_to_lo = BaseVehicle.compute_a_gap(orig_lane_leader, self)
+        if ignore_orig_lane_leader:
+            is_safe_to_orig_lane_leader = True
         else:
-            gap_to_lo = np.inf
-        is_safe_to_orig_lane_leader = gap_to_lo + margin >= orig_leader_safe_gap
+            orig_leader_safe_gap = self.compute_reference_gap(
+                self.h_safe_origin_leader)
+            if self.has_origin_lane_leader():
+                orig_lane_leader = vehicles[self.get_origin_lane_leader_id()]
+                gap_to_lo = BaseVehicle.compute_a_gap(orig_lane_leader, self)
+            else:
+                gap_to_lo = np.inf
+            is_safe_to_orig_lane_leader = (gap_to_lo + margin
+                                           >= orig_leader_safe_gap)
 
         dest_leader_safe_gap = self.compute_reference_gap(
             self.h_safe_destination_leader)
