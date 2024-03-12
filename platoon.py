@@ -25,8 +25,22 @@ class Platoon:
         self._dest_lane_leader_id = -1  # the non-platoon vehicle behind which
         # the entire platoon move
 
+    def get_id(self) -> int:
+        return self._id
+
     def get_size(self) -> int:
         return len(self.vehicles)
+
+    def get_vehicle_by_position(self, pos: int) -> fsv.FourStateVehicle:
+        """
+        Gets the vehicle at the given position in the platoon. The vehicle
+        position in the platoon is set at creation time. The vehicle order in
+        the platoon's vehicle list is not updated even if vehicles change
+        order during the lane change.
+        :param pos:
+        :return:
+        """
+        return self.vehicles[pos]
 
     def get_platoon_leader(self) -> fsv.FourStateVehicle:
         """
@@ -35,7 +49,7 @@ class Platoon:
         order
         :return:
         """
-        return self.vehicles[0]
+        return self.get_vehicle_by_position(0)
 
     def get_platoon_leader_id(self) -> int:
         return self.get_platoon_leader().get_id()
@@ -47,7 +61,7 @@ class Platoon:
         order
         :return:
         """
-        return self.vehicles[-1]
+        return self.get_vehicle_by_position(-1)
 
     def get_vehicle_ids(self) -> list[int]:
         return [veh.get_id() for veh in self.vehicles]

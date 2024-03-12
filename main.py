@@ -319,7 +319,7 @@ def explore_collision_scenarios():
 
 def main():
     # test_1()
-    n_platoon = 3
+    n_platoon = 4
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
 
@@ -362,6 +362,9 @@ def main():
     # lcsm.set_parameters(n_platoon, False, {}, {})
     # lcsm.run_scenarios_from_file()
     # explore_collision_scenarios()
+
+    # graph_tools.GraphCreator.explore_unsolved_nodes(n_platoon,
+    #                                                 graph_includes_fd)
 
     v_dest_idx = 0
     lc_time = 1
