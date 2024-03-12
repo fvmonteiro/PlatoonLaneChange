@@ -112,8 +112,11 @@ class VehicleStateGraph:
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                                  "vehicle_state_graphs",
                                  file_name + ".pickle")
-        with open(file_path, "rb") as f:
-            vsg: VehicleStateGraph = pickle.load(f)
+        try:
+            with open(file_path, "rb") as f:
+                vsg: VehicleStateGraph = pickle.load(f)
+        except FileNotFoundError:
+            vsg = VehicleStateGraph()
         return vsg
 
     @staticmethod
@@ -140,7 +143,13 @@ class VehicleStateGraph:
     @staticmethod
     def split_state_vector(values: Sequence[Any]) -> dict[str, Any]:
         # TODO remove hard coded indices?
-        return {"lo": values[:4], "platoon": values[4:-4], "ld": values[-4:]}
+        n_states = fsv.FourStateVehicle.get_n_states()
+        n_vehicles = len(values) // n_states
+        by_vehicle = {"lo": values[:n_states], "ld": values[-n_states:]}
+        for idx in range(n_vehicles - 2):
+            by_vehicle["p" + str(idx+1)] = values[n_states * (idx + 1)
+                                                  : n_states * (idx + 2)]
+        return by_vehicle
 
     @staticmethod
     def split_matrix(matrix: Iterable[Sequence[Any]]) -> dict[str, Any]:
@@ -168,9 +177,8 @@ class VehicleStateGraph:
     def get_quantization_parameters(self) -> dict[str, float]:
         return self._quantization_parameters
 
-    def get_state_quantizer(self, n_vehicles: int) -> StateQuantizer:
-        return StateQuantizer(
-            n_vehicles, self._quantization_parameters)
+    def get_state_quantizer(self) -> StateQuantizer:
+        return StateQuantizer(self._quantization_parameters)
 
     def get_successor_given_first_movers(
             self, source: configuration.QuantizedState,
@@ -211,14 +219,16 @@ class VehicleStateGraph:
     def mark_terminal_node(self, node: configuration.QuantizedState) -> None:
         self.states_graph.nodes[node]["is_terminal"] = True
 
-    def delete_all_successors(self, node: configuration.QuantizedState):
+    def delete_all_successors(self, node: configuration.QuantizedState
+                              ) -> set[configuration.QuantizedState]:
         """
         Deletes all children of the given node if they don't have
-        any other ancestors
+        any other ancestors. Returns all the deleted nodes.
         """
         nodes_to_delete = set()
         self._get_all_successor_nodes(node, nodes_to_delete)
         self.states_graph.remove_nodes_from(nodes_to_delete)
+        return nodes_to_delete
 
     def find_minimum_cost_strategy_from_node(
             self, starting_node: configuration.QuantizedState, cost_name: str
@@ -260,14 +270,14 @@ class VehicleStateGraph:
     def register_quantization_boundaries(self):
         qx0 = self._initial_states
         qx0_split = VehicleStateGraph.split_matrix(qx0)
-        x_lo = np.array(qx0_split["lo"])[:,
-               fsv.FourStateVehicle.get_idx_of_state("x")]
-        x_ld = np.array(qx0_split["ld"])[:,
-               fsv.FourStateVehicle.get_idx_of_state("x")]
-        v_lo = np.array(qx0_split["lo"])[:,
-               fsv.FourStateVehicle.get_idx_of_state("v")]
-        v_ld = np.array(qx0_split["ld"])[:,
-               fsv.FourStateVehicle.get_idx_of_state("v")]
+        x_lo = np.array(qx0_split["lo"])[
+               :, fsv.FourStateVehicle.get_idx_of_state("x")]
+        x_ld = np.array(qx0_split["ld"])[
+               :, fsv.FourStateVehicle.get_idx_of_state("x")]
+        v_lo = np.array(qx0_split["lo"])[
+               :, fsv.FourStateVehicle.get_idx_of_state("v")]
+        v_ld = np.array(qx0_split["ld"])[
+               :, fsv.FourStateVehicle.get_idx_of_state("v")]
         bounds = {
             "max_x_lo": int(np.max(x_lo)),
             "min_x_lo": int(np.min(x_lo)),
@@ -355,34 +365,67 @@ class GraphCreator:
         self._has_fd = has_fd
         self.vehicle_state_graph = VehicleStateGraph()
         self.state_quantizer: StateQuantizer = (
-            self.vehicle_state_graph.get_state_quantizer(
-                self.get_n_vehicles_per_state()))
+            self.vehicle_state_graph.get_state_quantizer())
 
     @staticmethod
-    def explore_unsolved_nodes(n_platoon: int, has_fd: bool):
-        file_name = "_".join(["unsolved_x0", str(n_platoon),
+    def load_initial_states_seen_in_simulations(
+            n_platoon: int, simulator_name: str) -> tuple[pd.DataFrame, str]:
+        """
+        Reads the file containing the initial states (at lane change intention
+        time) encountered during simulations and returns the dataframe with
+        the data together with the file path. We remove duplicates before
+        returning the dataframe.
+        """
+        if simulator_name not in {"python", "vissim"}:
+            raise ValueError(
+                "Invalid value for parameter 'simulator'. Unsolved nodes must "
+                "be loaded either from python or vissim simulations.")
+        file_name = "_".join([simulator_name + "_x0", str(n_platoon),
                               "vehicles.csv"])
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                                  "vehicle_state_graphs", file_name)
         df: pd.DataFrame = pd.read_csv(file_path)
+        df.drop_duplicates(inplace=True)
+        df.to_csv(file_path, index=False)
+        return df, file_path
+
+    @staticmethod
+    def explore_initial_states_from_simulations(
+            n_platoon: int, has_fd: bool, simulator_name: str, mode: str
+    ) -> None:
+        """
+        Expands the graph to include initial states (at lane change intention
+        time) encountered during simulations.
+        """
+        if mode not in {"ao", "as"}:
+            raise ValueError("Mode must be 'as' or 'ao' when exploring "
+                             "unsolved nodes.")
+        df, file_path = GraphCreator.load_initial_states_seen_in_simulations(
+            n_platoon, simulator_name)
         states_idx = [i for i in range(len(df.columns))
                       if df.columns[i].startswith("x")]
         graph_creator = GraphCreator(n_platoon, has_fd)
         graph_creator.load_a_graph()
-        visited_nodes = set(
+        graph_nodes = set(
             graph_creator.vehicle_state_graph.states_graph.nodes)
+        n_initial_states = len(df.index)
+        print(f"{n_initial_states} initial states to explore.")
+        solved_nodes = set()
         for index, row in df.iterrows():
             free_flow_speeds = VehicleStateGraph.order_values(
                 row["orig"], [row["platoon"]] * n_platoon, row["dest"])
-            node = tuple(row.iloc[states_idx].to_numpy(int))
-            graph_creator.add_all_from_initial_state_to_graph(
-                node, visited_nodes, free_flow_speeds, "as")
+            initial_state = tuple(row.iloc[states_idx].to_numpy(int))
+            if (initial_state
+                    in graph_creator.vehicle_state_graph.get_initial_states()):
+                n_initial_states -= 1
+            if initial_state not in solved_nodes:
+                graph_creator.add_all_from_initial_state_to_graph(
+                    initial_state, graph_nodes, free_flow_speeds, mode)
+                solved_nodes.add(initial_state)
+        print(f"{n_initial_states} *new* initial states explored.")
         graph_creator.save_vehicle_state_graph_to_file()
         graph_creator.save_quantization_parameters_to_file()
         graph_creator.save_minimum_cost_strategies_to_json()
-
-        df = df.iloc[0:0]  # erase data
-        df.to_csv(file_path, index=False)
 
     def get_n_vehicles_per_state(self):
         return self._n_platoon + 2 + self._has_fd
@@ -390,8 +433,7 @@ class GraphCreator:
     def load_a_graph(self):
         vsg = VehicleStateGraph.load_from_file(self._n_platoon, self._has_fd)
         self.vehicle_state_graph = vsg
-        self.state_quantizer = self.vehicle_state_graph.get_state_quantizer(
-            self.get_n_vehicles_per_state())
+        self.state_quantizer = self.vehicle_state_graph.get_state_quantizer()
 
     def save_vehicle_state_graph_to_file(self) -> None:
         self.vehicle_state_graph.save_to_file(self._n_platoon, self._has_fd)
@@ -513,6 +555,24 @@ class GraphCreator:
             print(("skipped" if mode.endswith("s") else "overwrote")
                   + f" initial states: {repeated_initial_states_counter}")
 
+    def recreate_graph(self, vel_ff_platoon: float):
+        visited_states = set()
+        v_idx = fsv.FourStateVehicle.get_idx_of_state("v")
+        all_initial_states = self.vehicle_state_graph.get_initial_states()
+        print(f"Recreating a graph with {len(all_initial_states)} initial "
+              f"states and "
+              f"{self.vehicle_state_graph.states_graph.number_of_nodes()} "
+              f"nodes.")
+        for initial_state in all_initial_states:
+            initial_state_matrix = np.reshape(initial_state, [-1, 4])
+            v0_lo = initial_state_matrix[0, v_idx]
+            v0_dest = initial_state_matrix[-1, v_idx]
+            free_flow_speeds = VehicleStateGraph.order_values(
+                v0_lo, [vel_ff_platoon] * self._n_platoon, v0_dest)
+            self.add_all_from_initial_state_to_graph(
+                initial_state, visited_states, free_flow_speeds, mode="ao"
+            )
+
     def add_all_from_initial_state_to_graph(
             self, initial_state: tuple[int], visited_states: set[tuple],
             free_flow_speeds: Sequence[float], mode: str):
@@ -525,7 +585,10 @@ class GraphCreator:
             if mode.endswith("s"):
                 return 0
             elif mode.endswith("o"):
-                self.vehicle_state_graph.delete_all_successors(initial_state)
+                del_nodes = self.vehicle_state_graph.delete_all_successors(
+                    initial_state)
+                for n in del_nodes:
+                    visited_states.discard(n)
             else:
                 warnings.warn(
                     "[VehicleStatesGraph] found a repeated initial "
@@ -858,11 +921,10 @@ class LaneChangeStrategyManager:
     _empty_initial_state: configuration.QuantizedState = (0,)
 
     def __init__(self, n_platoon: int, has_fd: bool):
-        n_vehicles = n_platoon + 2 + has_fd
+        # n_vehicles = n_platoon + 2 + has_fd
         self.vehicle_state_graph = VehicleStateGraph.load_from_file(
             n_platoon, has_fd)
-        self.state_quantizer = self.vehicle_state_graph.get_state_quantizer(
-            n_vehicles)
+        self.state_quantizer = self.vehicle_state_graph.get_state_quantizer()
         self._initial_state_per_vehicle: \
             dict[int, configuration.QuantizedState] = dict()
 
@@ -1035,7 +1097,7 @@ class StateQuantizer:
     Class to manage quantization of states
     """
 
-    def __init__(self, n_vehicles: int, parameters: dict[str, float],
+    def __init__(self, parameters: dict[str, float],
                  veh_type: type[base.BaseVehicle] = None):
 
         if veh_type is None:
@@ -1048,31 +1110,31 @@ class StateQuantizer:
         self._shift = veh_type.create_state_vector_2(0., -2., 0., 0.)
         self._n_states = veh_type.get_n_states()
         self._zero_idx = veh_type.get_idx_of_state("theta")
+
         # Still not sure if we'll need this [Feb 9]
-        max_y = 1
-        max_theta = 0
-        min_y = -1
-        min_theta = 0
-        self._max = {
-            "lo": veh_type.create_state_vector_2(
-                parameters["max_x_lo"], max_y, max_theta,
-                parameters["max_v_lo"]),
-            "ld": veh_type.create_state_vector_2(
-                parameters["max_x_ld"], max_y, max_theta,
-                parameters["max_v_ld"]),
-            "p": veh_type.create_state_vector_2(
-                np.inf, max_y, max_theta, np.inf)
-        }
-        self._min = {
-            "lo": veh_type.create_state_vector_2(
-                parameters["min_x_lo"], min_y, min_theta,
-                parameters["min_v_lo"]),
-            "ld": veh_type.create_state_vector_2(
-                parameters["min_x_ld"], min_y, min_theta,
-                parameters["min_v_ld"]),
-            "p": veh_type.create_state_vector_2(
-                -np.inf, min_y, min_theta, -np.inf)
-        }
+        if "max_x_lo" in parameters:
+            max_y, min_y = 1, -1
+            max_theta, min_theta = 0, 0
+            self._max = {
+                "lo": veh_type.create_state_vector_2(
+                    parameters["max_x_lo"], max_y, max_theta,
+                    parameters["max_v_lo"]),
+                "ld": veh_type.create_state_vector_2(
+                    parameters["max_x_ld"], max_y, max_theta,
+                    parameters["max_v_ld"]),
+                "p": veh_type.create_state_vector_2(
+                    np.inf, max_y, max_theta, np.inf)
+            }
+            self._min = {
+                "lo": veh_type.create_state_vector_2(
+                    parameters["min_x_lo"], min_y, min_theta,
+                    parameters["min_v_lo"]),
+                "ld": veh_type.create_state_vector_2(
+                    parameters["min_x_ld"], min_y, min_theta,
+                    parameters["min_v_ld"]),
+                "p": veh_type.create_state_vector_2(
+                    -np.inf, min_y, min_theta, -np.inf)
+            }
 
     def quantize_state_array(self, full_system_state: Sequence[float]
                              ) -> configuration.QuantizedState:
@@ -1142,7 +1204,7 @@ class StateQuantizer:
         """
 
         if mode == "min":
-            delta = 0
+            delta = 0.
         elif mode == "mean":
             delta = 0.5
         elif mode == "max":
