@@ -5,7 +5,7 @@ import shutil
 from typing import Union
 
 from vissim_handler.vissim_vehicle import VehicleType, PlatoonLaneChangeStrategy
-from vissim_handler.scenario_handling import ScenarioInfo, is_all_human
+from vissim_handler.scenario_handling import ScenarioInfo
 
 
 @dataclass
@@ -70,22 +70,9 @@ _folders_map: dict[str, _PCInfo] = {
 _network_info_all: dict[str, _NetworkInfo] = {
     "in_and_out":
         _NetworkInfo("in_and_out", "highway_in_and_out_lanes", 3, [3]),
-    "in_and_merge":
-        _NetworkInfo("in_and_merge", "highway_in_and_merge", 3, [3]),
-    "platoon_mandatory_lane_change":
-        _NetworkInfo("platoon_mandatory_lane_change",
-                     "platoon_mandatory_lane_change", 2, [3]),
     "platoon_discretionary_lane_change":
         _NetworkInfo("platoon_discretionary_lane_change",
                      "platoon_discretionary_lane_change", 2, [1, 3]),
-    "risky_lane_changes":
-        _NetworkInfo("risky_lane_changes", "risky_lane_changes", 2, [1, 3]),
-    "traffic_lights":
-        _NetworkInfo("traffic_lights", "traffic_lights_study", 2, []),
-    "i710":
-        _NetworkInfo("i710", "I710-MultiSec-3mi", 3, []),
-    "us101":
-        _NetworkInfo("us101", "US_101", 6, []),
 }
 
 
@@ -169,7 +156,6 @@ class FileHandler:
         if ("in_and_out" in self.get_file_name()
                 and scenario_info.vehicle_percentages is not None
                 and sum(scenario_info.vehicle_percentages.values()) == 0):
-            scenario_info.accepted_risk = None
             base_folder = self.get_network_file_folder()
         else:
             base_folder = self.get_results_base_folder()
@@ -338,17 +324,6 @@ def create_vehs_per_lane_folder_name(vehicles_per_lane: Union[int, str]) -> str:
     return vehs_per_lane_folder
 
 
-def create_accepted_risk_folder_name(accepted_risk: Union[int, None]) -> str:
-    """
-    Creates the name of the folder which contains the results for the given
-    maximum accepted lane change risk
-    :param accepted_risk: simulation"s maximum accepted lane change risk
-    :return: folder name as: [accepted_risk]_accepted_risk
-    """
-    return ("" if accepted_risk is None
-            else str(accepted_risk) + "_accepted_risk")
-
-
 def create_platoon_lc_strategy_folder_name(
         platoon_lc_strategy: PlatoonLaneChangeStrategy) -> str:
     return platoon_lc_strategy.name
@@ -391,10 +366,6 @@ def create_file_path(
     else:
         folder_list.append(create_vehs_per_lane_folder_name(
             scenario_info.vehicles_per_lane))
-    if (scenario_info.accepted_risk is not None
-            and not is_all_human(scenario_info)):
-        folder_list.append(create_accepted_risk_folder_name(
-            scenario_info.accepted_risk))
     if scenario_info.special_case is not None:
         folder_list.append(scenario_info.special_case)
 

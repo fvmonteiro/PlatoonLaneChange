@@ -348,7 +348,7 @@ def main():
 
     start_time = time.time()
 
-    vissim_interface.run_a_platoon_simulation()
+    vissim_interface.run_platoon_warm_up()
 
     end_time = time.time()
     exec_time = datetime.timedelta(seconds=end_time - start_time)
