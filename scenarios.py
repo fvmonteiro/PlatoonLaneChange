@@ -17,8 +17,8 @@ import analysis
 import controllers.optimal_controller as opt_ctrl
 import controllers.optimal_control_costs as occ
 import configuration
-import graph_tools
-import platoon_lane_change_strategies as lc_strategy
+import platoon_functionalities.graph_tools as graph_tools
+import platoon_functionalities.platoon_lane_change_strategies as lc_strategy
 import post_processing as pp
 import vehicle_group as vg
 import vehicle_models.base_vehicle as base
@@ -66,29 +66,31 @@ class LaneChangeScenarioManager:
     def set_plotting(self, value: bool):
         self._has_plots = value
 
-    def run_scenarios_from_file(self, simulator_name: str):
+    def run_scenarios_from_file(self, simulator_name: str,
+                                scenario_number: int = None):
         """
         Runs initial states found during runs in VISSIM
+        :param simulator_name: vissim or python
+        :param scenario_number: For debugging, in case we want to run a single
+         scenario
         """
         df, _ = (
             graph_tools.GraphCreator.load_initial_states_seen_in_simulations(
                 self.n_platoon, simulator_name)
         )
+        if scenario_number is not None:
+            df = df.iloc[scenario_number: scenario_number + 1]
+
         states_idx = [i for i in range(len(df.columns))
                       if df.columns[i].startswith("x")]
         tf = config.sim_time
         strategy_number = 5
-        # scenario_name = self._create_scenario_name(strategy_number)
-        quantization_parameters = {
-            "dx": configuration.DELTA_X, "dy": configuration.DELTA_Y,
-            "dtheta": 1000,  # irrelevant for current approach because we force
-            # q_theta = 0 always
-            "dv": configuration.DELTA_V,
-        }
-        quantizer = graph_tools.StateQuantizer(quantization_parameters)
-        lc_intention_time = 0.1
+
+        lc_intention_time = 0.0
+        quantizer = graph_tools.StateQuantizer()  # assuming default params
         print(f"Running {len(df.index)} scenarios.")
         for index, row in df.iterrows():
+            print(f"Scenario {index}")
             scenario = self.initialize_closed_loop_scenario(strategy_number)
             scenario.set_lc_intention_time(lc_intention_time)
 
@@ -97,23 +99,31 @@ class LaneChangeScenarioManager:
             for i in range(self.n_platoon):
                 free_flow_speeds["p" + str(i+1)] = row["platoon"]
             quantized_initial_state = tuple(row.iloc[states_idx].to_numpy(int))
-            initial_state = quantizer.dequantize_state(quantized_initial_state,
-                                                       "mean")
+            initial_state = quantizer.dequantize_state(quantized_initial_state)
             initial_state_per_vehicle = (
                 graph_tools.VehicleStateGraph.split_state_vector(initial_state)
             )
+            # Helps ensure that
+            initial_state_per_vehicle["p1"][0] = 0
             initial_state_per_vehicle["ld"][0] += (
                     (free_flow_speeds["p1"] - free_flow_speeds["ld"])
                     * lc_intention_time
             )
             scenario.create_vehicle_group_from_initial_state(
-                initial_state_per_vehicle, free_flow_speeds, False)
+                initial_state_per_vehicle, free_flow_speeds,
+                fill_destination_lane_leaders=True)
             scenario.vehicle_group.set_verbose(False)
             try:
-                scenario.run(tf, initial_state_per_vehicle)
+                scenario.run(tf)
             except nx.NodeNotFound:
                 print("Simulation interrupted because some nodes were not "
                       "found in the graph.")
+                analysis.plot_state_vector(
+                    scenario.vehicle_group.get_full_initial_state_vector(),
+                    "initial state")
+                analysis.plot_state_vector(
+                    scenario.vehicle_group.get_state(),
+                    "last state")
                 continue
             except vg.CollisionException:
                 warnings.warn(f"Collision at simulation {index}.")
@@ -409,10 +419,21 @@ class SimulationScenario(ABC):
     def create_vehicle_group_from_initial_state(
             self, initial_state: Mapping[str, np.ndarray],
             free_flow_speed: Mapping[str, float],
-            is_acceleration_optimal: bool = False):
-        # x_idx = fsv.FourStateVehicle.get_idx_of_state("x")
+            is_acceleration_optimal: bool = False,
+            fill_destination_lane_leaders: bool = False):
+        """
+
+        :param initial_state: Initial state per vehicle
+        :param free_flow_speed: Free flow speed per vehicle
+        :param is_acceleration_optimal: Determines whether the optimal
+         controller is in charge of the acceleration (if there is an optimal
+         controller at all)
+        :param fill_destination_lane_leaders: If true, creates vehicles in
+         front of the destination lane leader. This is useful to force the
+         platoon to merge behind the destination lane leader
+        :return:
+        """
         y_idx = fsv.FourStateVehicle.get_idx_of_state("y")
-        # p1_x = initial_state["p1"][x_idx]
         for name, x0 in initial_state.items():
             if name.startswith("p"):
                 veh = self._lc_veh_type(True, is_acceleration_optimal, True)
@@ -421,10 +442,30 @@ class SimulationScenario(ABC):
                                             self._are_vehicles_cooperative)
             veh.set_name(name)
             veh.set_free_flow_speed(free_flow_speed[name])
-            # x0[x_idx] -= p1_x
             x0[y_idx] = configuration.LANE_WIDTH * (x0[y_idx] > 0)
             veh.set_initial_state(full_state=x0)
             self.vehicle_group.add_vehicle(veh)
+        if fill_destination_lane_leaders:
+            x_idx = fsv.FourStateVehicle.get_idx_of_state("x")
+            ld = self.vehicle_group.get_vehicle_by_name("ld")
+            p1 = self.vehicle_group.get_vehicle_by_name("p1")
+            i = 1
+            previous_veh = ld
+            while previous_veh.get_x() < p1.get_x():
+                dest_lane_veh = fsv.ClosedLoopVehicle(
+                    False, is_acceleration_optimal,
+                    self._are_vehicles_cooperative)
+                dest_lane_veh.set_name("d" + str(i))
+                i += 1
+                dest_lane_veh.set_free_flow_speed(free_flow_speed["ld"])
+                safe_gap = previous_veh.compute_non_connected_reference_gap()
+                x0 = previous_veh.get_initial_state()
+                x0[x_idx] += (safe_gap * 1.1)  # we want the vehicles to be
+                # close to each other, but not so close that they'll leave
+                # velocity control mode
+                dest_lane_veh.set_initial_state(full_state=x0)
+                previous_veh = dest_lane_veh
+                self.vehicle_group.add_vehicle(previous_veh)
 
     def place_origin_lane_vehicles(
             self, v_ff_lo: float, v_ff_platoon: float,
@@ -739,8 +780,12 @@ class LaneChangeScenario(SimulationScenario):
             if np.abs(time[i] - self._lc_intention_time) < self.dt / 10:
                 self.vehicle_group.set_vehicles_lane_change_direction(
                     1, self.lc_vehicle_names)
-                if expected_states_at_lc_time is not None:
-                    self.vehicle_group.force_state(expected_states_at_lc_time)
+            # There's a one dt delay between setting the intention and starting
+            # the procedure for the maneuver
+            elif (expected_states_at_lc_time is not None
+                  and (np.abs(time[i] - (self._lc_intention_time + self.dt))
+                       < self.dt / 10)):
+                self.vehicle_group.force_state(expected_states_at_lc_time)
             self.vehicle_group.simulate_one_time_step(time[i + 1],
                                                       detect_collision=True)
             # Early termination conditions
@@ -831,7 +876,7 @@ class AllLaneChangeStrategies(LaneChangeScenario):
 
                 n_states = self.vehicle_group.get_n_states()
                 n_inputs = self.vehicle_group.get_n_inputs()
-                desired_input = [0.] * n_inputs  # TODO: hard codded
+                desired_input = np.zeros(n_inputs)  # TODO: hard codded
 
                 all_vehicles = self.vehicle_group.get_all_vehicles_in_order()
                 controlled_veh_ids = set(self.get_lc_vehicle_ids())

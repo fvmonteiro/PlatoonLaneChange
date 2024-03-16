@@ -12,10 +12,10 @@ import numpy as np
 
 import analysis
 import configuration
-import graph_tools
-import post_processing
+from platoon_functionalities import graph_tools
 import scenarios
 import vehicle_models
+from vissim_handler import vissim_interface
 
 trajectory_file_name = 'trajectory_data.pickle'  # temp
 cost_file_name = 'cost_data.pickle'
@@ -266,7 +266,7 @@ def test_1():
     :return:
     """
     n_platoon = 2
-    with open("unsolved_root_nodes.pickle", "rb") as f:
+    with open("data/unsolved_root_nodes.pickle", "rb") as f:
         unsolved_initial_states = pickle.load(f)
 
     graph_creator = graph_tools.GraphCreator(2, False)
@@ -318,7 +318,7 @@ def explore_collision_scenarios():
 
 
 def main():
-    # test_1()
+
     n_platoon = 4
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
@@ -337,7 +337,6 @@ def main():
     #     jumpstart_next_solver_call=True, has_initial_mode_guess=True
     # )
 
-    # TODO: test values only
     # v_orig = [110/3.6 - 2]
     # v_ff_platoon = 110/3.6  # make 110
     # v_dest = np.array([70])/3.6  # make 50, 70, 90
@@ -349,56 +348,28 @@ def main():
 
     start_time = time.time()
 
-    for n_platoon in [2, 4, 6, 8]:
-        print(f" ===== Exploring scenario with platoon size {n_platoon} ==== ")
+    vissim_interface.run_a_platoon_simulation()
+
+    end_time = time.time()
+    exec_time = datetime.timedelta(seconds=end_time - start_time)
+    print("VISSIM running time:", str(exec_time).split(".")[0])
+
+    # lcsm = scenarios.LaneChangeScenarioManager()
+    for n_platoon in [2, 3, 4, 5]:
+        print(f"===== Exploring scenario with platoon size {n_platoon} =====")
         sim_time = 20.0 * n_platoon
         configuration.Configuration.set_scenario_parameters(
             sim_time=sim_time, increase_lc_time_headway=False
         )
-        graph_tools.GraphCreator.explore_initial_states_from_simulations(
-            n_platoon, graph_includes_fd, "vissim", "ao")
-
-    # lcsm = scenarios.LaneChangeScenarioManager()
-    # lcsm.set_parameters(n_platoon, False, {}, {})
-    # lcsm.run_scenarios_from_file()
-    # explore_collision_scenarios()
-
-    # graph_tools.GraphCreator.explore_unsolved_nodes(n_platoon,
-    #                                                 graph_includes_fd)
-
-    v_dest_idx = 0
-    lc_time = 1
-    # delta_x = {'ld': -70., 'lo': -90., 'fd': -10.}
-    # delta_x["ld"] += (v_dest[v_dest_idx] - v_orig[0]) / lc_time
-    # run_closed_loop_test(n_platoon, are_vehicles_cooperative,
-    #                      v_orig[0], v_ff_platoon, v_dest[v_dest_idx], delta_x,
-    #                      [6], plot_results=True)
-
-    # run_scenarios_for_comparison(
-    #     n_platoon, v_orig[0], v_ff_platoon, are_vehicles_cooperative,
-    #     [5], v_dest, gap_positions=None, has_plots=False, save=False
-    # )
-
-    # for n_platoon in [3]:
-    #     print(f'############ N={n_platoon} ############')
-    #     graph_t0 = time.time()
-    #     create_graph(n_platoon, graph_includes_fd, v_orig, v_ff_platoon,
-    #                  v_dest, max_dist, mode="w")
-    #     print(f'Time to create graph: {time.time() - graph_t0}')
-    #     configuration.Configuration.set_scenario_parameters(
-    #         sim_time=20.0 * n_platoon
-    #     )
-    #     sim_t0 = time.time()
-    #     # run_all_scenarios_for_comparison(n_platoon, v_orig[0], v_ff_platoon,
-    #     #                                  are_vehicles_cooperative)
-    #     print(f'Time simulated: {time.time() - sim_t0}')
-    # analysis.compare_approaches(save_fig=False)
-    # analysis.compare_graph_to_best_heuristic(save_fig=True)
-
-    # post_processing.export_strategy_maps_to_cloud()
+        graph_creator = graph_tools.GraphCreator(n_platoon, graph_includes_fd)
+        # graph_creator.solve_initial_states_from_simulations("vissim", "ao")
+        graph_creator.solve_queries_from_simulations("vissim", "ao")
+        # graph_tools.GraphCreator.solve_initial_states_from_simulations(
+        #     n_platoon, graph_includes_fd, "python", "as")
+        # lcsm.set_parameters(n_platoon, are_vehicles_cooperative, v_ref={})
+        # lcsm.run_scenarios_from_file("vissim")
 
     end_time = time.time()
-
     exec_time = datetime.timedelta(seconds=end_time - start_time)
     print("Execution time:", str(exec_time).split(".")[0])
 

@@ -418,7 +418,7 @@ def plot_initial_state(data: pd.DataFrame, axis=None):
         fig.show()
 
 
-def plot_state_vector(state: Iterable[float]):
+def plot_state_vector(state: Iterable[float], title: str = None):
     state = np.array(state).reshape(-1, 4).transpose()
     x = state[0, :]
     y = state[1, :]
@@ -430,7 +430,8 @@ def plot_state_vector(state: Iterable[float]):
            ylabel=_get_variable_with_unit('y'),
            ylim=(np.min(y) - 2, np.max(y) + 2))
     ax.set_aspect('equal', adjustable='box')
-
+    if title:
+        ax.set_title(title)
     fig.tight_layout()
     fig.show()
 

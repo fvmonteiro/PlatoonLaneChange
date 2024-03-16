@@ -146,7 +146,7 @@ class BaseVehicle(ABC):
         return self._free_flow_speed
 
     def get_initial_state(self) -> np.ndarray:
-        return self._initial_state
+        return self._initial_state.copy()
 
     @abstractmethod
     def get_has_open_loop_acceleration(self) -> bool:
@@ -771,20 +771,30 @@ class BaseVehicle(ABC):
             fd_safe_gap = 0.
         is_safe_to_dest_lane_follower = gap_from_fd + margin >= fd_safe_gap
 
-        # A suitable gap is a gap that the vehicle can reach by decelerating
-        # and that is large enough for a lane change.
-        lc_speed = min(self.get_vel(), dest_lane_leader_vel)
-        ego_safe_gap_after_deceleration = self.compute_reference_gap(
-            self.h_safe_destination_follower, lc_speed)
-        self._is_lane_change_gap_suitable = (
-                is_safe_to_dest_lane_follower
-                and (gap_to_ld + gap_from_fd + margin
-                     >= fd_safe_gap + ego_safe_gap_after_deceleration)
-        )
         self._is_lane_change_safe = (is_safe_to_orig_lane_leader
                                      and is_safe_to_dest_lane_leader
                                      and is_safe_to_dest_lane_follower)
-        # return self._is_lane_change_safe
+        # A suitable gap is a gap that the vehicle can reach by decelerating
+        # and that is large enough for a lane change.
+        lc_speed = min(self.get_vel(), dest_lane_leader_vel)
+
+        # Because the gap below is computed with the min speed of both vehicles,
+        # we don't need to call compute_safe_lane_change_gap (the nonlinear
+        # term will be zero anyway)
+        ego_safe_gap_after_deceleration = self.compute_reference_gap(
+            self.h_safe_destination_leader, lc_speed)
+        min_gap_to_decelerate = (
+            (self.get_vel()**2 - dest_lane_leader_vel**2)
+            / 2 / np.abs(self.brake_comfort_max))
+        self._is_lane_change_gap_suitable = (
+                self._is_lane_change_safe
+                or (
+                    is_safe_to_dest_lane_follower
+                    and gap_to_ld >= min_gap_to_decelerate
+                    and (gap_to_ld + gap_from_fd + margin
+                         >= fd_safe_gap + ego_safe_gap_after_deceleration)
+                )
+        )
 
     # @staticmethod
     # def is_gap_safe_for_lane_change(leading_vehicle: BaseVehicle,
@@ -817,16 +827,6 @@ class BaseVehicle(ABC):
     def receive_cooperation_request(self, other_id) -> None:
         if self._is_connected:
             self._aided_vehicle_id[self._iter_counter] = other_id
-
-    # @abstractmethod
-    # def update_target_leader(self, vehicles: Mapping[int, BaseVehicle]
-    # ) -> None:
-    #     """
-    #     Defines which surrounding vehicle should be used to determine this
-    #     vehicle's own acceleration
-    #     :return:
-    #     """
-    #     pass
 
     def update_virtual_leader(self, vehicles: Mapping[int, BaseVehicle]
                               ) -> None:

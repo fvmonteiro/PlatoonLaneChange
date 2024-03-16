@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 
 import configuration
-import platoon_lane_change_strategies as lc_strategies
+import platoon_functionalities.platoon_lane_change_strategies as lc_strategies
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
 

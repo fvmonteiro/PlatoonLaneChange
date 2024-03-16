@@ -10,8 +10,8 @@ import networkx as nx
 import numpy as np
 
 import configuration
-import graph_tools
-import platoon as plt
+import platoon_functionalities.graph_tools as graph_tools
+import platoon_functionalities.vehicle_platoon as vehicle_platoon
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
 
@@ -92,7 +92,7 @@ class LaneChangeStrategy(ABC):
     _id: int
     _name: str
 
-    def __init__(self, platoon: plt.Platoon):
+    def __init__(self, platoon: vehicle_platoon.Platoon):
         # TODO: make the strategy have the platoon as a member. This will make
         #  it clearer that the strategy has access to updated platoon info
         self.platoon = platoon
@@ -197,7 +197,7 @@ class TemplateStrategy(LaneChangeStrategy):
     # at the destination lane
     _last_dest_lane_vehicle_idx: int
 
-    def __init__(self, platoon: plt.Platoon):
+    def __init__(self, platoon: vehicle_platoon.Platoon):
         super().__init__(platoon)
         self._is_initialized = False
 
@@ -335,7 +335,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
     _cost_name: str
     _includes_fd: bool = False  # fixed for now
 
-    def __init__(self, platoon: plt.Platoon):
+    def __init__(self, platoon: vehicle_platoon.Platoon):
         super().__init__(platoon)
         self._is_data_loaded = False
 
@@ -570,7 +570,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
             self, node: configuration.QuantizedState, v_ref: dict[str: float]
     ) -> None:
         print(f"Node {node} was not found in the graph. Adding it "
-              f"'unsolved' file...")
+              f"'python_x0' file...")
         n_platoon = self.platoon.get_size()
         file_name = "_".join(["python_x0", str(n_platoon),
                               "vehicles.csv"])

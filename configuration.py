@@ -20,6 +20,7 @@ SAFE_CONNECTED_TIME_HEADWAY = 1.0  # [s]
 STANDSTILL_DISTANCE = 1.0  # [m]
 TIME_HEADWAY_MARGIN = 0.1  # [s]
 MAX_DISTANCE = 300.  # [m] for when we need to create virtual far away vehicles
+FREE_FLOW_SPEED = 110  # km/h
 # TODO: read these from a file
 DELTA_X = 9  # quantization interval [m]
 DELTA_V = 2  # quantization interval [m]

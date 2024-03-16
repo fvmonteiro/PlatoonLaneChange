@@ -11,8 +11,8 @@ import controllers.longitudinal_controller as long_ctrl
 import controllers.optimal_controller as opt_ctrl
 import controllers.vehicle_controller as veh_ctrl
 import operating_modes.concrete_vehicle_modes as modes
-import platoon
 import vehicle_models.base_vehicle as base
+import platoon_functionalities.vehicle_platoon as vehicle_platoon
 
 
 class FourStateVehicle(base.BaseVehicle, ABC):
@@ -21,7 +21,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     """
 
     _controller_type: type[veh_ctrl.VehicleController]
-    _platoon: Union[platoon.Platoon, None]
+    _platoon: Union[vehicle_platoon.Platoon, None]
 
     _state_names = ['x', 'y', 'theta', 'v']
     _input_names = ['a', 'phi']
@@ -40,11 +40,6 @@ class FourStateVehicle(base.BaseVehicle, ABC):
                  has_open_loop_acceleration: bool,
                  is_connected: bool):
         super().__init__(is_connected)
-        # TODO: red flag
-        # if not FourStateVehicle._is_model_defined:
-        #     FourStateVehicle._set_model()
-        #     FourStateVehicle._is_model_defined = True
-        #     FourStateVehicle._ocp_interface_type = FourStateVehicleInterface
         self._can_change_lanes = can_change_lanes
         self._has_open_loop_acceleration = has_open_loop_acceleration
         # TODO: bad naming.
@@ -69,9 +64,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         situation, we want to prevent the platoon from getting far from the gap.
         """
         if (self.is_in_a_platoon() and self.is_platoon_leader()
-                and self.has_lane_change_intention()
-                # and self._platoon.has_lane_change_started()
-        ):
+                and self.has_lane_change_intention()):
             relevant_vehicle_id = (
                 self._platoon.get_platoon_desired_dest_lane_leader_id())
             if relevant_vehicle_id > -1:  # there is a dest lane leader (ld)
@@ -88,7 +81,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
     def get_vel(self):
         return self.get_a_state_by_name('v')
 
-    def get_platoon(self) -> Union[None, platoon.Platoon]:
+    def get_platoon(self) -> Union[None, vehicle_platoon.Platoon]:
         try:
             return self._platoon
         except AttributeError:
@@ -117,7 +110,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         else:
             return -1
 
-    def set_platoon(self, new_platoon: platoon.Platoon) -> None:
+    def set_platoon(self, new_platoon: vehicle_platoon.Platoon) -> None:
         self._platoon = new_platoon
 
     def make_reset_copy(self, initial_state: np.ndarray = None) -> base.V:
@@ -222,11 +215,11 @@ class FourStateVehicle(base.BaseVehicle, ABC):
                 and vehicles[self.get_origin_lane_leader_id()].is_in_a_platoon()
         )
         if is_leader_in_a_platoon:
-            leader_platoon: platoon.Platoon = vehicles[
+            leader_platoon: vehicle_platoon.Platoon = vehicles[
                 self.get_origin_lane_leader_id()].get_platoon()
             if not self.is_in_a_platoon() or self._platoon != leader_platoon:
                 leader_platoon.add_vehicle(self)
-                # opt_control = leader_platoon.get_optimal_controller()
+                # opt_control = leader_vehicle_platoon.get_optimal_controller()
                 # self.set_centralized_controller(opt_control)
                 self.set_platoon(leader_platoon)
         else:
@@ -238,16 +231,16 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         #     if is_leader_in_a_platoon:
         #         leader_platoon = vehicles[
         #             self.get_orig_lane_leader_id()].get_platoon()
-        #         leader_platoon.add_vehicle(self)
+        #         leader_vehicle_platoon.add_vehicle(self)
         #         self.set_platoon(leader_platoon)
         #     else:
-        #         self.set_platoon(platoon.Platoon(self))
+        #         self.set_platoon(vehicle_platoon.Platoon(self))
         # else:
         #     if is_leader_in_a_platoon:
         #         leader_platoon = vehicles[
         #             self.get_orig_lane_leader_id()].get_platoon()
         #         if self._platoon != leader_platoon:
-        #             leader_platoon.add_vehicle(self)
+        #             leader_vehicle_platoon.add_vehicle(self)
         #             self.set_platoon(leader_platoon)
 
     def set_platoon_lane_change_order(
@@ -281,7 +274,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
 
     def _create_platoon(
             self, platoon_lane_change_strategy: int
-    ) -> platoon.Platoon:
+    ) -> vehicle_platoon.Platoon:
         pass
 
 
@@ -312,7 +305,7 @@ class OptimalControlVehicle(FourStateVehicle):
     a CBF computed lane keeping phi. """
 
     _controller_type = veh_ctrl.OptimalControl
-    _platoon: platoon.OptimalPlatoon
+    _platoon: vehicle_platoon.OptimalPlatoon
 
     def __init__(self, can_change_lanes: bool = True,
                  has_open_loop_acceleration: bool = True,
@@ -320,14 +313,14 @@ class OptimalControlVehicle(FourStateVehicle):
         super().__init__(can_change_lanes, has_open_loop_acceleration,
                          is_connected)
 
-        self._platoon_type = platoon.OptimalPlatoon
+        self._platoon_type = vehicle_platoon.OptimalPlatoon
         self.set_mode(modes.OCPLaneKeepingMode())
         self.get_opt_controller().set_controlled_vehicles_ids(self.get_id())
 
     def get_opt_controller(self) -> opt_ctrl.VehicleOptimalController:
         return self._controller.get_opt_controller()
 
-    def get_platoon(self) -> Union[None, platoon.OptimalPlatoon]:
+    def get_platoon(self) -> Union[None, vehicle_platoon.OptimalPlatoon]:
         try:
             return self._platoon
         except AttributeError:
@@ -417,8 +410,9 @@ class OptimalControlVehicle(FourStateVehicle):
         return False
 
     def _create_platoon(self, platoon_lane_change_strategy: int
-                        ) -> platoon.OptimalPlatoon:
-        return platoon.OptimalPlatoon(self, platoon_lane_change_strategy)
+                        ) -> vehicle_platoon.OptimalPlatoon:
+        return vehicle_platoon.OptimalPlatoon(
+            self, platoon_lane_change_strategy)
 
 
 class ClosedLoopVehicle(FourStateVehicle):
@@ -426,17 +420,17 @@ class ClosedLoopVehicle(FourStateVehicle):
      States: [x, y, theta, v], external input: None, centered at the C.G. """
 
     _controller_type = veh_ctrl.ClosedLoopControl
-    _platoon: platoon.ClosedLoopPlatoon
+    _platoon: vehicle_platoon.ClosedLoopPlatoon
 
     def __init__(self, can_change_lanes: bool,
                  has_open_loop_acceleration: bool = False,
                  is_connected: bool = False):
         super().__init__(can_change_lanes, has_open_loop_acceleration,
                          is_connected)
-        self._platoon_type = platoon.ClosedLoopPlatoon
+        self._platoon_type = vehicle_platoon.ClosedLoopPlatoon
         self.set_mode(modes.CLLaneKeepingMode())
 
-    def get_platoon(self) -> Union[None, platoon.ClosedLoopPlatoon]:
+    def get_platoon(self) -> Union[None, vehicle_platoon.ClosedLoopPlatoon]:
         try:
             return self._platoon
         except AttributeError:
@@ -482,8 +476,9 @@ class ClosedLoopVehicle(FourStateVehicle):
         self._controller.set_up_lane_change_control(self._lc_start_time)
 
     def _create_platoon(self, platoon_lane_change_strategy: int
-                        ) -> platoon.ClosedLoopPlatoon:
-        return platoon.ClosedLoopPlatoon(self, platoon_lane_change_strategy)
+                        ) -> vehicle_platoon.ClosedLoopPlatoon:
+        return vehicle_platoon.ClosedLoopPlatoon(
+            self, platoon_lane_change_strategy)
 
 
 class ShortSimulationVehicle(ClosedLoopVehicle):
@@ -522,7 +517,8 @@ class FourStateVehicleInterface(base.BaseVehicleInterface, ABC):
         if self._can_change_lanes:
             self._input_names.append('phi')
         self._set_model()
-        self.long_controller = long_ctrl.LongitudinalController(vehicle)
+        self.long_controller = long_ctrl.LongitudinalController(
+            vehicle, self.get_brake_max())
 
     def _set_speed(self, v0, state) -> None:
         state[self.state_idx['v']] = v0

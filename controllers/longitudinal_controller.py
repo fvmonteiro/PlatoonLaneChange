@@ -146,6 +146,7 @@ class LongitudinalController:
                           - self.vehicle.get_an_input_by_name("a"))
         else:
             accel_diff = 0  # to make the difference zero
+        accel_diff = 0
         return self._compute_gap_control(gap, v_ego, other_vehicle.get_vel(),
                                          accel_diff)
 

@@ -111,7 +111,7 @@ class VehicleController(ABC):
         #         f"[VehicleController] "
         #         f"t={self._ego_vehicle.get_current_time()} "
         #         f"veh {self._ego_vehicle.get_name()} long mode from: "
-        #         f"{self.long_mode.name} to {new_mode}")
+        #         f"{self.long_mode.name} to {new_mode.name}")
         self.long_mode = new_mode
         return desired_accel
 
@@ -245,5 +245,7 @@ class ClosedLoopControl(VehicleController):
         # we should never reach this
         warnings.warn('ClosedLoopController was constructed with'
                       'has_open_loop_acceleration True')
-        return self._real_leader_long_controller.get_more_critical_leader(
-            vehicles)
+        if self.long_mode == self.LongMode.REAL_LEADER:
+            return self._ego_vehicle.get_current_leader_id()
+        else:
+            return self._ego_vehicle.get_virtual_leader_id()
