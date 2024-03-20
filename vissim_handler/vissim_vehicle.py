@@ -1,8 +1,7 @@
+from __future__ import annotations
 from enum import Enum
 
 
-# TODO: these VehicleType and Vehicle classes are messy. Consider better
-#  organizing the data. Perhaps make VehicleType a regular class.
 class VehicleType(Enum):
     HDV = 0
     ACC = 1
@@ -10,6 +9,28 @@ class VehicleType(Enum):
     CONNECTED = 3
     CONNECTED_NO_LANE_CHANGE = 4
     PLATOON = 5
+
+    def get_print_name(self):
+        _vehicle_type_to_print_name: dict[VehicleType, str] = {
+            VehicleType.HDV: "HDV",
+            VehicleType.ACC: "ACC",
+            VehicleType.AUTONOMOUS: "AV",
+            VehicleType.CONNECTED: "CAV",
+            VehicleType.CONNECTED_NO_LANE_CHANGE: "CAV",
+            VehicleType.PLATOON: "Platoon",
+        }
+        return _vehicle_type_to_print_name[self]
+
+    def get_vissim_id(self):
+        _vehicle_type_to_vissim_id: dict[VehicleType, int] = {
+            VehicleType.HDV: 100,
+            VehicleType.ACC: 105,
+            VehicleType.AUTONOMOUS: 110,
+            VehicleType.CONNECTED: 120,
+            VehicleType.CONNECTED_NO_LANE_CHANGE: 121,
+            VehicleType.PLATOON: 140
+        }
+        return _vehicle_type_to_vissim_id[self]
 
 
 class PlatoonLaneChangeStrategy(Enum):
@@ -19,35 +40,23 @@ class PlatoonLaneChangeStrategy(Enum):
     leader_first = 2
     last_vehicle_first = 3
     leader_first_and_reverse = 4
-    graph = 5
+    graph_min_time = 5
+    graph_min_accel = 6
 
+    @classmethod
+    def get_all_strategies(cls) -> list[PlatoonLaneChangeStrategy]:
+        """ Excludes 'no strategy' and 'human driven' """
+        return [cls(i) for i
+                in range(cls.single_body_platoon.value,
+                         cls.graph_min_accel.value + 1)]
 
-vehicle_type_to_print_name_map = {
-    VehicleType.HDV: "HDV",
-    VehicleType.ACC: "ACC",
-    VehicleType.AUTONOMOUS: "AV",
-    VehicleType.CONNECTED: "CAV",
-    VehicleType.CONNECTED_NO_LANE_CHANGE: "CAV",
-    VehicleType.PLATOON: "Platoon",
-}
-
-
-strategy_to_print_name_map = {
-    PlatoonLaneChangeStrategy.human_driven: "HDV",
-    PlatoonLaneChangeStrategy.no_strategy: "CAV",
-    PlatoonLaneChangeStrategy.single_body_platoon: "SBP",
-    PlatoonLaneChangeStrategy.leader_first: "LdF",
-    PlatoonLaneChangeStrategy.last_vehicle_first: "LVF",
-    PlatoonLaneChangeStrategy.leader_first_and_reverse: "LdFR"
-}
-
-
-# Useful when editing vissim simulation parameters
-ENUM_TO_VISSIM_ID = {
-    VehicleType.HDV: 100,
-    VehicleType.ACC: 105,
-    VehicleType.AUTONOMOUS: 110,
-    VehicleType.CONNECTED: 120,
-    VehicleType.CONNECTED_NO_LANE_CHANGE: 121,
-    VehicleType.PLATOON: 140
-}
+    def get_print_name(self):
+        _strategy_to_print_name: dict[PlatoonLaneChangeStrategy, str] = {
+            PlatoonLaneChangeStrategy.human_driven: "HDV",
+            PlatoonLaneChangeStrategy.no_strategy: "CAV",
+            PlatoonLaneChangeStrategy.single_body_platoon: "SBP",
+            PlatoonLaneChangeStrategy.leader_first: "LdF",
+            PlatoonLaneChangeStrategy.last_vehicle_first: "LVF",
+            PlatoonLaneChangeStrategy.leader_first_and_reverse: "LdFR"
+        }
+        return _strategy_to_print_name[self]

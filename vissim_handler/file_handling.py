@@ -324,9 +324,9 @@ def create_vehs_per_lane_folder_name(vehicles_per_lane: Union[int, str]) -> str:
     return vehs_per_lane_folder
 
 
-def create_platoon_lc_strategy_folder_name(
-        platoon_lc_strategy: PlatoonLaneChangeStrategy) -> str:
-    return platoon_lc_strategy.name
+# def create_platoon_lc_strategy_folder_name(
+#         platoon_lc_strategy: PlatoonLaneChangeStrategy) -> str:
+#     return platoon_lc_strategy.name
 
 
 def create_speeds_folder_name(orig_and_dest_lane_speeds: tuple[int, str]
@@ -353,8 +353,7 @@ def create_file_path(
 
     folder_list = [base_folder]
     if scenario_info.platoon_lane_change_strategy is not None:
-        folder_list.append(create_platoon_lc_strategy_folder_name(
-            scenario_info.platoon_lane_change_strategy))
+        folder_list.append(scenario_info.platoon_lane_change_strategy.name)
     if scenario_info.vehicles_per_lane > 0:
         folder_list.append(create_percent_folder_name(
             scenario_info.vehicle_percentages))
@@ -366,6 +365,8 @@ def create_file_path(
     else:
         folder_list.append(create_vehs_per_lane_folder_name(
             scenario_info.vehicles_per_lane))
+    if scenario_info.platoon_size is not None:
+        folder_list.append(str(scenario_info.platoon_size) + "_vehicle_platoon")
     if scenario_info.special_case is not None:
         folder_list.append(scenario_info.special_case)
 

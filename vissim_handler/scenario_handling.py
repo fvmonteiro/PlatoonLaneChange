@@ -27,12 +27,32 @@ class ScenarioInfo:
     platoon_size: int = None
     special_case: str = None
 
+    def __str__(self):
+        str_list = []
+        veh_percent_list = [str(p) + "% " + vt.name.lower()
+                            for vt, p in self.vehicle_percentages.items()]
+        str_list.append("Vehicles: " + ", ".join(veh_percent_list))
+        str_list.append("Input: " + str(self.vehicles_per_lane)
+                        + " vehs/lane/hour")
+        if self.platoon_lane_change_strategy is not None:
+            str_list.append("Platoon LC strat.: "
+                            + self.platoon_lane_change_strategy.name.lower())
+        if self.orig_and_dest_lane_speeds is not None:
+            str_list.append("Orig lane speed "
+                            + str(self.orig_and_dest_lane_speeds[0])
+                            + ". Dest lane speed: "
+                            + str(self.orig_and_dest_lane_speeds[1]))
+        if self.platoon_size is not None:
+            str_list.append("n_platoon=" + str(self.platoon_size))
+        if self.special_case is not None:
+            str_list.append("Special case: " + self.special_case)
+        return "\n".join(str_list)
+
 
 def is_all_human(scenario: ScenarioInfo) -> bool:
     return (sum(scenario.vehicle_percentages.values()) == 0
-            or (vissim_vehicle.VehicleType.HDV in scenario.vehicle_percentages
-                and scenario.vehicle_percentages[vissim_vehicle.VehicleType.HDV]
-                == 100))
+            or scenario.vehicle_percentages.get(
+                vissim_vehicle.VehicleType.HDV, 0) == 100)
 
 
 def create_vehicle_percentages_dictionary(
@@ -88,28 +108,6 @@ def create_multiple_scenarios(
     return scenarios
 
 
-def print_scenario(scenario: ScenarioInfo) -> str:
-    str_list = []
-    veh_percent_list = [str(p) + "% " + vt.name.lower()
-                        for vt, p in scenario.vehicle_percentages.items()]
-    str_list.append("Vehicles: " + ", ".join(veh_percent_list))
-    str_list.append("Input: " + str(scenario.vehicles_per_lane)
-                    + " vehs/lane/hour")
-    if scenario.platoon_lane_change_strategy is not None:
-        str_list.append("Platoon LC strat.: "
-                        + scenario.platoon_lane_change_strategy.name.lower())
-    if scenario.orig_and_dest_lane_speeds is not None:
-        str_list.append("Orig lane speed "
-                        + str(scenario.orig_and_dest_lane_speeds[0])
-                        + ". Dest lane speed: "
-                        + str(scenario.orig_and_dest_lane_speeds[1]))
-    if scenario.platoon_size is not None:
-        str_list.append("n_platoon=" + str(scenario.platoon_size))
-    if scenario.special_case is not None:
-        str_list.append("Special case: " + scenario.special_case)
-    return "\n".join(str_list)
-
-
 def vehicle_percentage_dict_to_string(
         vp_dict: dict[vissim_vehicle.VehicleType, int]) -> str:
     if sum(vp_dict.values()) == 0:
@@ -118,21 +116,21 @@ def vehicle_percentage_dict_to_string(
     for veh_type, p in vp_dict.items():
         ret_str.append(
             str(p) + "% "
-            + vissim_vehicle.vehicle_type_to_print_name_map[veh_type])
+            + veh_type.get_print_name())
     return " ".join(sorted(ret_str))
 
 
 all_platoon_simulation_configurations: dict[str, Iterable] = {
     "strategies": [
         vissim_vehicle.PlatoonLaneChangeStrategy.single_body_platoon,
-        vissim_vehicle.PlatoonLaneChangeStrategy.leader_first,
         vissim_vehicle.PlatoonLaneChangeStrategy.last_vehicle_first,
         vissim_vehicle.PlatoonLaneChangeStrategy.leader_first_and_reverse,
-        vissim_vehicle.PlatoonLaneChangeStrategy.graph
+        vissim_vehicle.PlatoonLaneChangeStrategy.graph_min_accel,
+        vissim_vehicle.PlatoonLaneChangeStrategy.graph_min_time
     ],
     "orig_and_dest_lane_speeds": [("70", "50"), ("70", "70"), ("70", "90")],
     "platoon_size": [2, 3, 4, 5],
-    "vehicles_per_lane": [500, 1000, 2000, 3000]
+    "vehicles_per_lane": [500, 1000, 1500]
 }
 
 

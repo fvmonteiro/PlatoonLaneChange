@@ -12,14 +12,21 @@ import win32com.client as com
 import configuration
 from vissim_handler.file_handling import FileHandler, delete_files_in_folder
 import vissim_handler.scenario_handling as scenario_handling
-from vissim_handler.vissim_vehicle import VehicleType, \
-    PlatoonLaneChangeStrategy, ENUM_TO_VISSIM_ID
+from vissim_handler.vissim_vehicle import VehicleType, PlatoonLaneChangeStrategy
 
 
-def run_platoon_warm_up():
+def run_platoon_simulations(is_warm_up: bool = False):
+    if is_warm_up:
+        strategies = [PlatoonLaneChangeStrategy.graph_min_accel]
+        special_case = ["warmup"]
+    else:
+        strategies = [PlatoonLaneChangeStrategy.graph_min_accel,
+                      PlatoonLaneChangeStrategy.graph_min_time]
+        # strategies = scenario_handling.all_platoon_simulation_configurations[
+        #     "strategies"]
+        special_case = None
     scenario_name = "platoon_discretionary_lane_change"
     other_vehicles = [{VehicleType.HDV: 100}]
-    strategy = [PlatoonLaneChangeStrategy.graph]
     # vehicles_per_lane = [1000]
     vehicles_per_lane = (
         scenario_handling.all_platoon_simulation_configurations[
@@ -29,22 +36,28 @@ def run_platoon_warm_up():
     orig_and_dest_lane_speeds = (
         scenario_handling.all_platoon_simulation_configurations[
             "orig_and_dest_lane_speeds"])
-    # platoon_size = [2]
-    platoon_size = (
-        scenario_handling.all_platoon_simulation_configurations["platoon_size"])
+    platoon_size = [2, 3, 4]
+    # platoon_size = (
+    #     scenario_handling.all_platoon_simulation_configurations["platoon_size"])
+
     scenarios = scenario_handling.create_multiple_scenarios(
-        other_vehicles, vehicles_per_lane, lane_change_strategies=strategy,
+        other_vehicles, vehicles_per_lane, lane_change_strategies=strategies,
         orig_and_dest_lane_speeds=orig_and_dest_lane_speeds,
-        platoon_size=platoon_size, special_cases=["warmup"])
+        platoon_size=platoon_size, special_cases=special_case)
+
     vi = VissimInterface()
     vi.load_simulation(scenario_name)
     vi.run_multiple_platoon_lane_change_scenarios(scenarios)
 
 
+def run_platoon_warm_up():
+    run_platoon_simulations(is_warm_up=True)
+
+
 def run_a_platoon_simulation():
     scenario_name = "platoon_discretionary_lane_change"
     other_vehicles = {VehicleType.HDV: 100}
-    strategy = PlatoonLaneChangeStrategy.graph
+    strategy = PlatoonLaneChangeStrategy.graph_min_accel
     scenario = scenario_handling.ScenarioInfo(
         other_vehicles, 500, platoon_lane_change_strategy=strategy,
         orig_and_dest_lane_speeds=("70", "50"), platoon_size=2,
@@ -88,7 +101,7 @@ class VissimInterface:
             "platoon_mandatory_lane_change": _ScenarioParameters(
                 1200, 1, self.run_platoon_lane_change_scenario),
             "platoon_discretionary_lane_change": _ScenarioParameters(
-                1200, 1, self.run_platoon_lane_change_scenario),
+                600, 1, self.run_platoon_lane_change_scenario),
         }
 
         if vissim is None:
@@ -235,7 +248,7 @@ class VissimInterface:
 
     def run_platoon_scenario_sample(
             self, scenario_info: scenario_handling.ScenarioInfo,
-            simulation_period: int = 60, number_of_runs: int = 2,
+            number_of_runs: int = 2,
             random_seed: int = None, is_fast_mode: bool = False,
             is_simulation_verbose: bool = False,
             logged_veh_id: int = None) -> None:
@@ -249,13 +262,8 @@ class VissimInterface:
             random_seed = self._initial_random_seed
         self.set_random_seed(random_seed)
 
-        self.set_simulation_period(simulation_period)
+        # self.set_simulation_period(simulation_period)
         self.set_number_of_runs(number_of_runs)
-        self.set_platoon_lane_change_strategy(
-            scenario_info.platoon_lane_change_strategy)
-        veh_volumes = {"left_lane": scenario_info.vehicles_per_lane,
-                       "right_lane": scenario_info.vehicles_per_lane}
-        self.set_vehicle_inputs(veh_volumes)
         self.set_verbose_simulation(is_simulation_verbose)
         if logged_veh_id is not None:
             self.set_logged_vehicle_id(logged_veh_id)
@@ -311,7 +319,7 @@ class VissimInterface:
         print("Starting multiple-scenario run.")
         multiple_sim_start_time = time.perf_counter()
         for sc in scenarios:
-            print("Scenario:\n", scenario_handling.print_scenario(sc))
+            print("Scenario:\n", sc)
             self.reset_saved_simulations(warning_active=False)
             self.set_vissim_scenario_parameters(sc)
             if is_debugging:
@@ -352,8 +360,9 @@ class VissimInterface:
          short time period, and results are saved to a test folder.
         """
         # Set-up simulation parameters
+        self.set_verbose_simulation(True)  # for faster error tracking
         if not is_debugging:
-            self.set_verbose_simulation(False)
+            # self.set_verbose_simulation(False)
             self.set_logged_vehicle_id(0)
             self.vissim.Graphics.CurrentNetworkWindow.SetAttValue(
                 "QuickMode", 1)
@@ -370,7 +379,7 @@ class VissimInterface:
         print("Starting multiple-scenario run.")
         multiple_sim_start_time = time.perf_counter()
         for sc in scenarios:
-            print("Scenario:\n", scenario_handling.print_scenario(sc))
+            print("Scenario:\n", sc)
             self.reset_saved_simulations(warning_active=False)
             self.set_vissim_scenario_parameters(sc)
             if is_debugging:
@@ -447,9 +456,7 @@ class VissimInterface:
 
         special_case = scenario.special_case
         if special_case is None:  # creates a single lane change
-            simulation_period = 1200
-            if scenario.vehicle_percentages == {VehicleType.HDV: 100}:
-                simulation_period = 900
+            pass
         elif special_case == "test":
             simulation_period = 600
             first_platoon_time = 30
@@ -457,8 +464,8 @@ class VissimInterface:
             simulation_period = 600
             first_platoon_time = simulation_period + 1
         elif special_case == "warmup":
-            # Runs that stop after the vehicles cross the lane change starting
-            # position
+            # Runs that stop as soon as the entire platoon has left the
+            # simulation
             simulation_period = first_platoon_time + 240
         elif special_case.endswith("lane_change_period"):
             creation_period = int(special_case.split("_")[0])
@@ -705,7 +712,7 @@ class VissimInterface:
         self.set_all_vehicle_inputs_composition(composition_number)
 
         # Modify the relative flows
-        desired_flows = {ENUM_TO_VISSIM_ID[vt]: p for vt, p
+        desired_flows = {vt.get_vissim_id(): p for vt, p
                          in percentages_with_humans.items()}
         veh_composition = self.vissim.Net.VehicleCompositions.ItemByKey(
             composition_number)
@@ -814,7 +821,7 @@ class VissimInterface:
         veh_type = list(vehicle_percentages.keys())
         for i in range(len(relative_flows)):
             relative_flows[i].SetAttValue(
-                "VehType", ENUM_TO_VISSIM_ID[veh_type[i]])
+                "VehType", veh_type[i].get_vissim_id())
             relative_flows[i].SetAttValue(
                 "RelFlow", vehicle_percentages[veh_type[i]])
 
@@ -856,7 +863,7 @@ class VissimInterface:
         if platoon_size == 0:
             return
 
-        vissim_vehicle_type = ENUM_TO_VISSIM_ID[VehicleType.PLATOON]
+        vissim_vehicle_type = VehicleType.PLATOON.get_vissim_id()
         # h, d = platoon_vehicle.compute_vehicle_following_parameters(
         #     leader_max_brake=platoon_vehicle.max_brake, rho=0.1)
         h, d = 1.1, 1.0  # TODO: get information from parameters source
@@ -954,7 +961,7 @@ class VissimInterface:
         :param vehicle_percentages: Percent of each vehicle type as a dictionary
         :return: The vehicle composition number
         """
-        vehicle_type_ids = set([ENUM_TO_VISSIM_ID[vt] for vt in
+        vehicle_type_ids = set([vt.get_vissim_id() for vt in
                                 vehicle_percentages
                                 if vehicle_percentages[vt] > 0])
         veh_compositions_container = self.vissim.Net.VehicleCompositions
@@ -988,8 +995,8 @@ class VissimInterface:
         # vehicle_type_ids = set([Vehicle.ENUM_TO_VISSIM_ID[vt] for vt in
         #                         vehicle_percentages
         #                         if vehicle_percentages[vt] > 0])
-        speed_dist = {ENUM_TO_VISSIM_ID[key]: value
-                      for key, value in desired_speed_distribution.items()}
+        speed_dist = {vt.get_vissim_id(): speed
+                      for vt, speed in desired_speed_distribution.items()}
         veh_compositions_container = self.vissim.Net.VehicleCompositions
         for veh_composition in veh_compositions_container:
             relative_flows_container = veh_composition.VehCompRelFlows
