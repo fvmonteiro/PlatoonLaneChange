@@ -20,10 +20,10 @@ def run_platoon_simulations(is_warm_up: bool = False):
         strategies = [PlatoonLaneChangeStrategy.graph_min_accel]
         special_case = ["warmup"]
     else:
-        strategies = [PlatoonLaneChangeStrategy.graph_min_accel,
-                      PlatoonLaneChangeStrategy.graph_min_time]
-        # strategies = scenario_handling.all_platoon_simulation_configurations[
-        #     "strategies"]
+        # strategies = [PlatoonLaneChangeStrategy.graph_min_accel,
+        #               PlatoonLaneChangeStrategy.graph_min_time]
+        strategies = scenario_handling.all_platoon_simulation_configurations[
+            "strategies"]
         special_case = None
     scenario_name = "platoon_discretionary_lane_change"
     other_vehicles = [{VehicleType.HDV: 100}]

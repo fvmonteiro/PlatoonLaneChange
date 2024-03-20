@@ -325,7 +325,6 @@ class TemplateStrategy(LaneChangeStrategy):
         return [{i} for i in value]
 
 
-# TODO: poor naming
 class GraphLaneChangeApproach(TemplateStrategy):
     _id = 4
     _name = 'Graph-based'

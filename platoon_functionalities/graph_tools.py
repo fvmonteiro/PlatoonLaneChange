@@ -196,8 +196,9 @@ class VehicleStateGraph:
         """
         if initial_state in self._initial_states:
             for successor in self.states_graph.successors(initial_state):
-                if (self.states_graph[initial_state][successor]["lc_vehicles"]
-                        == first_movers_set):
+                if (first_movers_set is None
+                        or self.states_graph[initial_state][successor][
+                            "lc_vehicles"] == first_movers_set):
                     return True
         return False
 
@@ -489,11 +490,10 @@ class GraphCreator:
             df = df.iloc[scenario_number: scenario_number + 1]
 
         self.load_a_graph()
-        graph_nodes = set(self.vehicle_state_graph.states_graph.nodes)
+        visited_nodes = set(self.vehicle_state_graph.states_graph.nodes)
         n_queries = len(df.index)
         print(f"{n_queries} queries to solve.")
         for index, row in df.iterrows():
-            print(index)
             initial_state = tuple(int(x) for x in row["qx"].split(","))
             first_movers_set = set(int(x) for x
                                    in row["first_movers_set"].split(","))
@@ -501,13 +501,18 @@ class GraphCreator:
             if self.vehicle_state_graph.is_query_in_graph(
                     initial_state, first_movers_set):
                 n_queries -= 1
+                print(f"Query {index} already in graph.")
+            else:
+                print(f"Query {index} not in graph.")
+                # To ensure the node will be explored
+                visited_nodes.discard(initial_state)
             free_flow_speeds = self._get_free_flow_speeds_from_node(
                 initial_state)
             self.add_all_from_initial_state_to_graph(
-                initial_state, graph_nodes, free_flow_speeds, mode,
+                initial_state, visited_nodes, free_flow_speeds, mode,
                 first_movers_set)
             # solved_nodes.add(initial_state)
-        print(f"{n_queries} *new* initial states explored.")
+        print(f"{n_queries} new queries solved.")
         self.save_vehicle_state_graph_to_file()
         self.save_quantization_parameters_to_file()
         self.save_minimum_cost_strategies_to_json()
@@ -666,7 +671,8 @@ class GraphCreator:
         succeeding states.
         :return: Number of new nodes
         """
-        if initial_state in self.vehicle_state_graph.get_initial_states():
+        if self.vehicle_state_graph.is_query_in_graph(initial_state,
+                                                      first_movers_set):
             if mode.endswith("s"):
                 return 0
             elif mode.endswith("o"):

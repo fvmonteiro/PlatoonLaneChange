@@ -348,12 +348,6 @@ def main():
 
     start_time = time.time()
 
-    vissim_interface.run_platoon_warm_up()
-
-    end_time = time.time()
-    exec_time = datetime.timedelta(seconds=end_time - start_time)
-    print("VISSIM running time:", str(exec_time).split(".")[0])
-
     # lcsm = scenarios.LaneChangeScenarioManager()
     for n_platoon in [2, 3, 4, 5]:
         print(f"===== Exploring scenario with platoon size {n_platoon} =====")
@@ -363,13 +357,21 @@ def main():
         )
         graph_creator = graph_tools.GraphCreator(n_platoon, graph_includes_fd)
         # graph_creator.solve_initial_states_from_simulations("vissim", "ao")
-        graph_creator.solve_queries_from_simulations("vissim", "ao")
+        graph_creator.solve_queries_from_simulations("vissim", "as")
         # graph_tools.GraphCreator.solve_initial_states_from_simulations(
         #     n_platoon, graph_includes_fd, "python", "as")
         # lcsm.set_parameters(n_platoon, are_vehicles_cooperative, v_ref={})
         # lcsm.run_scenarios_from_file("vissim")
 
+    mid_time = time.time()
+    exec_time = datetime.timedelta(seconds=mid_time - start_time)
+    print("Graph expansion time:", str(exec_time).split(".")[0])
+
+    vissim_interface.run_platoon_simulations()
     end_time = time.time()
+    exec_time = datetime.timedelta(seconds=end_time - mid_time)
+    print("VISSIM running time:", str(exec_time).split(".")[0])
+
     exec_time = datetime.timedelta(seconds=end_time - start_time)
     print("Execution time:", str(exec_time).split(".")[0])
 
