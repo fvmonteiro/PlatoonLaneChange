@@ -278,8 +278,8 @@ def main():
 
     v_orig = 70/3.6
     v_ff_platoon = 110/3.6
-    v_dest = 50/3.6
-    strategy = [platoon_lane_change_strategies.StrategyMap.single_body_platoon]
+    v_dest = 90/3.6
+    strategy = [platoon_lane_change_strategies.StrategyMap.graph_min_time]
     # max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY * 1.1
 
     is_acceleration_optimal = True
@@ -289,41 +289,43 @@ def main():
     times = [time.time()]
     # start_time = time.time()
 
-    # scenarios.run_scenarios_for_comparison(
-    #     n_platoon, v_orig, v_dest, v_ff_platoon, are_vehicles_cooperative,
-    #     strategy, has_plots=True)
+    scenarios.run_scenarios_for_comparison(
+        2, v_orig, v_dest, v_ff_platoon, are_vehicles_cooperative,
+        strategy, has_plots=True)
     # scenarios.run_all_scenarios_for_comparison(warmup=True)
     # times.append(time.time())
     # warmup_time = datetime.timedelta(seconds=times[-1] - times[-2])
     # print("Python warmup time:", str(warmup_time).split(".")[0])
 
-    for n_platoon in [5]:
-        print(f"===== Exploring scenario with platoon size {n_platoon} =====")
-        sim_time = 20.0 * n_platoon
-        configuration.Configuration.set_scenario_parameters(
-            sim_time=sim_time, increase_lc_time_headway=False
-        )
-        graph_creator = graph_tools.GraphCreator(n_platoon, graph_includes_fd)
-        graph_creator.solve_queries_from_simulations("python", "as")
-    #     graph_creator.solve_queries_from_simulations("vissim", "as")
-        times.append(time.time())
-        graph_time = datetime.timedelta(seconds=times[-1] - times[-2])
-        print(f"Graph n={n_platoon} expansion time:",
-              str(graph_time).split(".")[0])
-        # lcsm = scenarios.LaneChangeScenarioManager(
-        #     n_platoon, are_vehicles_cooperative, v_ref={})
-        # lcsm.run_scenarios_from_file("vissim")
+    # for n_platoon in [5]:
+    #     print(f"===== Exploring scenario with platoon size {n_platoon} =====")
+    #     sim_time = 20.0 * n_platoon
+    #     configuration.Configuration.set_scenario_parameters(
+    #         sim_time=sim_time, increase_lc_time_headway=False
+    #     )
+    #     graph_creator = graph_tools.GraphCreator(n_platoon, graph_includes_fd)
+    #     graph_creator.solve_queries_from_simulations("python", "as")
+    # #     graph_creator.solve_queries_from_simulations("vissim", "as")
+    #     times.append(time.time())
+    #     graph_time = datetime.timedelta(seconds=times[-1] - times[-2])
+    #     print(f"Graph n={n_platoon} expansion time:",
+    #           str(graph_time).split(".")[0])
+    #     # lcsm = scenarios.LaneChangeScenarioManager(
+    #     #     n_platoon, are_vehicles_cooperative, v_ref={})
+    #     # lcsm.run_scenarios_from_file("vissim")
 
-    scenarios.run_all_scenarios_for_comparison()
-    times.append(time.time())
-    python_sim_time = datetime.timedelta(seconds=times[-1] - times[-2])
-    print("Python sim time:", str(python_sim_time).split(".")[0])
-    analysis.get_python_results_for_paper()
+    # scenarios.run_all_scenarios_for_comparison()
+    # times.append(time.time())
+    # python_sim_time = datetime.timedelta(seconds=times[-1] - times[-2])
+    # print("Python sim time:", str(python_sim_time).split(".")[0])
+    # analysis.get_python_results_for_paper()
+    #
+    # vissim_interface.run_platoon_simulations()
+    # times.append(time.time())
+    # vissim_time = datetime.timedelta(seconds=times[-1] - times[-2])
+    # print("VISSIM running time:", str(vissim_time).split(".")[0])
 
-    vissim_interface.run_platoon_simulations()
-    times.append(time.time())
-    vissim_time = datetime.timedelta(seconds=times[-1] - times[-2])
-    print("VISSIM running time:", str(vissim_time).split(".")[0])
+    # analysis.get_python_results_for_paper(save_fig=True)
 
     exec_time = datetime.timedelta(seconds=time.time() - times[0])
     print("Execution time:", str(exec_time).split(".")[0])

@@ -214,18 +214,14 @@ class FileHandler:
     def export_all_vissim_platoon_scenarios_to_cloud(self):
         strategies = scenario_handling.all_vissim_simulation_configurations[
             "strategies"]
-        scenario_name = "platoon_discretionary_lane_change"
         other_vehicles = [{VehicleType.HDV: 100}]
-        # vehicles_per_lane = [1000]
         vehicles_per_lane = (
             scenario_handling.all_vissim_simulation_configurations[
                 "vehicles_per_lane"]
         )
-        # orig_and_dest_lane_speeds = [("70", "50")]
         orig_and_dest_lane_speeds = (
             scenario_handling.all_vissim_simulation_configurations[
                 "orig_and_dest_lane_speeds"])
-        # platoon_size = [5]
         platoon_size = (
             scenario_handling.all_vissim_simulation_configurations[
                 "platoon_size"])
@@ -235,6 +231,27 @@ class FileHandler:
             orig_and_dest_lane_speeds=orig_and_dest_lane_speeds,
             platoon_size=platoon_size)
         self.export_multiple_results_to_cloud(scenarios)
+
+    def import_all_vissim_platoon_scenarios_from_cloud(self):
+        strategies = scenario_handling.all_vissim_simulation_configurations[
+            "strategies"]
+        other_vehicles = [{VehicleType.HDV: 100}]
+        vehicles_per_lane = (
+            scenario_handling.all_vissim_simulation_configurations[
+                "vehicles_per_lane"]
+        )
+        orig_and_dest_lane_speeds = (
+            scenario_handling.all_vissim_simulation_configurations[
+                "orig_and_dest_lane_speeds"])
+        platoon_size = (
+            scenario_handling.all_vissim_simulation_configurations[
+                "platoon_size"])
+        scenarios = scenario_handling.create_multiple_scenarios(
+            other_vehicles, vehicles_per_lane,
+            lane_change_strategies=strategies,
+            orig_and_dest_lane_speeds=orig_and_dest_lane_speeds,
+            platoon_size=platoon_size)
+        self.import_multiple_results_from_cloud(scenarios)
 
     def export_multiple_results_to_cloud(self, scenarios: list[ScenarioInfo]
                                          ) -> None:

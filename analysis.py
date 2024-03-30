@@ -31,15 +31,16 @@ def load_result_summary():
     file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                              'platoon_strategy_results', file_name)
     results = pd.read_csv(file_path)
-    # TODO: erase all old results and run again
-    # Simulations before 15 are old and have unreliable results
-    results = results[results["experiment_counter"] >= 15]
+    # Pretty names
+    results.loc[results["strategy"] == "Graph-based_time", "strategy"] = (
+        "Graph Min Time"
+    )
+    results.loc[results["strategy"] == "Graph-based_accel", "strategy"] = (
+        "Graph Min Control"
+    )
+
     simulation_identifiers = ['n_platoon', 'vo', 'vd', 'gap_position',
                               'strategy']
-    # latest_experiments = results.groupby(
-    #     simulation_identifiers)['experiment_counter'].max().to_numpy()
-    # latest_results = results.loc[results['experiment_counter'].isin(
-    #     latest_experiments)]
     # For each simulated configuration, get only the latest result
     latest_results = results.loc[results.groupby(
         simulation_identifiers)['experiment_counter'].idxmax()]
@@ -53,7 +54,7 @@ def save_fig_at_shared_folder(figure: plt.Figure, fig_name: str):
 
 def compare_graph_to_best_heuristic(save_fig: bool = False):
     results = load_result_summary()
-
+    # results = results.loc[results['n_platoon'] > 2]
     # Number of steps
     results['K'] = results['cooperation_order'].str.strip('[]').str.split(
         ',').apply(len)
@@ -79,7 +80,7 @@ def compare_graph_to_best_heuristic(save_fig: bool = False):
     # Success rates
     best_results = other_results.loc[other_results.groupby(
         simulation_identifiers)['success'].idxmax()]
-    best_results['strategy'] = 'Best Heuristic'
+    best_results['strategy'] = 'Best Fixed Order'
     all_results = pd.concat([graph_results, other_results, best_results])
     success_rate = all_results.groupby(['n_platoon', 'strategy'])[
         ['success', 'K']].mean()
@@ -91,7 +92,7 @@ def compare_graph_to_best_heuristic(save_fig: bool = False):
     for c in cost_names:
         best_results = other_results.loc[other_results.groupby(
             simulation_identifiers)[c].idxmin()]
-        best_results['strategy'] = 'Best Heuristic'
+        best_results['strategy'] = 'Best Fixed Order'
         all_results = pd.concat([graph_results, best_results])
         drop_sims = best_results.loc[~best_results['success'],
                                      simulation_identifiers]
@@ -103,6 +104,10 @@ def compare_graph_to_best_heuristic(save_fig: bool = False):
 
         ax = sns.boxplot(data=successful_sims, x='n_platoon', y=c,
                          hue='strategy')
+        ax.set_xlabel("Platoon Size")
+        ylabel = ("Maneuver Time" if c == 'completion_time'
+                  else "Platoon Control Effort")
+        ax.set_ylabel(ylabel)
         fig: plt.Figure = ax.get_figure()
         fig.tight_layout()
         fig.show()
@@ -144,6 +149,8 @@ def compare_approaches(save_fig: bool = False):
             relevant_results_per_n.append(pd.concat(
                 [graph_results, other_results.loc[other_success_idx]]))
         relevant_results = pd.concat(relevant_results_per_n)
+        if relevant_results.empty:
+            continue
         grouped_results = relevant_results.groupby(['n_platoon', 'strategy'])
         avg_costs = grouped_results[cost_names].mean()
         print(avg_costs)

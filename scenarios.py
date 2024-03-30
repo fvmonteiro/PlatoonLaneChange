@@ -755,7 +755,7 @@ class LaneChangeScenario(SimulationScenario):
         self._are_vehicles_cooperative = are_vehicles_cooperative
 
     def get_opc_results_summary(self):
-        # We assume there"s either a single optimally controlled vehicles
+        # We assume there's either a single optimally controlled vehicles
         # or that they all share the same controller
         try:
             opc_vehicle = self.vehicle_group.get_optimal_control_vehicles()[0]
@@ -782,7 +782,7 @@ class LaneChangeScenario(SimulationScenario):
         v_orig_leader = v_ref["orig"]
         v_dest_leader = v_ref["dest"]
         v_platoon = v_ref["platoon"]
-        delta_x_ld = (v_orig_leader - v_dest_leader) / self._lc_intention_time
+        delta_x_ld = (v_orig_leader - v_dest_leader) * self._lc_intention_time
         self.place_origin_lane_vehicles(
             v_orig_leader, v_platoon, self._is_acceleration_optimal,
             delta_x_lo=delta_x_lo)
@@ -793,13 +793,13 @@ class LaneChangeScenario(SimulationScenario):
         #     self.vehicle_group.get_full_initial_state_vector())
 
     def place_dest_lane_vehicles_with_single_gap(
-            self, v_ff: float, gap_position: int,
+            self, v_dest: float, gap_position: int,
             is_acceleration_optimal: bool, delta_x: float = None):
         """
         Creates destination lanes on position spanning from ahead the origin
         lane leader to behind the origin lane follower. One vehicle is removed
         to create a suitable lane change gap
-        :param v_ff: Destination lane free-flow speed
+        :param v_dest: Destination lane free-flow speed
         :param gap_position: Where, in relation to the platoon vehicles, is
          the gap. If i=0: aligned with lo; i=platoon size + 1: aligned with fo;
          otherwise: aligned with platoon veh i
@@ -827,36 +827,67 @@ class LaneChangeScenario(SimulationScenario):
                 "p" + str(gap_position))
 
         if delta_x is None:
-            delta_x = ((center_vehicle.get_vel() - v_ff)
-                       / self._lc_intention_time)
+            delta_x = ((center_vehicle.get_vel() - v_dest)
+                       * self._lc_intention_time)
 
         # assuming uniform vehicles:
-        reference_gap = center_vehicle.compute_non_connected_reference_gap(v_ff)
+        reference_gap = center_vehicle.compute_non_connected_reference_gap(
+            v_dest)
+        safe_gap_leader = center_vehicle.compute_safe_lane_change_gap(
+            configuration.SAFE_TIME_HEADWAY, v_dest,
+            center_vehicle.brake_max, is_other_ahead=True
+        )
+        safe_gap_follower = center_vehicle.compute_safe_lane_change_gap(
+            configuration.SAFE_TIME_HEADWAY, v_dest,
+            center_vehicle.brake_max, is_other_ahead=False
+        )
         x_gap = center_vehicle.get_x() + delta_x
-        x0 = x_gap + n_ahead * reference_gap
+        # x0 = x_gap + n_ahead * reference_gap
 
         # Destination lane vehicles
         ld_counter = 0
         fd_counter = 0
         pN = self.vehicle_group.get_vehicle_by_name("p" + str(self._n_platoon))
         # print(f"x_gap={x_gap:.1f}")
-        while x0 > pN.get_x() - n_behind * reference_gap:
-            if np.abs(x0 - x_gap) > 0.1:  # skip the vehicle at x_gap
-                veh = fsv.ClosedLoopVehicle(False, is_acceleration_optimal,
-                                            self._are_vehicles_cooperative)
-                if x0 > x_gap:
-                    veh_name = "ld" + str(ld_counter)
-                    ld_counter += 1
-                else:
-                    veh_name = "fd" + str(fd_counter)
-                    fd_counter += 1
-                veh.set_name(veh_name)
-                veh.set_free_flow_speed(v_ff)
-                veh.set_initial_state(x0, configuration.LANE_WIDTH, 0., v_ff)
-                self.vehicle_group.add_vehicle(veh)
-            # print(f"x0={x0:.1f}, #ld={ld_counter}, #fd={fd_counter}")
+        x0 = x_gap + safe_gap_leader + 0.1  # good to have some margin
+        for n in range(n_ahead):
+            veh = fsv.ClosedLoopVehicle(False, is_acceleration_optimal,
+                                        self._are_vehicles_cooperative)
+            veh_name = "ld" + str(n)
+            veh.set_name(veh_name)
+            veh.set_free_flow_speed(v_dest)
+            veh.set_initial_state(x0, configuration.LANE_WIDTH, 0., v_dest)
+            self.vehicle_group.add_vehicle(veh)
+            x0 += reference_gap
+
+        x0 = x_gap - safe_gap_follower - 0.1
+        for n in range(n_behind):
+            veh = fsv.ClosedLoopVehicle(False, is_acceleration_optimal,
+                                        self._are_vehicles_cooperative)
+            veh_name = "fd" + str(n)
+            veh.set_name(veh_name)
+            veh.set_free_flow_speed(v_dest)
+            veh.set_initial_state(x0, configuration.LANE_WIDTH, 0., v_dest)
+            self.vehicle_group.add_vehicle(veh)
             x0 -= reference_gap
-        self.n_per_lane.append(fd_counter + ld_counter + 1)
+        self.n_per_lane.append(n_ahead + n_behind)
+        # while x0 > pN.get_x() - n_behind * reference_gap:
+        #     if np.abs(x0 - x_gap) > 0.1:  # skip the vehicle at x_gap
+        #         veh = fsv.ClosedLoopVehicle(False, is_acceleration_optimal,
+        #                                     self._are_vehicles_cooperative)
+        #         if x0 > x_gap:
+        #             veh_name = "ld" + str(ld_counter)
+        #             ld_counter += 1
+        #         else:
+        #             veh_name = "fd" + str(fd_counter)
+        #             fd_counter += 1
+        #         veh.set_name(veh_name)
+        #         veh.set_free_flow_speed(v_dest)
+        #         veh.set_initial_state(x0, configuration.LANE_WIDTH, 0., v_dest)
+        #         self.vehicle_group.add_vehicle(veh)
+        #     # print(f"x0={x0:.1f}, #ld={ld_counter}, #fd={fd_counter}")
+        #     x0 -= reference_gap
+        # self.n_per_lane.append(fd_counter + ld_counter + 1)
         # print(f"Final: #ld={ld_counter}, #fd={fd_counter} ")
 
     def set_lane_change_strategy(self,
