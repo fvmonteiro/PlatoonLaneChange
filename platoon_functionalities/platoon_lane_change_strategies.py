@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
+from enum import Enum
 import os
 import time
 import warnings
@@ -14,6 +15,47 @@ import platoon_functionalities.graph_tools as graph_tools
 import platoon_functionalities.vehicle_platoon as vehicle_platoon
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
+
+
+# TODO: merge with vissim_vehicle.PlatoonLaneChangeStrategy
+class StrategyMap(Enum):
+    """
+    Class to help manage, call and print all strategies in Python
+    """
+    human_driven = -1
+    no_strategy = 0
+    single_body_platoon = 1
+    leader_first = 2
+    last_vehicle_first = 3
+    leader_first_and_reverse = 4
+    graph_min_time = 5
+    graph_min_accel = 6
+    template = 7
+
+    def get_print_name(self):
+        to_print_name: dict[StrategyMap, str] = {
+            StrategyMap.human_driven: "HDV",
+            StrategyMap.no_strategy: "CAV",
+            StrategyMap.single_body_platoon: "SBP",
+            StrategyMap.leader_first: "LdF",
+            StrategyMap.last_vehicle_first: "LVF",
+            StrategyMap.leader_first_and_reverse: "LdFR"
+        }
+        return to_print_name[self]
+
+    def get_implementation(self):
+        to_implementation: dict = {
+            StrategyMap.human_driven: SynchronousStrategy,
+            StrategyMap.no_strategy: IndividualStrategy,
+            StrategyMap.single_body_platoon: SynchronousStrategy,
+            StrategyMap.leader_first: LeaderFirstStrategy,
+            StrategyMap.last_vehicle_first: LastFirstStrategy,
+            StrategyMap.leader_first_and_reverse: LeaderFirstReverseStrategy,
+            StrategyMap.graph_min_time: GraphMinTime,
+            StrategyMap.graph_min_accel: GraphMinAccel,
+            StrategyMap.template: TemplateStrategy,
+        }
+        return to_implementation[self]
 
 
 class StrategyGenerator:
@@ -337,6 +379,8 @@ class GraphLaneChangeApproach(TemplateStrategy):
     def __init__(self, platoon: vehicle_platoon.Platoon):
         super().__init__(platoon)
         self._is_data_loaded = False
+        # TODO: get from _lane_change_strategy_manager?
+        self.state_quantizer = graph_tools.StateQuantizer()
 
     @classmethod
     def get_name(cls) -> str:
@@ -358,24 +402,93 @@ class GraphLaneChangeApproach(TemplateStrategy):
         if not self._is_data_loaded:
             self._load_data()
 
-        self._set_maneuver_initial_state_for_all_vehicles(vehicles)
+        queries = self._create_all_queries(vehicles)
+        opt_strategy = self.get_query_results_from_map(queries)
+        if opt_strategy is not None:
+            self.set_maneuver_order(opt_strategy[0], opt_strategy[1])
 
-        start_time = time.time()
-        opt_strategy_from_graph = self._find_best_strategy_from_graph()
-        if opt_strategy_from_graph is not None:
-            final_time = time.time()
-            self._decision_time = final_time - start_time
-            print(f'Graph min cost took '
-                  f'{self._decision_time:.2e} seconds')
-            self.set_maneuver_order(opt_strategy_from_graph[0],
-                                    opt_strategy_from_graph[1])
+        # self._set_maneuver_initial_state_for_all_vehicles(vehicles)
+        # start_time = time.time()
+        # opt_strategy_from_graph = self._find_best_strategy_from_graph()
+        # if opt_strategy_from_graph is not None:
+        #     final_time = time.time()
+        #     self._decision_time = final_time - start_time
+        #     print(f'Graph min cost took '
+        #           f'{self._decision_time:.2e} seconds')
+        #     self.set_maneuver_order(opt_strategy_from_graph[0],
+        #                             opt_strategy_from_graph[1])
+        #
+        # # Testing
+        # opt_strategy_from_map = self._find_best_strategy_from_map()
+        # if opt_strategy_from_map != opt_strategy_from_graph:
+        #     print(f'Different strategies.\n'
+        #           f'From graph: {opt_strategy_from_graph}\n'
+        #           f'From map: {opt_strategy_from_map}')
 
-        # Testing
-        opt_strategy_from_map = self._find_best_strategy_from_map()
-        if opt_strategy_from_map != opt_strategy_from_graph:
-            print(f'Different strategies.\n'
-                  f'From graph: {opt_strategy_from_graph}\n'
-                  f'From map: {opt_strategy_from_map}')
+    def _create_all_queries(self, vehicles: Mapping[int, base.BaseVehicle]
+                            ) -> list[configuration.Query]:
+        queries_safe_start = []
+        queries_delayed_start = []
+        veh_pos = 0
+        n_platoon = self.platoon.get_size()
+        while veh_pos < n_platoon:
+            front_most_veh_pos = veh_pos
+            veh = self.platoon.get_vehicle_by_position(veh_pos)
+            first_movers = set()
+            are_lc_gaps_safe = False
+            while veh_pos < n_platoon and veh.get_is_lane_change_safe():
+                are_lc_gaps_safe = True
+                first_movers.add(veh_pos)
+                veh_pos += 1
+                if veh_pos < n_platoon:
+                    veh = self.platoon.get_vehicle_by_position(veh_pos)
+
+            # If no vehicle so far is safe to start a lane change, we store
+            # queries of vehicles with suitable (safe after adjustment)
+            # lane change gaps.
+            if (not are_lc_gaps_safe and len(queries_safe_start) == 0
+                    and veh.get_is_lane_change_gap_suitable()):
+                first_movers.add(veh_pos)
+
+            if len(first_movers) > 0:
+                system_states = self.platoon.get_system_states(
+                    front_most_veh_pos, vehicles)
+                quantized_states = self.state_quantizer.quantize_state_map(
+                    system_states)
+                query = (quantized_states, first_movers)
+                if are_lc_gaps_safe:
+                    queries_safe_start.append(query)
+                else:
+                    queries_delayed_start.append(query)
+            veh_pos += 1
+
+        return (queries_safe_start if len(queries_safe_start) > 0
+                else queries_delayed_start)
+
+    def get_query_results_from_map(
+            self, queries: Iterable[configuration.Query]):
+        best_cost = np.inf
+        best_strategy = None
+        all_strategies = []
+        all_costs = []
+        all_queries_answered = True
+        for q in queries:
+            quantized_state, first_movers = q
+            try:
+                strategy, cost = self._strategy_map[quantized_state][
+                    frozenset(first_movers)]
+                all_strategies.append(strategy)
+                all_costs.append(cost)
+                if cost < best_cost:
+                    best_cost = cost
+                    best_strategy = strategy
+            except KeyError:
+                all_queries_answered = False
+                print(f"Query {quantized_state}, {first_movers} not found")
+                self.save_query_to_file(q)
+        if not all_queries_answered:
+            raise KeyError
+        return best_strategy
 
     def _set_maneuver_initial_state_for_all_vehicles(
             self, all_vehicles: Mapping[int, base.BaseVehicle]) -> None:
@@ -586,20 +699,34 @@ class GraphLaneChangeApproach(TemplateStrategy):
         with open(file_path, "a") as file:
             file.write(new_line)
 
+    def save_query_to_file(self, query: configuration.Query):
+        n_platoon = self.platoon.get_size()
+        file_name = "_".join(["python_queries", str(n_platoon),
+                                          "vehicles.csv"])
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 "vehicle_state_graphs", file_name)
+        new_line = ("\"" + ",".join(str(x) for x in query[0]) + "\",\""
+                    + ",".join(str(x) for x in query[1]) + "\"\n")
+        if not os.path.isfile(file_path):
+            header = "qx, first_movers_set\n"
+            new_line = header + new_line
+        with open(file_path, "a") as file:
+            file.write(new_line)
 
-class GraphLaneChangeApproachMinTime(GraphLaneChangeApproach):
+
+class GraphMinTime(GraphLaneChangeApproach):
     _id = 5
     _cost_name = 'time'
 
 
-class GraphLaneChangeApproachMinAccel(GraphLaneChangeApproach):
+class GraphMinAccel(GraphLaneChangeApproach):
     _id = 6
     _cost_name = 'accel'
 
 
 graphStrategyIds = {GraphLaneChangeApproach.get_id(),
-                    GraphLaneChangeApproachMinTime.get_id(),
-                    GraphLaneChangeApproachMinAccel.get_id()}
+                    GraphMinTime.get_id(),
+                    GraphMinAccel.get_id()}
 
 
 # ========================= Heuristic Strategies ============================= #
@@ -846,20 +973,3 @@ class LeaderFirstReverseStrategyHardCoded(HardCodedStrategy):
         if follower.has_lane_change_intention():
             return follower.get_id()
         return -1
-
-
-strategy_map: dict[int, type[LaneChangeStrategy]] = {
-    IndividualStrategy.get_id(): IndividualStrategy,
-    SynchronousStrategy.get_id(): SynchronousStrategy,
-    TemplateStrategy.get_id(): TemplateStrategy,
-    GraphLaneChangeApproach.get_id(): GraphLaneChangeApproach,
-    GraphLaneChangeApproachMinTime.get_id(): GraphLaneChangeApproachMinTime,
-    GraphLaneChangeApproachMinAccel.get_id(): GraphLaneChangeApproachMinAccel,
-    LeaderFirstStrategy.get_id(): LeaderFirstStrategy,
-    LastFirstStrategy.get_id(): LastFirstStrategy,
-    LeaderFirstReverseStrategy.get_id(): LeaderFirstReverseStrategy,
-    LeaderFirstStrategyHardCoded.get_id(): LeaderFirstStrategyHardCoded,
-    LastFirstStrategyHardCoded.get_id(): LastFirstStrategyHardCoded,
-    LeaderFirstReverseStrategyHardCoded.get_id():
-        LeaderFirstReverseStrategyHardCoded,
-}

@@ -16,6 +16,7 @@ import pandas as pd
 import analysis
 import configuration
 import platoon_functionalities.vehicle_platoon as vehicle_platoon
+import platoon_functionalities.platoon_lane_change_strategies as lc_strategies
 import vehicle_group as vg
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
@@ -495,8 +496,13 @@ class GraphCreator:
         print(f"{n_queries} queries to solve.")
         for index, row in df.iterrows():
             initial_state = tuple(int(x) for x in row["qx"].split(","))
-            first_movers_set = set(int(x) for x
-                                   in row["first_movers_set"].split(","))
+            if isinstance(row["first_movers_set"], str):
+                first_movers_set = set(int(x) for x
+                                       in row["first_movers_set"].split(","))
+            elif np.isscalar(row["first_movers_set"]):
+                first_movers_set = {row["first_movers_set"]}
+            else:
+                first_movers_set = set(int(x) for x in row["first_movers_set"])
 
             if self.vehicle_state_graph.is_query_in_graph(
                     initial_state, first_movers_set):
@@ -895,10 +901,8 @@ class GraphCreator:
             veh.set_name("p" + str(i + 1))
             platoon_vehicles.append(veh)
 
-        # TODO: improve strategy setting method.
-        #  Setting by int is hard to maintain and read
-        leader_platoon = vehicle_platoon.ClosedLoopPlatoon(platoon_vehicles[0],
-                                                           2)
+        leader_platoon = vehicle_platoon.ClosedLoopPlatoon(
+            platoon_vehicles[0], lc_strategies.StrategyMap.template)
         platoon_vehicles[0].set_platoon(leader_platoon)
         for i in range(1, len(platoon_vehicles)):
             leader_platoon.append_vehicle(platoon_vehicles[i])
@@ -919,7 +923,8 @@ class GraphCreator:
                                                       ld, fd)
         vehicle_group = vg.ShortSimulationVehicleGroup()
         vehicle_group.fill_vehicle_array(all_vehicles)
-        vehicle_group.set_platoon_lane_change_strategy(2)
+        vehicle_group.set_platoon_lane_change_strategy(
+            lc_strategies.StrategyMap.template)
 
         return vehicle_group
 

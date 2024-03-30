@@ -9,12 +9,14 @@ import numpy as np
 LCOrder = list[set[int]]
 CoopOrder = list[int]
 QuantizedState = tuple[int]
+Query = tuple[QuantizedState, set[int]]
 Strategy = tuple[LCOrder, CoopOrder]
 StrategyMap = dict[QuantizedState,
                    dict[frozenset[int], tuple[Strategy, float]]]
 
 # ================================ Constants ================================= #
 LANE_WIDTH = 4  # [m]
+KMH_TO_MS = 1/3.6
 SAFE_TIME_HEADWAY = 2.0  # [s]
 SAFE_CONNECTED_TIME_HEADWAY = 1.0  # [s]
 STANDSTILL_DISTANCE = 1.0  # [m]

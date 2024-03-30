@@ -810,7 +810,7 @@ class BaseVehicle(ABC):
 
     def initialize_platoons(
             self, vehicles: Mapping[int, BaseVehicle],
-            platoon_lane_change_strategy: int
+            platoon_lane_change_strategy=None
     ) -> None:
         pass
 

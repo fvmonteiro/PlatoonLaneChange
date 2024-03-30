@@ -27,41 +27,136 @@ import vehicle_models.four_state_vehicles as fsv
 config = configuration.Configuration
 
 
+all_platoon_simulation_configurations = {
+    "strategies": [
+        lc_strategy.StrategyMap.single_body_platoon,
+        lc_strategy.StrategyMap.last_vehicle_first,
+        lc_strategy.StrategyMap.leader_first_and_reverse,
+        lc_strategy.StrategyMap.graph_min_accel,
+        lc_strategy.StrategyMap.graph_min_time
+    ],
+    "orig_and_dest_lane_speeds": [(70, 50), (70, 70), (70, 90)],
+    "platoon_size": [2, 3, 4, 5],
+}
+
+
+def run_all_scenarios_for_comparison(warmup: bool = False):
+    if warmup:
+        strategies = [lc_strategy.StrategyMap.graph_min_time]
+        save_results = False
+    else:
+        strategies = all_platoon_simulation_configurations[
+            "strategies"]
+        save_results = True
+
+    orig_and_dest_lane_speeds = (
+        all_platoon_simulation_configurations[
+            "orig_and_dest_lane_speeds"])
+    v_ff_platoon = configuration.FREE_FLOW_SPEED * configuration.KMH_TO_MS
+    n_platoon = all_platoon_simulation_configurations["platoon_size"]
+    are_vehicles_cooperative = False
+
+    for n in n_platoon:
+        sim_time = 20.0 * n
+        configuration.Configuration.set_scenario_parameters(
+            sim_time=sim_time, increase_lc_time_headway=False
+        )
+        for v_orig, v_dest in orig_and_dest_lane_speeds:
+            run_scenarios_for_comparison(
+                n, v_orig * configuration.KMH_TO_MS,
+                v_dest * configuration.KMH_TO_MS, v_ff_platoon,
+                are_vehicles_cooperative, strategies,
+                has_plots=False, save=save_results
+            )
+
+
+def run_scenarios_for_comparison(
+        n_platoon: int, v_orig: float, v_dest: float, v_ff_platoon: float,
+        are_vehicles_cooperative: bool,
+        strategies: Iterable[lc_strategy.StrategyMap],
+        gap_positions: Iterable[int] = None,
+        has_plots: bool = True, save: bool = False):
+    v_ref = {'orig': v_orig, 'platoon': v_ff_platoon, 'dest': v_dest}
+    scenario_manager = LaneChangeScenarioManager(
+        n_platoon, are_vehicles_cooperative, v_ref)
+    scenario_manager.set_plotting(has_plots)
+
+    print(f'Starting multiple runs with n_platoon={n_platoon}, '
+          f'vo={v_orig:.1f}, vd={v_dest:.1f}')
+    for s in strategies:
+        print(f' strategy number={s}')
+        if gap_positions is None:
+            scenario_manager.run_all_single_gap_cases(s)
+        else:
+            for gp in gap_positions:
+                scenario_manager.run_single_gap_scenario(s, gp)
+                result = scenario_manager.get_results()
+                print(result.groupby('strategy')[
+                          ['success', 'completion_time', 'accel_cost',
+                           'decision_time']
+                      ].mean())
+                result.to_csv('results_temp_name.csv', index=False)
+    if save:
+        scenario_manager.append_results_to_csv()
+
+
+def run_closed_loop_test(
+        n_platoon: int, are_vehicles_cooperative: bool,
+        v_orig: float, v_ff_platoon: float, v_dest: float,
+        delta_x: Mapping[str, float],
+        strategies: Iterable[lc_strategy.StrategyMap],
+        plot_results: bool = True):
+    v_ref = {'orig': v_orig, 'platoon': v_ff_platoon, 'dest': v_dest}
+    scenario_manager = LaneChangeScenarioManager(
+        n_platoon, are_vehicles_cooperative, v_ref, delta_x)
+    scenario_manager.set_plotting(plot_results)
+    n_orig_ahead = 1
+    n_orig_behind = 1
+    n_dest_ahead = 1
+    n_dest_behind = 1
+    scenario_manager.run_strategy_comparison_on_test_scenario(
+        n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind, strategies
+    )
+
+
 class LaneChangeScenarioManager:
 
     # scenario: LaneChangeScenario
-    v_ref: Mapping[str, float]
+    # v_ref: Mapping[str, float]
     # delta_x: Mapping[str, float]
-    n_platoon: int
-    are_vehicles_cooperative: bool
+    # n_platoon: int
+    # are_vehicles_cooperative: bool
     # _lane_change_graph: graph_tools.VehicleStatesGraph
     # _strategy_map: graph_tools.StrategyMap
 
-    def __init__(self):
+    def __init__(self, n_platoon: int, are_vehicles_cooperative: bool,
+                 v_ref: Mapping[str, float],
+                 delta_x: Mapping[str, float] = None):
         # TODO: names should depend on the scenario
         self.trajectory_file_name = "trajectory_data.pickle"
         self.cost_file_name = "cost_data.pickle"
         self.results: dict[str, list] = defaultdict(list)
-        # {
-        #     "n_platoon": [], "vo": [], "vd": [], "strategy": [],
-        #     "lane_change_order": [], "cooperation_order": [],
-        #     "success": [], "completion_time": [], "accel_cost": [],
-        #     "decision_time": []
-        # }
-        self.delta_x: dict[str, float] = defaultdict(float)
         self._has_plots = True
 
-    def get_results(self) -> pd.DataFrame:
-        return pd.DataFrame(self.results)
-
-    def set_parameters(self, n_platoon: int, are_vehicles_cooperative: bool,
-                       v_ref: Mapping[str, float],
-                       delta_x: Mapping[str, float] = None):
         self.n_platoon = n_platoon
         self.are_vehicles_cooperative = are_vehicles_cooperative
         self.v_ref = v_ref
         if delta_x is not None:
             self.delta_x = delta_x
+        else:
+            self.delta_x: dict[str, float] = defaultdict(float)
+
+    def get_results(self) -> pd.DataFrame:
+        return pd.DataFrame(self.results)
+
+    # def set_parameters(self, n_platoon: int, are_vehicles_cooperative: bool,
+    #                    v_ref: Mapping[str, float],
+    #                    delta_x: Mapping[str, float] = None):
+    #     self.n_platoon = n_platoon
+    #     self.are_vehicles_cooperative = are_vehicles_cooperative
+    #     self.v_ref = v_ref
+    #     if delta_x is not None:
+    #         self.delta_x = delta_x
 
     def set_plotting(self, value: bool):
         self._has_plots = value
@@ -84,14 +179,14 @@ class LaneChangeScenarioManager:
         states_idx = [i for i in range(len(df.columns))
                       if df.columns[i].startswith("x")]
         tf = config.sim_time
-        strategy_number = 5
+        strategy = lc_strategy.StrategyMap.graph_min_time
 
         lc_intention_time = 0.0
         quantizer = graph_tools.StateQuantizer()  # assuming default params
         print(f"Running {len(df.index)} scenarios.")
         for index, row in df.iterrows():
             print(f"Scenario {index}")
-            scenario = self.initialize_closed_loop_scenario(strategy_number)
+            scenario = self.initialize_closed_loop_scenario(strategy)
             scenario.set_lc_intention_time(lc_intention_time)
 
             free_flow_speeds = {"lo": row["orig"], "ld": row["dest"]}
@@ -125,6 +220,10 @@ class LaneChangeScenarioManager:
                     scenario.vehicle_group.get_state(),
                     "last state")
                 continue
+            except ValueError:
+                print("Simulation interrupted because a query was not "
+                      "found in the strategies map.")
+                continue
             except vg.CollisionException:
                 warnings.warn(f"Collision at simulation {index}.")
 
@@ -138,29 +237,29 @@ class LaneChangeScenarioManager:
 
     def run_strategy_comparison_on_test_scenario(
             self, n_orig_ahead: int, n_orig_behind: int, n_dest_ahead: int,
-            n_dest_behind: int, strategy_numbers: Iterable[int]):
-        for sn in strategy_numbers:
+            n_dest_behind: int, strategies: Iterable[lc_strategy.StrategyMap]):
+        for sn in strategies:
             self.run_test_scenario(n_orig_ahead, n_orig_behind, n_dest_ahead,
                                    n_dest_behind, sn)
 
     def run_strategy_comparison_on_single_gap_scenario(
-            self, strategy_numbers: Iterable[int]):
-        for sn in strategy_numbers:
+            self, strategies: Iterable[lc_strategy.StrategyMap]):
+        for sn in strategies:
             self.run_all_single_gap_cases(sn)
 
     def run_test_scenario(
             self, n_orig_ahead: int, n_orig_behind: int, n_dest_ahead: int,
-            n_dest_behind: int, strategy_number: int):
+            n_dest_behind: int, strategy: lc_strategy.StrategyMap):
         tf = config.sim_time
-        scenario_name = self._create_scenario_name(strategy_number)
-        scenario = self.initialize_closed_loop_scenario(strategy_number)
+        scenario_name = self._create_scenario_name(strategy)
+        scenario = self.initialize_closed_loop_scenario(strategy)
         scenario.set_test_initial_state(
             n_dest_ahead, n_dest_behind, n_orig_ahead, n_orig_behind,
             self.v_ref, self.delta_x)
         gap_position = -1
         self.run_save_and_plot(scenario, tf, gap_position, scenario_name)
 
-    def run_all_single_gap_cases(self, strategy_number: int):
+    def run_all_single_gap_cases(self, strategy: lc_strategy.StrategyMap):
         first_gap = 1
         last_gap = self.n_platoon
         if self.v_ref["orig"] > self.v_ref["dest"]:
@@ -168,25 +267,26 @@ class LaneChangeScenarioManager:
         elif self.v_ref["orig"] < self.v_ref["dest"]:
             last_gap = self.n_platoon + 1
         for gap_position in range(first_gap, last_gap + 1):
-            self.run_single_gap_scenario(strategy_number, gap_position)
+            self.run_single_gap_scenario(strategy, gap_position)
 
-    def run_single_gap_scenario(self, strategy_number: int, gap_position: int):
-        tf = config.sim_time
-        scenario_name = self._create_scenario_name(strategy_number)
+    def run_single_gap_scenario(self, strategy: lc_strategy.StrategyMap,
+                                gap_position: int):
+        tf = 20 * self.n_platoon
+        scenario_name = self._create_scenario_name(strategy)
         print(f"      gap position={gap_position}")
-        scenario = self.initialize_closed_loop_scenario(strategy_number)
+        scenario = self.initialize_closed_loop_scenario(strategy)
         scenario.set_single_gap_initial_state(gap_position, self.v_ref,
                                               self.delta_x["lo"])
         self.run_save_and_plot(scenario, tf, gap_position,
                                scenario_name + f" gap at {gap_position}")
 
-    def initialize_closed_loop_scenario(self, strategy_number: int
+    def initialize_closed_loop_scenario(self, strategy: lc_strategy.StrategyMap
                                         ) -> LaneChangeScenario:
         scenario = LaneChangeScenario(self.n_platoon,
                                       self.are_vehicles_cooperative)
         scenario.set_control_type("closed_loop",
                                   is_acceleration_optimal=False)
-        scenario.set_lane_change_strategy(strategy_number)
+        scenario.set_lane_change_strategy(strategy)
         # if strategy_number in lc_strategy.graphStrategyIds:
         #     scenario.set_lane_change_states_graph(self._lane_change_graph)
         return scenario
@@ -212,18 +312,19 @@ class LaneChangeScenarioManager:
 
     def create_closed_loop_test_scenario(
             self, n_orig_ahead: int, n_orig_behind: int,
-            n_dest_ahead: int, n_dest_behind: int, strategy_number: int
+            n_dest_ahead: int, n_dest_behind: int,
+            strategy: lc_strategy.StrategyMap
     ) -> LaneChangeScenario:
-        scenario = self.initialize_closed_loop_scenario(strategy_number)
+        scenario = self.initialize_closed_loop_scenario(strategy)
         scenario.set_test_initial_state(
             n_dest_ahead, n_dest_behind, n_orig_ahead, n_orig_behind,
             self.v_ref, self.delta_x)
         return scenario
 
     def create_closed_loop_single_gap_scenario(
-            self, strategy_number: int, gap_position: int
+            self, strategy: lc_strategy.StrategyMap, gap_position: int
     ) -> LaneChangeScenario:
-        scenario = self.initialize_closed_loop_scenario(strategy_number)
+        scenario = self.initialize_closed_loop_scenario(strategy)
         scenario.set_single_gap_initial_state(gap_position, self.v_ref,
                                               self.delta_x["lo"])
         return scenario
@@ -249,6 +350,10 @@ class LaneChangeScenarioManager:
         except nx.NodeNotFound:
             print("Simulation interrupted because some nodes were not "
                   "found in the graph.")
+            return
+        except KeyError:
+            print("Simulation interrupted because a query was not "
+                  "found in the strategies map.")
             return
 
         self.store_results(scenario, gap_position)
@@ -336,8 +441,8 @@ class LaneChangeScenarioManager:
     #     with open(file_path, "a") as file:
     #         file.write(new_line)
 
-    def _create_scenario_name(self, strategy_number: int):
-        scenario_name = lc_strategy.strategy_map[strategy_number].get_name()
+    def _create_scenario_name(self, strategy_id: lc_strategy.StrategyMap):
+        scenario_name = strategy_id.get_implementation().get_name()
         if self.v_ref["orig"] > self.v_ref["dest"]:
             scenario_name += " vo > vd"
         elif self.v_ref["orig"] < self.v_ref["dest"]:
@@ -754,9 +859,10 @@ class LaneChangeScenario(SimulationScenario):
         self.n_per_lane.append(fd_counter + ld_counter + 1)
         # print(f"Final: #ld={ld_counter}, #fd={fd_counter} ")
 
-    def set_lane_change_strategy(self, platoon_strategy_number: int):
+    def set_lane_change_strategy(self,
+                                 platoon_strategy: lc_strategy.StrategyMap):
         self.vehicle_group.set_platoon_lane_change_strategy(
-            platoon_strategy_number)
+            platoon_strategy)
 
     def make_control_centralized(self):
         self.vehicle_group.centralize_control()
@@ -820,7 +926,7 @@ class AllLaneChangeStrategies(LaneChangeScenario):
             expected_states_at_lc_time: Mapping[str, np.ndarray] = None
             ) -> None:
         sg = lc_strategy.StrategyGenerator()
-        strategy_number = lc_strategy.TemplateStrategy.get_id()
+        strategy = lc_strategy.StrategyMap.template
         all_positions = [i for i in range(self._n_platoon)]
 
         ldf_lc_order = all_positions
@@ -861,7 +967,7 @@ class AllLaneChangeStrategies(LaneChangeScenario):
                 self.set_test_initial_state(self._nda, self._ndb, self._noa,
                                             self._nob, self.v_ref, self.delta_x)
                 self.vehicle_group.set_platoon_lane_change_strategy(
-                    strategy_number)
+                    strategy)
                 self.vehicle_group.set_predefined_lane_change_order(
                     merging_order, coop_order)
                 self.vehicle_group.set_verbose(False)

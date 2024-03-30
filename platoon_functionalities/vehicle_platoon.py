@@ -29,6 +29,10 @@ class Platoon:
         return self._id
 
     def get_size(self) -> int:
+        """
+        Gets the number of vehicles
+        :return:
+        """
         return len(self.vehicles)
 
     def get_vehicle_by_position(self, pos: int) -> fsv.FourStateVehicle:
@@ -134,12 +138,49 @@ class Platoon:
     def get_strategy(self) -> lc_strategies.LaneChangeStrategy:
         return self.lane_change_strategy
 
+    def get_system_states(
+            self, veh_pos: int, all_vehicles: Mapping[int, base.BaseVehicle]
+    ) -> dict[str, np.ndarray]:
+        """
+        Creates system states around the vehicle at veh_pos
+        :return:
+        """
+        states = self.get_centered_vehicles_states()
+        platoon_leader = self.get_platoon_leader()
+        leader_x = platoon_leader.get_x()
+        leader_y = platoon_leader.get_y()
+        x_idx = fsv.FourStateVehicle.get_idx_of_state("x")
+        y_idx = fsv.FourStateVehicle.get_idx_of_state("y")
+        if platoon_leader.has_origin_lane_leader():
+            lo = all_vehicles[platoon_leader.get_origin_lane_leader_id()]
+            lo_states = lo.get_states()
+        else:
+            lo_states = platoon_leader.get_states()
+            lo_states[x_idx] += configuration.MAX_DISTANCE
+        lo_states[x_idx] -= leader_x
+        lo_states[y_idx] -= leader_y
+        states["lo"] = lo_states
+
+        veh = self.get_vehicle_by_position(veh_pos)
+        if veh.has_destination_lane_leader():
+            ld = all_vehicles[veh.get_destination_lane_leader_id()]
+            ld_states = ld.get_states()
+        else:
+            ld_states = platoon_leader.get_states()
+            ld_states[x_idx] += configuration.MAX_DISTANCE
+            ld_states[y_idx] = platoon_leader.get_target_y()
+        ld_states[x_idx] -= leader_x
+        ld_states[y_idx] -= leader_y
+        states["ld"] = ld_states
+        return states
+
     def set_lc_start_time(self, time: float) -> None:
         self._lc_start_time = time
 
-    def set_strategy(self, lane_change_strategy: int) -> None:
-        self.lane_change_strategy = lc_strategies.strategy_map[
-            lane_change_strategy](self)
+    def set_strategy(self, lane_change_strategy: lc_strategies.StrategyMap
+                     ) -> None:
+        self.lane_change_strategy = lane_change_strategy.get_implementation()(
+            self)
 
     def set_lane_change_order(
             self, strategy_parameters: configuration.Strategy
@@ -189,7 +230,7 @@ class Platoon:
 class OptimalPlatoon(Platoon):
 
     def __init__(self, first_vehicle: fsv.OptimalControlVehicle,
-                 lane_change_strategy: int):
+                 lane_change_strategy: lc_strategies.StrategyMap):
         super().__init__()
 
         # Vehicles and their ids sorted by position (first is front-most)
@@ -210,7 +251,7 @@ class OptimalPlatoon(Platoon):
 
 class ClosedLoopPlatoon(Platoon):
     def __init__(self, first_vehicle: fsv.ClosedLoopVehicle,
-                 lane_change_strategy: int,
+                 lane_change_strategy: lc_strategies.StrategyMap,
                  ):
         super().__init__()
 

@@ -12,7 +12,10 @@ import controllers.optimal_controller as opt_ctrl
 import controllers.vehicle_controller as veh_ctrl
 import operating_modes.concrete_vehicle_modes as modes
 import vehicle_models.base_vehicle as base
-import platoon_functionalities.vehicle_platoon as vehicle_platoon
+from platoon_functionalities import vehicle_platoon
+from platoon_functionalities import platoon_lane_change_strategies \
+    as lc_strategies
+
 
 
 class FourStateVehicle(base.BaseVehicle, ABC):
@@ -189,13 +192,13 @@ class FourStateVehicle(base.BaseVehicle, ABC):
 
     def initialize_platoons(
             self, vehicles: Mapping[int, base.BaseVehicle],
-            platoon_lane_change_strategy: int
+            platoon_lane_change_strategy: lc_strategies.StrategyMap = None
     ) -> None:
         self.update_platoons(vehicles, platoon_lane_change_strategy)
 
     def update_platoons(
             self, vehicles: Mapping[int, base.BaseVehicle],
-            platoon_lane_change_strategy: int,
+            platoon_lane_change_strategy: lc_strategies.StrategyMap,
     ) -> None:
         """
         For now, only used to set platoons at the start of the simulation.
@@ -273,7 +276,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             self._inputs[self._input_idx[i_name]] = optimal_inputs[i_idx]
 
     def _create_platoon(
-            self, platoon_lane_change_strategy: int
+            self, platoon_lane_change_strategy: lc_strategies.StrategyMap
     ) -> vehicle_platoon.Platoon:
         pass
 
@@ -409,8 +412,9 @@ class OptimalControlVehicle(FourStateVehicle):
             return delta_t <= self.get_opt_controller().get_time_horizon()
         return False
 
-    def _create_platoon(self, platoon_lane_change_strategy: int
-                        ) -> vehicle_platoon.OptimalPlatoon:
+    def _create_platoon(
+            self, platoon_lane_change_strategy: lc_strategies.StrategyMap
+            ) -> vehicle_platoon.OptimalPlatoon:
         return vehicle_platoon.OptimalPlatoon(
             self, platoon_lane_change_strategy)
 
@@ -475,8 +479,9 @@ class ClosedLoopVehicle(FourStateVehicle):
     def _set_up_lane_change_control(self):
         self._controller.set_up_lane_change_control(self._lc_start_time)
 
-    def _create_platoon(self, platoon_lane_change_strategy: int
-                        ) -> vehicle_platoon.ClosedLoopPlatoon:
+    def _create_platoon(
+            self, platoon_lane_change_strategy: lc_strategies.StrategyMap
+            ) -> vehicle_platoon.ClosedLoopPlatoon:
         return vehicle_platoon.ClosedLoopPlatoon(
             self, platoon_lane_change_strategy)
 

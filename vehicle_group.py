@@ -26,6 +26,8 @@ class VehicleGroup:
     rear_most_dest_lane_vehicle: base.BaseVehicle
     forced_state: Mapping[str, np.ndarray]
 
+    _platoon_lane_change_strategy: lc_strategies.StrategyMap
+
     def __init__(self):
         self.vehicles: dict[int, base.BaseVehicle] = {}
         # Often, we need to iterate over all vehicles in the order they were
@@ -36,7 +38,7 @@ class VehicleGroup:
         # The full system (all vehicles) mode is defined by follower/leader
         # pairs.
         self.mode_sequence: som.ModeSequence = som.ModeSequence()
-        self._platoon_lane_change_strategy = 0
+        # self._platoon_lane_change_strategy = None
         # self._vehicle_states_graph = None
         # self._strategy_map = None
         self._maneuver_order = None
@@ -213,8 +215,8 @@ class VehicleGroup:
                 return veh.get_platoon_strategy_decision_time()
 
     def set_platoon_lane_change_strategy(
-            self, strategy_number: int) -> None:
-        self._platoon_lane_change_strategy = strategy_number
+            self, strategy: lc_strategies.StrategyMap) -> None:
+        self._platoon_lane_change_strategy = strategy
 
     def set_predefined_lane_change_order(
             self, lane_change_order: list[set[int]],
@@ -512,15 +514,23 @@ class VehicleGroup:
 
     def is_platoon_out_of_range(self) -> bool:
         if (self._platoon_lane_change_strategy ==
-                lc_strategies.LastFirstStrategy.get_id()):
+                lc_strategies.StrategyMap.last_vehicle_first):
             for veh_id in self.lane_changing_vehicle_ids:
                 if (self.vehicles[veh_id].get_x()
                         < self.rear_most_dest_lane_vehicle.get_x()):
                     return True
         if (self._platoon_lane_change_strategy ==
-                lc_strategies.LeaderFirstReverseStrategy.get_id()):
+                lc_strategies.StrategyMap.leader_first_and_reverse):
             for veh_id in self.lane_changing_vehicle_ids:
                 if (self.vehicles[veh_id].get_x()
+                        > self.front_most_dest_lane_vehicle.get_x()):
+                    return True
+        if (self._platoon_lane_change_strategy ==
+                lc_strategies.StrategyMap.single_body_platoon):
+            for veh_id in self.lane_changing_vehicle_ids:
+                if (self.vehicles[veh_id].get_x()
+                        < self.rear_most_dest_lane_vehicle.get_x()
+                    or self.vehicles[veh_id].get_x()
                         > self.front_most_dest_lane_vehicle.get_x()):
                     return True
 

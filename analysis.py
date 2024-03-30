@@ -15,6 +15,11 @@ import configuration
 import post_processing as pp
 
 
+def get_python_results_for_paper(save_fig: bool = False):
+    compare_approaches(save_fig)
+    compare_graph_to_best_heuristic(save_fig)
+
+
 def load_latest_simulated_scenario(pickle_file_name: str):
     with open(pickle_file_name, 'rb') as f:
         data = pickle.load(f)
@@ -26,10 +31,18 @@ def load_result_summary():
     file_path = os.path.join(configuration.DATA_FOLDER_PATH,
                              'platoon_strategy_results', file_name)
     results = pd.read_csv(file_path)
-    latest_experiments = results.groupby(
-        'n_platoon')['experiment_counter'].max()
-    latest_results = results.loc[results['experiment_counter'].isin(
-        latest_experiments)]
+    # TODO: erase all old results and run again
+    # Simulations before 15 are old and have unreliable results
+    results = results[results["experiment_counter"] >= 15]
+    simulation_identifiers = ['n_platoon', 'vo', 'vd', 'gap_position',
+                              'strategy']
+    # latest_experiments = results.groupby(
+    #     simulation_identifiers)['experiment_counter'].max().to_numpy()
+    # latest_results = results.loc[results['experiment_counter'].isin(
+    #     latest_experiments)]
+    # For each simulated configuration, get only the latest result
+    latest_results = results.loc[results.groupby(
+        simulation_identifiers)['experiment_counter'].idxmax()]
     return latest_results
 
 

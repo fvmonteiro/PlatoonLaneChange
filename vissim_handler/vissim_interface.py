@@ -20,25 +20,23 @@ def run_platoon_simulations(is_warm_up: bool = False):
         strategies = [PlatoonLaneChangeStrategy.graph_min_accel]
         special_case = ["warmup"]
     else:
-        # strategies = [PlatoonLaneChangeStrategy.graph_min_accel,
-        #               PlatoonLaneChangeStrategy.graph_min_time]
-        strategies = scenario_handling.all_platoon_simulation_configurations[
+        strategies = scenario_handling.all_vissim_simulation_configurations[
             "strategies"]
         special_case = None
     scenario_name = "platoon_discretionary_lane_change"
     other_vehicles = [{VehicleType.HDV: 100}]
     # vehicles_per_lane = [1000]
     vehicles_per_lane = (
-        scenario_handling.all_platoon_simulation_configurations[
+        scenario_handling.all_vissim_simulation_configurations[
             "vehicles_per_lane"]
     )
     # orig_and_dest_lane_speeds = [("70", "50")]
     orig_and_dest_lane_speeds = (
-        scenario_handling.all_platoon_simulation_configurations[
+        scenario_handling.all_vissim_simulation_configurations[
             "orig_and_dest_lane_speeds"])
-    platoon_size = [2, 3, 4]
-    # platoon_size = (
-    #     scenario_handling.all_platoon_simulation_configurations["platoon_size"])
+    # platoon_size = [5]
+    platoon_size = (
+        scenario_handling.all_vissim_simulation_configurations["platoon_size"])
 
     scenarios = scenario_handling.create_multiple_scenarios(
         other_vehicles, vehicles_per_lane, lane_change_strategies=strategies,
@@ -46,6 +44,7 @@ def run_platoon_simulations(is_warm_up: bool = False):
         platoon_size=platoon_size, special_cases=special_case)
 
     vi = VissimInterface()
+    time.sleep(1)  # trying to give the computer some "breathing time"
     vi.load_simulation(scenario_name)
     vi.run_multiple_platoon_lane_change_scenarios(scenarios)
 
@@ -376,10 +375,13 @@ class VissimInterface:
         self.set_simulation_period(simulation_period)
         self.set_number_of_runs(runs_per_scenario)
 
+        n_scenarios = len(scenarios)
+        counter = 0
         print("Starting multiple-scenario run.")
         multiple_sim_start_time = time.perf_counter()
         for sc in scenarios:
-            print("Scenario:\n", sc)
+            counter += 1
+            print(f"Scenario ({counter}/{n_scenarios}):\n", sc)
             self.reset_saved_simulations(warning_active=False)
             self.set_vissim_scenario_parameters(sc)
             if is_debugging:
@@ -440,9 +442,9 @@ class VissimInterface:
             orig_lane_composition_number, scenario.orig_and_dest_lane_speeds[0])
         self.set_vehicle_composition_desired_speed(
             dest_lane_composition_number, scenario.orig_and_dest_lane_speeds[1])
-        speed_map = {"orig_lane": scenario.orig_and_dest_lane_speeds[0],
-                     "dest_lane": scenario.orig_and_dest_lane_speeds[1]}
-        self.set_reduced_speed_area_limit(speed_map)
+        # speed_map = {"orig_lane": scenario.orig_and_dest_lane_speeds[0],
+        #              "dest_lane": scenario.orig_and_dest_lane_speeds[1]}
+        # self.set_reduced_speed_area_limit(speed_map)
         self.set_uniform_vehicle_input_for_all_lanes(scenario.vehicles_per_lane)
 
     def get_parameters_for_platoon_special_case_scenario(

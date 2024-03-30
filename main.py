@@ -12,7 +12,7 @@ import numpy as np
 
 import analysis
 import configuration
-from platoon_functionalities import graph_tools
+from platoon_functionalities import graph_tools, platoon_lane_change_strategies
 import scenarios
 import vehicle_models
 from vissim_handler import vissim_interface
@@ -84,7 +84,6 @@ def run_brute_force_strategy_test(
         n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
         n_dest_ahead: int, n_dest_behind: int, are_vehicles_cooperative: bool,
         v_ref: Mapping[str, float], delta_x: Mapping[str, float]):
-
     tf = configuration.Configuration.sim_time
     scenario = scenarios.AllLaneChangeStrategies(
         n_platoon, n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind,
@@ -113,65 +112,6 @@ def run_save_and_plot(scenario: scenarios.SimulationScenario, tf: float,
         analysis.plot_costs_vs_iteration(running_cost, terminal_cost)
     except AttributeError:
         pass
-
-
-def run_closed_loop_test(
-        n_platoon: int, are_vehicles_cooperative: bool,
-        v_orig: float, v_ff_platoon: float, v_dest: float,
-        delta_x: Mapping[str, float],
-        strategies: Iterable[int], plot_results: bool = True):
-    scenario_manager = scenarios.LaneChangeScenarioManager()
-    v_ref = {'orig': v_orig, 'platoon': v_ff_platoon, 'dest': v_dest}
-    scenario_manager.set_parameters(
-        n_platoon, are_vehicles_cooperative, v_ref, delta_x)
-    n_orig_ahead = 1
-    n_orig_behind = 1
-    n_dest_ahead = 1
-    n_dest_behind = 1
-    scenario_manager.set_plotting(plot_results)
-    scenario_manager.run_strategy_comparison_on_test_scenario(
-        n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind, strategies
-    )
-
-
-def run_all_scenarios_for_comparison(
-        n_platoon: int, v_orig: float, v_ff_platoon: float,
-        are_vehicles_cooperative: bool):
-    run_scenarios_for_comparison(
-        n_platoon, v_orig, v_ff_platoon, are_vehicles_cooperative,
-        [5, 6, 12, 13], np.array([50, 70, 90]) / 3.6,
-        has_plots=False, save=True)
-
-
-def run_scenarios_for_comparison(
-        n_platoon: int, v_orig: float, v_ff_platoon: float,
-        are_vehicles_cooperative: bool, strategies: Iterable[int],
-        v_dest: Sequence[float], gap_positions: Iterable[int] = None,
-        has_plots: bool = True, save: bool = False):
-
-    scenario_manager = scenarios.LaneChangeScenarioManager()
-    scenario_manager.set_plotting(has_plots)
-    v_ref = {'orig': v_orig, 'platoon': v_ff_platoon}
-    print('Starting multiple runs')
-    for vd in v_dest:
-        print(f'  v_dest={vd * 3.6}')
-        v_ref['dest'] = vd
-        scenario_manager.set_parameters(n_platoon, are_vehicles_cooperative,
-                                        v_ref)
-        for s in strategies:
-            print(f'    strategy number={s}')
-            if gap_positions is None:
-                scenario_manager.run_all_single_gap_cases(s)
-            else:
-                for gp in gap_positions:
-                    scenario_manager.run_single_gap_scenario(s, gp)
-    result = scenario_manager.get_results()
-    print(result.groupby('strategy')[
-              ['success', 'completion_time', 'accel_cost', 'decision_time']
-          ].mean())
-    result.to_csv('results_temp_name.csv', index=False)
-    if save:
-        scenario_manager.append_results_to_csv()
 
 
 # def run_optimal_platoon_test(
@@ -231,7 +171,7 @@ def filter_test():
     v_ego = []
     v_ref = []
     v_ff = []
-    for i in range(int(tf/dt)):
+    for i in range(int(tf / dt)):
         if i == 0:
             sim_time.append(0)
             v_ego.append(v0)
@@ -259,7 +199,7 @@ def filter_test():
     fig.show()
 
 
-def test_1():
+def debug_unsolved_initial_states():
     """
     Loads initial nodes which raised problems and rebuilds trees starting
     from them
@@ -274,7 +214,7 @@ def test_1():
     # graph_creator._initial_states |= set(unsolved_initial_states)
     visited_nodes = set()
 
-    free_flow_speeds = np.array([70.] + [110.]*n_platoon + [0.]) / 3.6
+    free_flow_speeds = np.array([70.] + [110.] * n_platoon + [0.]) / 3.6
     possible_vel_dest = np.array([50, 70, 90]) / 3.6
     n = len(unsolved_initial_states)
     for i in range(n):
@@ -282,7 +222,7 @@ def test_1():
         free_flow_speeds[-1] = (
             graph_creator.state_quantizer.dequantize_free_flow_velocities(
                 x0[-1], possible_vel_dest))
-        print(f"{i+1}/{n}")
+        print(f"{i + 1}/{n}")
         graph_creator.add_all_from_initial_state_to_graph(
             x0, visited_nodes, free_flow_speeds, "ao")
         # tracker = graph_tools.PlatoonLCTracker(n_platoon)
@@ -318,8 +258,7 @@ def explore_collision_scenarios():
 
 
 def main():
-
-    n_platoon = 4
+    n_platoon = 2
     n_orig_ahead, n_orig_behind = 1, 1
     n_dest_ahead, n_dest_behind = 1, 1
 
@@ -337,42 +276,56 @@ def main():
     #     jumpstart_next_solver_call=True, has_initial_mode_guess=True
     # )
 
-    # v_orig = [110/3.6 - 2]
-    # v_ff_platoon = 110/3.6  # make 110
-    # v_dest = np.array([70])/3.6  # make 50, 70, 90
+    v_orig = 70/3.6
+    v_ff_platoon = 110/3.6
+    v_dest = 50/3.6
+    strategy = [platoon_lane_change_strategies.StrategyMap.single_body_platoon]
     # max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY * 1.1
 
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
     graph_includes_fd = False
 
-    start_time = time.time()
+    times = [time.time()]
+    # start_time = time.time()
 
-    # lcsm = scenarios.LaneChangeScenarioManager()
-    for n_platoon in [2, 3, 4, 5]:
+    # scenarios.run_scenarios_for_comparison(
+    #     n_platoon, v_orig, v_dest, v_ff_platoon, are_vehicles_cooperative,
+    #     strategy, has_plots=True)
+    # scenarios.run_all_scenarios_for_comparison(warmup=True)
+    # times.append(time.time())
+    # warmup_time = datetime.timedelta(seconds=times[-1] - times[-2])
+    # print("Python warmup time:", str(warmup_time).split(".")[0])
+
+    for n_platoon in [5]:
         print(f"===== Exploring scenario with platoon size {n_platoon} =====")
         sim_time = 20.0 * n_platoon
         configuration.Configuration.set_scenario_parameters(
             sim_time=sim_time, increase_lc_time_headway=False
         )
         graph_creator = graph_tools.GraphCreator(n_platoon, graph_includes_fd)
-        # graph_creator.solve_initial_states_from_simulations("vissim", "ao")
-        graph_creator.solve_queries_from_simulations("vissim", "as")
-        # graph_tools.GraphCreator.solve_initial_states_from_simulations(
-        #     n_platoon, graph_includes_fd, "python", "as")
-        # lcsm.set_parameters(n_platoon, are_vehicles_cooperative, v_ref={})
+        graph_creator.solve_queries_from_simulations("python", "as")
+    #     graph_creator.solve_queries_from_simulations("vissim", "as")
+        times.append(time.time())
+        graph_time = datetime.timedelta(seconds=times[-1] - times[-2])
+        print(f"Graph n={n_platoon} expansion time:",
+              str(graph_time).split(".")[0])
+        # lcsm = scenarios.LaneChangeScenarioManager(
+        #     n_platoon, are_vehicles_cooperative, v_ref={})
         # lcsm.run_scenarios_from_file("vissim")
 
-    mid_time = time.time()
-    exec_time = datetime.timedelta(seconds=mid_time - start_time)
-    print("Graph expansion time:", str(exec_time).split(".")[0])
+    scenarios.run_all_scenarios_for_comparison()
+    times.append(time.time())
+    python_sim_time = datetime.timedelta(seconds=times[-1] - times[-2])
+    print("Python sim time:", str(python_sim_time).split(".")[0])
+    analysis.get_python_results_for_paper()
 
     vissim_interface.run_platoon_simulations()
-    end_time = time.time()
-    exec_time = datetime.timedelta(seconds=end_time - mid_time)
-    print("VISSIM running time:", str(exec_time).split(".")[0])
+    times.append(time.time())
+    vissim_time = datetime.timedelta(seconds=times[-1] - times[-2])
+    print("VISSIM running time:", str(vissim_time).split(".")[0])
 
-    exec_time = datetime.timedelta(seconds=end_time - start_time)
+    exec_time = datetime.timedelta(seconds=time.time() - times[0])
     print("Execution time:", str(exec_time).split(".")[0])
 
 

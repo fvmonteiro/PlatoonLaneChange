@@ -120,7 +120,7 @@ def vehicle_percentage_dict_to_string(
     return " ".join(sorted(ret_str))
 
 
-all_platoon_simulation_configurations: dict[str, Iterable] = {
+all_vissim_simulation_configurations: dict[str, Iterable] = {
     "strategies": [
         vissim_vehicle.PlatoonLaneChangeStrategy.single_body_platoon,
         vissim_vehicle.PlatoonLaneChangeStrategy.last_vehicle_first,
@@ -153,11 +153,11 @@ def get_platoon_lane_change_scenarios(
         other_vehicles = [{vissim_vehicle.VehicleType.HDV: 100}]
     else:
         other_vehicles = [{vissim_vehicle.VehicleType.CONNECTED: 100}]
-    strategies = all_platoon_simulation_configurations["strategies"]
-    orig_and_dest_lane_speeds = all_platoon_simulation_configurations[
+    strategies = all_vissim_simulation_configurations["strategies"]
+    orig_and_dest_lane_speeds = all_vissim_simulation_configurations[
         "orig_and_dest_lane_speeds"]
-    platoon_size = all_platoon_simulation_configurations["platoon_size"]
-    vehicles_per_lane = all_platoon_simulation_configurations[
+    platoon_size = all_vissim_simulation_configurations["platoon_size"]
+    vehicles_per_lane = all_vissim_simulation_configurations[
         "vehicles_per_lane"]
     scenarios = []
     if select == "all" or select == "dest_lane_speed":

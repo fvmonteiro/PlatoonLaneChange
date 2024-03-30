@@ -33,6 +33,7 @@ class VehicleType(Enum):
         return _vehicle_type_to_vissim_id[self]
 
 
+# TODO: merge with platoon_lane_change_strategies.StrategyMap
 class PlatoonLaneChangeStrategy(Enum):
     human_driven = -1  # baseline for comparison
     no_strategy = 0  # baseline for comparison
@@ -42,13 +43,6 @@ class PlatoonLaneChangeStrategy(Enum):
     leader_first_and_reverse = 4
     graph_min_time = 5
     graph_min_accel = 6
-
-    @classmethod
-    def get_all_strategies(cls) -> list[PlatoonLaneChangeStrategy]:
-        """ Excludes 'no strategy' and 'human driven' """
-        return [cls(i) for i
-                in range(cls.single_body_platoon.value,
-                         cls.graph_min_accel.value + 1)]
 
     def get_print_name(self):
         _strategy_to_print_name: dict[PlatoonLaneChangeStrategy, str] = {
