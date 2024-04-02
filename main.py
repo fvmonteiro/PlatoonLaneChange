@@ -12,10 +12,12 @@ import numpy as np
 
 import analysis
 import configuration
+import post_processing
 from platoon_functionalities import graph_tools, platoon_lane_change_strategies
 import scenarios
 import vehicle_models
 from vissim_handler import vissim_interface
+from vissim_handler import file_handling
 
 trajectory_file_name = 'trajectory_data.pickle'  # temp
 cost_file_name = 'cost_data.pickle'
@@ -278,8 +280,12 @@ def main():
 
     v_orig = 70/3.6
     v_ff_platoon = 110/3.6
-    v_dest = 90/3.6
-    strategy = [platoon_lane_change_strategies.StrategyMap.graph_min_time]
+    v_dest = 70/3.6
+    strategies = [
+        platoon_lane_change_strategies.StrategyMap.last_vehicle_first,
+        platoon_lane_change_strategies.StrategyMap.leader_first_and_reverse,
+        platoon_lane_change_strategies.StrategyMap.graph_min_time
+    ]
     # max_dist = v_ff_platoon * configuration.SAFE_TIME_HEADWAY * 1.1
 
     is_acceleration_optimal = True
@@ -287,11 +293,12 @@ def main():
     graph_includes_fd = False
 
     times = [time.time()]
-    # start_time = time.time()
 
-    scenarios.run_scenarios_for_comparison(
-        2, v_orig, v_dest, v_ff_platoon, are_vehicles_cooperative,
-        strategy, has_plots=True)
+    # scenarios.run_scenarios_for_comparison(
+    #     4, v_orig, v_dest, v_ff_platoon, are_vehicles_cooperative,
+    #     strategies
+    # )
+
     # scenarios.run_all_scenarios_for_comparison(warmup=True)
     # times.append(time.time())
     # warmup_time = datetime.timedelta(seconds=times[-1] - times[-2])
@@ -310,6 +317,13 @@ def main():
     #     graph_time = datetime.timedelta(seconds=times[-1] - times[-2])
     #     print(f"Graph n={n_platoon} expansion time:",
     #           str(graph_time).split(".")[0])
+    #
+    #     try:
+    #         post_processing.export_strategy_maps_to_cloud([n_platoon])
+    #     except FileNotFoundError or EOFError:
+    #         print("Couldn't share strategy maps")
+    #         continue
+    #     times.append(time.time())
     #     # lcsm = scenarios.LaneChangeScenarioManager(
     #     #     n_platoon, are_vehicles_cooperative, v_ref={})
     #     # lcsm.run_scenarios_from_file("vissim")
@@ -318,8 +332,10 @@ def main():
     # times.append(time.time())
     # python_sim_time = datetime.timedelta(seconds=times[-1] - times[-2])
     # print("Python sim time:", str(python_sim_time).split(".")[0])
+    post_processing.export_results_to_cloud()
+
     # analysis.get_python_results_for_paper()
-    #
+
     # vissim_interface.run_platoon_simulations()
     # times.append(time.time())
     # vissim_time = datetime.timedelta(seconds=times[-1] - times[-2])

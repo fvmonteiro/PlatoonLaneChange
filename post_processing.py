@@ -97,17 +97,17 @@ def compute_default_safe_gap(vel):
 
 def export_strategy_maps_to_cloud(n_platoon: Iterable[int] = None,
                                   cost_names: Iterable[str] = None):
-    _exchange_files_with_cloud(True, n_platoon, cost_names)
+    _exchange_strategy_maps_with_cloud(True, n_platoon, cost_names)
 
 
 def import_strategy_maps_from_cloud(n_platoon: Iterable[int] = None,
                                     cost_names: Iterable[str] = None):
-    _exchange_files_with_cloud(False, n_platoon, cost_names)
+    _exchange_strategy_maps_with_cloud(False, n_platoon, cost_names)
 
 
-def _exchange_files_with_cloud(is_exporting: bool,
-                               n_platoon: Iterable[int] = None,
-                               cost_names: Iterable[str] = None):
+def _exchange_strategy_maps_with_cloud(is_exporting: bool,
+                                       n_platoon: Iterable[int] = None,
+                                       cost_names: Iterable[str] = None):
     if n_platoon is None:
         n_platoon = [2, 3, 4]
     if cost_names is None:
@@ -128,3 +128,28 @@ def _exchange_files_with_cloud(is_exporting: bool,
             shutil.copy2(source_path, dest_path)
             print(f'File {file_name} copied from folder {source_dir} to '
                   f'{dest_dir}')
+
+
+def export_results_to_cloud():
+    _exchange_results_with_cloud(True)
+
+
+def import_results_from_cloud():
+    _exchange_results_with_cloud(False)
+
+
+def _exchange_results_with_cloud(is_exporting: bool):
+    local_dir = os.path.join(config.DATA_FOLDER_PATH,
+                             "platoon_strategy_results")
+    cloud_dir = os.path.join(config.SHARED_DATA_PATH,
+                             "platoon_strategy_results")
+    if is_exporting:
+        source_dir, dest_dir = local_dir, cloud_dir
+    else:
+        source_dir, dest_dir = cloud_dir, local_dir
+    file_name = "result_summary.csv"
+    source_path = os.path.join(source_dir, file_name)
+    dest_path = os.path.join(dest_dir, file_name)
+    shutil.copy2(source_path, dest_path)
+    print(f'File {file_name} copied from folder {source_dir} to '
+          f'{dest_dir}')

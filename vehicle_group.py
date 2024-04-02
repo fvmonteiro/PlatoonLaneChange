@@ -22,8 +22,11 @@ class CollisionException(RuntimeError):
 class VehicleGroup:
     """ Class to help manage groups of vehicles """
 
-    front_most_dest_lane_vehicle: base.BaseVehicle
-    rear_most_dest_lane_vehicle: base.BaseVehicle
+    _front_most_dest_lane_vehicle: base.BaseVehicle
+    _rear_most_dest_lane_vehicle: base.BaseVehicle
+    _front_most_lc_vehicle: base.BaseVehicle
+    _rear_most_lc_vehicle: base.BaseVehicle
+
     forced_state: Mapping[str, np.ndarray]
 
     _platoon_lane_change_strategy: lc_strategies.StrategyMap
@@ -329,10 +332,16 @@ class VehicleGroup:
 
         dest_lane_vehicles = [veh for veh in self.vehicles.values()
                               if veh.get_current_lane() > 0]
-        self.front_most_dest_lane_vehicle = max(dest_lane_vehicles,
+        self._front_most_dest_lane_vehicle = max(dest_lane_vehicles,
+                                                 key=lambda x: x.get_x())
+        self._rear_most_dest_lane_vehicle = min(dest_lane_vehicles,
                                                 key=lambda x: x.get_x())
-        self.rear_most_dest_lane_vehicle = min(dest_lane_vehicles,
-                                               key=lambda x: x.get_x())
+        lane_changing_vehicles = [self.vehicles[veh_id] for veh_id
+                                  in self.lane_changing_vehicle_ids]
+        self._front_most_lc_vehicle = max(lane_changing_vehicles,
+                                          key=lambda x: x.get_x())
+        self._rear_most_lc_vehicle = min(lane_changing_vehicles,
+                                         key=lambda x: x.get_x())
 
     def fill_vehicle_array(self, vehicles: Iterable[base.BaseVehicle]) -> None:
         if self.get_n_vehicles() > 0:
@@ -513,26 +522,25 @@ class VehicleGroup:
         return False
 
     def is_platoon_out_of_range(self) -> bool:
-        if (self._platoon_lane_change_strategy ==
-                lc_strategies.StrategyMap.last_vehicle_first):
-            for veh_id in self.lane_changing_vehicle_ids:
-                if (self.vehicles[veh_id].get_x()
-                        < self.rear_most_dest_lane_vehicle.get_x()):
-                    return True
-        if (self._platoon_lane_change_strategy ==
-                lc_strategies.StrategyMap.leader_first_and_reverse):
-            for veh_id in self.lane_changing_vehicle_ids:
-                if (self.vehicles[veh_id].get_x()
-                        > self.front_most_dest_lane_vehicle.get_x()):
-                    return True
-        if (self._platoon_lane_change_strategy ==
-                lc_strategies.StrategyMap.single_body_platoon):
-            for veh_id in self.lane_changing_vehicle_ids:
-                if (self.vehicles[veh_id].get_x()
-                        < self.rear_most_dest_lane_vehicle.get_x()
-                    or self.vehicles[veh_id].get_x()
-                        > self.front_most_dest_lane_vehicle.get_x()):
-                    return True
+        if (self._rear_most_lc_vehicle.get_x()
+                >= self._front_most_dest_lane_vehicle.get_x()
+            or self._front_most_lc_vehicle.get_x()
+                <= self._rear_most_dest_lane_vehicle.get_x()):
+            return True
+
+        # Not necessary form here one, but helps terminate earlier
+        if (self._platoon_lane_change_strategy in
+                [lc_strategies.StrategyMap.last_vehicle_first,
+                 lc_strategies.StrategyMap.single_body_platoon]):
+            if (self._rear_most_lc_vehicle.get_x()
+                    < self._rear_most_dest_lane_vehicle.get_x()):
+                return True
+        if (self._platoon_lane_change_strategy in
+                [lc_strategies.StrategyMap.leader_first_and_reverse,
+                 lc_strategies.StrategyMap.single_body_platoon]):
+            if (self._front_most_lc_vehicle.get_x()
+                    > self._front_most_dest_lane_vehicle.get_x()):
+                return True
 
     def write_vehicle_states(self, time,
                              state_vectors: Mapping[int, np.ndarray],
@@ -577,6 +585,14 @@ class VehicleGroup:
                         f'current lane: {vehicle.get_current_lane()}.)')
                 return False
         return True
+
+    def are_all_at_target_lane_center(self) -> bool:
+        # for veh_id in self.lane_changing_vehicle_ids:
+        #     if not self.vehicles[veh_id].is_at_lane_center():
+        #         return False
+        # return True
+        return np.all([self.vehicles[veh_id].is_at_lane_center()
+                      for veh_id in self.lane_changing_vehicle_ids])
 
     def truncate_simulation_history(self) -> None:
         """

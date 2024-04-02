@@ -53,6 +53,7 @@ def run_all_scenarios_for_comparison(warmup: bool = False):
         all_platoon_simulation_configurations[
             "orig_and_dest_lane_speeds"])
     v_ff_platoon = configuration.FREE_FLOW_SPEED * configuration.KMH_TO_MS
+    # n_platoon = [4, 5]
     n_platoon = all_platoon_simulation_configurations["platoon_size"]
     are_vehicles_cooperative = False
 
@@ -90,12 +91,12 @@ def run_scenarios_for_comparison(
         else:
             for gp in gap_positions:
                 scenario_manager.run_single_gap_scenario(s, gp)
-                result = scenario_manager.get_results()
-                print(result.groupby('strategy')[
-                          ['success', 'completion_time', 'accel_cost',
-                           'decision_time']
-                      ].mean())
-                result.to_csv('results_temp_name.csv', index=False)
+                # result = scenario_manager.get_results()
+                # print(result.groupby('strategy')[
+                #           ['success', 'completion_time', 'accel_cost',
+                #            'decision_time']
+                #       ].mean())
+                # result.to_csv('results_temp_name.csv', index=False)
     if save:
         scenario_manager.append_results_to_csv()
 
@@ -158,7 +159,7 @@ class LaneChangeScenarioManager:
     #     if delta_x is not None:
     #         self.delta_x = delta_x
 
-    def set_plotting(self, value: bool):
+    def set_plotting(self, value: bool) -> None:
         self._has_plots = value
 
     def run_scenarios_from_file(self, simulator_name: str,
@@ -275,6 +276,7 @@ class LaneChangeScenarioManager:
         scenario_name = self._create_scenario_name(strategy)
         print(f"      gap position={gap_position}")
         scenario = self.initialize_closed_loop_scenario(strategy)
+        scenario.set_allow_early_termination(True)
         scenario.set_single_gap_initial_state(gap_position, self.v_ref,
                                               self.delta_x["lo"])
         self.run_save_and_plot(scenario, tf, gap_position,
@@ -387,10 +389,14 @@ class LaneChangeScenarioManager:
             strategy_name = "none"
             lane_change_order = []
             cooperation_order = []
+        success = veh_group.check_lane_change_success()
         completion_time = np.max(veh_group.get_lc_end_times())
         accel_cost = veh_group.compute_acceleration_cost()
         decision_time = veh_group.get_decision_time()
-        print(f"      Jt={completion_time:.1f}, Ju={accel_cost:.0f}")
+        if success:
+            print(f"      Jt={completion_time:.1f}, Ju={accel_cost:.0f}")
+        else:
+            print(f"      Lane change failure")
 
         result = {
             "n_platoon": scenario.get_n_platoon(),
@@ -753,6 +759,7 @@ class LaneChangeScenario(SimulationScenario):
         self._lc_intention_time = 1.0
         self._n_platoon = n_platoon
         self._are_vehicles_cooperative = are_vehicles_cooperative
+        self._allow_early_termination = False
 
     def get_opc_results_summary(self):
         # We assume there's either a single optimally controlled vehicles
@@ -771,6 +778,9 @@ class LaneChangeScenario(SimulationScenario):
             raise AttributeError  # no optimal control vehicles in this group
         return (opc_vehicle.get_opt_controller().get_running_cost_history(),
                 opc_vehicle.get_opt_controller().get_terminal_cost_history())
+
+    def set_allow_early_termination(self, value: bool) -> None:
+        self._allow_early_termination = value
 
     def set_lc_intention_time(self, value):
         self._lc_intention_time = value
@@ -815,7 +825,7 @@ class LaneChangeScenario(SimulationScenario):
         # choice ensures at least one dest lane vehicle ahead of lo and another
         # behind fd
         n_ahead = 1 + gap_position
-        n_behind = 3
+        n_behind = gap_position + self._n_platoon + 1
 
         # We make the gap align with one of the origin lane vehicles
         if gap_position == 0:
@@ -833,14 +843,21 @@ class LaneChangeScenario(SimulationScenario):
         # assuming uniform vehicles:
         reference_gap = center_vehicle.compute_non_connected_reference_gap(
             v_dest)
-        safe_gap_leader = center_vehicle.compute_safe_lane_change_gap(
-            configuration.SAFE_TIME_HEADWAY, v_dest,
-            center_vehicle.brake_max, is_other_ahead=True
-        )
+
+        min_gap_to_decelerate = (
+                (center_vehicle.get_vel() ** 2 - v_dest ** 2)
+                / 2 / np.abs(center_vehicle.brake_comfort_max)
+                )
+        gap_to_leader = max(reference_gap, min_gap_to_decelerate)
+        # safe_gap_leader = center_vehicle.compute_safe_lane_change_gap(
+        #     configuration.SAFE_TIME_HEADWAY, v_dest,
+        #     center_vehicle.brake_max, is_other_ahead=True
+        # )
         safe_gap_follower = center_vehicle.compute_safe_lane_change_gap(
             configuration.SAFE_TIME_HEADWAY, v_dest,
             center_vehicle.brake_max, is_other_ahead=False
         )
+        gap_to_follower = safe_gap_follower
         x_gap = center_vehicle.get_x() + delta_x
         # x0 = x_gap + n_ahead * reference_gap
 
@@ -849,7 +866,7 @@ class LaneChangeScenario(SimulationScenario):
         fd_counter = 0
         pN = self.vehicle_group.get_vehicle_by_name("p" + str(self._n_platoon))
         # print(f"x_gap={x_gap:.1f}")
-        x0 = x_gap + safe_gap_leader + 0.1  # good to have some margin
+        x0 = x_gap + gap_to_leader + 0.1  # good to have some margin
         for n in range(n_ahead):
             veh = fsv.ClosedLoopVehicle(False, is_acceleration_optimal,
                                         self._are_vehicles_cooperative)
@@ -860,7 +877,7 @@ class LaneChangeScenario(SimulationScenario):
             self.vehicle_group.add_vehicle(veh)
             x0 += reference_gap
 
-        x0 = x_gap - safe_gap_follower - 0.1
+        x0 = x_gap - gap_to_follower - 0.1
         for n in range(n_behind):
             veh = fsv.ClosedLoopVehicle(False, is_acceleration_optimal,
                                         self._are_vehicles_cooperative)
@@ -928,6 +945,12 @@ class LaneChangeScenario(SimulationScenario):
             # Early termination conditions
             if self.vehicle_group.is_platoon_out_of_range():
                 print(f"Platoon out of simulation range at {time[i]}")
+                self.vehicle_group.truncate_simulation_history()
+                break
+            if (self._allow_early_termination
+                    and time[i] > self._lc_intention_time + self.dt
+                    and self.vehicle_group.are_all_at_target_lane_center()):
+                print(f"Lane change finished at {time[i]}")
                 self.vehicle_group.truncate_simulation_history()
                 break
 
