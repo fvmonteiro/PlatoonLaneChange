@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from enum import Enum
 import os
-import time
+import datetime
 from collections.abc import Mapping
+import time
 from typing import Callable, Union
 import warnings
 
@@ -46,7 +47,10 @@ def run_platoon_simulations(is_warm_up: bool = False):
     vi = VissimInterface()
     time.sleep(1)  # trying to give the computer some "breathing time"
     vi.load_simulation(scenario_name)
+    start_time = time.time()
     vi.run_multiple_platoon_lane_change_scenarios(scenarios)
+    run_time = datetime.timedelta(seconds=time.time() - start_time)
+    print(f"Vissim simulations time:", str(run_time).split(".")[0])
 
 
 def run_platoon_warm_up():

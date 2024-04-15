@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import copy
+import datetime
 import pickle
 import warnings
 from collections.abc import Iterable, Mapping, Sequence
 from collections import defaultdict, deque
 import json
 import os
+import time
 from typing import Any, Union
 
 import networkx as nx
@@ -20,74 +22,6 @@ import platoon_functionalities.platoon_lane_change_strategies as lc_strategies
 import vehicle_group as vg
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
-
-
-def _simulate_till_lane_change(
-        vehicle_group: vg.ShortSimulationVehicleGroup,
-        initial_state: np.ndarray,
-        free_flow_speeds: Sequence[float],
-        next_platoon_positions_to_move: set[int],
-        next_platoon_position_to_coop: int
-) -> bool:
-    """
-    Simulates the vehicle group until all listed platoon vehicles have finished
-    lane changing. When there is no cooperation, only simulates if the
-    front-most lane changing vehicle is behind the destination lane leader.
-    :param vehicle_group:
-    :param initial_state:
-    :param free_flow_speeds:
-    :param next_platoon_positions_to_move:
-    :param next_platoon_position_to_coop:
-    :return:
-    """
-    vehicle_group.set_verbose(False)
-    vehicle_group.set_vehicles_initial_states_from_array(
-        initial_state)
-    vehicle_group.set_platoon_lane_change_order(
-        [next_platoon_positions_to_move], [next_platoon_position_to_coop])
-    # Due to quantization, we could end up with initial vel above free
-    # flow desired vel. To prevent vehicles from decelerating, we allow
-    # these slightly higher free-flow speeds
-    adjusted_free_flow_speeds = []
-    for i, veh in enumerate(vehicle_group.get_all_vehicles_in_order()):
-        adjusted_free_flow_speeds.append(
-            max(free_flow_speeds[i], veh.get_vel()))
-    vehicle_group.set_free_flow_speeds(adjusted_free_flow_speeds)
-
-    dt = 1.0e-2
-    tf = 40.
-    time = np.arange(0, tf + dt, dt)
-    vehicle_group.prepare_to_start_simulation(len(time))
-    [veh.set_lane_change_direction(1) for veh
-     in vehicle_group.vehicles.values()
-     if (veh.is_in_a_platoon() and veh.get_current_lane() == 0)]
-    vehicle_group.update_surrounding_vehicles()
-
-    next_vehs_to_move = (vehicle_group.get_next_vehicles_to_change_lane(
-        next_platoon_positions_to_move))
-
-    # We skip the simulation if no cooperation and the front most lc vehicle
-    # cannot start a lane change
-    if next_platoon_position_to_coop < 0:
-        front_most_vehicle = max([veh for veh in next_vehs_to_move],
-                                 key=lambda x: x.get_x())
-        # front_most_vehicle.check_surrounding_gaps_safety(vehicle_group.vehicles)
-        # front_most_vehicle.get_is_lane_change_gap_suitable()
-        # if not front_most_vehicle.get_is_lane_change_gap_suitable():
-        #     return False
-        ld = vehicle_group.get_vehicle_by_name("ld")
-        if ld.get_x() < front_most_vehicle.get_x():
-            return False
-
-    i = 0
-    success = False
-    while i < len(time) - 1 and not success:
-        i += 1
-        vehicle_group.simulate_one_time_step(time[i],
-                                             detect_collision=True)
-        success = np.all([not veh.has_lane_change_intention()
-                          for veh in next_vehs_to_move])
-    return success
 
 
 class VehicleStateGraph:
@@ -383,7 +317,7 @@ class PlatoonLCTracker:
 
 class GraphCreator:
 
-    def __init__(self, n_platoon: int, has_fd: bool):
+    def __init__(self, n_platoon: int, has_fd: bool = False):
         self._n_platoon = n_platoon
         self._has_fd = has_fd
         self.vehicle_state_graph = VehicleStateGraph()
@@ -485,6 +419,13 @@ class GraphCreator:
         """
         Expands the graph to include queries made during simulations.
         """
+        start_time = time.time()
+
+        sim_time = 20.0 * self._n_platoon
+        configuration.Configuration.set_scenario_parameters(
+            sim_time=sim_time, increase_lc_time_headway=False
+        )
+
         df, file_path = GraphCreator.load_queries_from_simulations(
             self._n_platoon, simulator_name)
         if scenario_number is not None:
@@ -522,6 +463,9 @@ class GraphCreator:
         self.save_vehicle_state_graph_to_file()
         self.save_quantization_parameters_to_file()
         self.save_minimum_cost_strategies_to_json()
+        graph_time = datetime.timedelta(seconds=time.time() - start_time)
+        print(f"Graph n={self._n_platoon} expansion time:",
+              str(graph_time).split(".")[0])
 
     def get_n_vehicles_per_state(self):
         return self._n_platoon + 2 + self._has_fd
@@ -827,9 +771,9 @@ class GraphCreator:
         v_idx = fsv.FourStateVehicle.get_idx_of_state("v")
         return VehicleStateGraph.order_values(
             initial_state_per_vehicle["lo"][v_idx],
-            [configuration.FREE_FLOW_SPEED] * self._n_platoon,
+            [configuration.FREE_FLOW_SPEED * configuration.KMH_TO_MS]
+            * self._n_platoon,
             initial_state_per_vehicle["ld"][v_idx])
-
 
     def _create_initial_states(
             self, v0_lo: float, v0_platoon: float, v0_ld: float, v0_fd: float,
@@ -1454,3 +1398,132 @@ class StateQuantizer:
     #     qv = []
     #     for v in velocities:
     #         qv.append(v - self.min_value)
+
+
+# ================== Exploring simulations with issues ======================= #
+
+def debug_unsolved_initial_states():
+    """
+    Loads initial nodes which raised problems and rebuilds trees starting
+    from them
+    :return:
+    """
+    n_platoon = 2
+    with open("data/unsolved_root_nodes.pickle", "rb") as f:
+        unsolved_initial_states = pickle.load(f)
+
+    graph_creator = GraphCreator(2, False)
+    graph_creator.load_a_graph()
+    # graph_creator._initial_states |= set(unsolved_initial_states)
+    visited_nodes = set()
+
+    free_flow_speeds = np.array([70.] + [110.] * n_platoon + [0.]) / 3.6
+    possible_vel_dest = np.array([50, 70, 90]) / 3.6
+    n = len(unsolved_initial_states)
+    for i in range(n):
+        x0 = unsolved_initial_states[i]
+        free_flow_speeds[-1] = (
+            graph_creator.state_quantizer.dequantize_free_flow_velocities(
+                x0[-1], possible_vel_dest))
+        print(f"{i + 1}/{n}")
+        graph_creator.add_all_from_initial_state_to_graph(
+            x0, visited_nodes, free_flow_speeds, "ao")
+        # tracker = graph_tools.PlatoonLCTracker(n_platoon)
+        # tracker.move_vehicles([0], -1)
+        # root = (tracker, x0)
+        # vsg._explore_until_maneuver_completion(root, visited_nodes,
+        #                                        free_flow_speeds)
+    if n > 0:
+        graph_creator.save_vehicle_state_graph_to_file()
+        graph_creator.save_quantization_parameters_to_file()
+        graph_creator.save_minimum_cost_strategies_to_json()
+
+
+def explore_collision_scenarios():
+    file_name = "collisions"
+    file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                             "vehicle_state_graphs",
+                             file_name + ".pickle")
+    collision_scenarios: list[dict[str, Any]] = []
+    with open(file_path, "rb") as f:
+        try:
+            while True:
+                collision_scenarios.append(pickle.load(f))
+        except EOFError:
+            pass
+
+    for sc in collision_scenarios:
+        print(f"Exploring initial condition: {sc['root']}")
+        graph_creator = GraphCreator(sc["platoon_size"], False)
+        graph_creator.explore_given_path(
+            sc["root"], sc["collision_node"], sc["tracker"],
+            sc["free_flow_speeds"], sc["next_to_move"], sc["next_to_coop"])
+
+
+# Helper function for the GraphCreator
+def _simulate_till_lane_change(
+        vehicle_group: vg.ShortSimulationVehicleGroup,
+        initial_state: np.ndarray,
+        free_flow_speeds: Sequence[float],
+        next_platoon_positions_to_move: set[int],
+        next_platoon_position_to_coop: int
+) -> bool:
+    """
+    Simulates the vehicle group until all listed platoon vehicles have finished
+    lane changing. When there is no cooperation, only simulates if the
+    front-most lane changing vehicle is behind the destination lane leader.
+    :param vehicle_group:
+    :param initial_state:
+    :param free_flow_speeds:
+    :param next_platoon_positions_to_move:
+    :param next_platoon_position_to_coop:
+    :return:
+    """
+    vehicle_group.set_verbose(False)
+    vehicle_group.set_vehicles_initial_states_from_array(
+        initial_state)
+    vehicle_group.set_platoon_lane_change_order(
+        [next_platoon_positions_to_move], [next_platoon_position_to_coop])
+    # Due to quantization, we could end up with initial vel above free
+    # flow desired vel. To prevent vehicles from decelerating, we allow
+    # these slightly higher free-flow speeds
+    adjusted_free_flow_speeds = []
+    for i, veh in enumerate(vehicle_group.get_all_vehicles_in_order()):
+        adjusted_free_flow_speeds.append(
+            max(free_flow_speeds[i], veh.get_vel()))
+    vehicle_group.set_free_flow_speeds(adjusted_free_flow_speeds)
+
+    dt = 1.0e-2
+    tf = 40.
+    time = np.arange(0, tf + dt, dt)
+    vehicle_group.prepare_to_start_simulation(len(time))
+    [veh.set_lane_change_direction(1) for veh
+     in vehicle_group.vehicles.values()
+     if (veh.is_in_a_platoon() and veh.get_current_lane() == 0)]
+    vehicle_group.update_surrounding_vehicles()
+
+    next_vehs_to_move = (vehicle_group.get_next_vehicles_to_change_lane(
+        next_platoon_positions_to_move))
+
+    # We skip the simulation if no cooperation and the front most lc vehicle
+    # cannot start a lane change
+    if next_platoon_position_to_coop < 0:
+        front_most_vehicle = max([veh for veh in next_vehs_to_move],
+                                 key=lambda x: x.get_x())
+        # front_most_vehicle.check_surrounding_gaps_safety(vehicle_group.vehicles)
+        # front_most_vehicle.get_is_lane_change_gap_suitable()
+        # if not front_most_vehicle.get_is_lane_change_gap_suitable():
+        #     return False
+        ld = vehicle_group.get_vehicle_by_name("ld")
+        if ld.get_x() < front_most_vehicle.get_x():
+            return False
+
+    i = 0
+    success = False
+    while i < len(time) - 1 and not success:
+        i += 1
+        vehicle_group.simulate_one_time_step(time[i],
+                                             detect_collision=True)
+        success = np.all([not veh.has_lane_change_intention()
+                          for veh in next_vehs_to_move])
+    return success

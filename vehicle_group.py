@@ -228,7 +228,7 @@ class VehicleGroup:
 
     def set_platoon_lane_change_order(self, lane_change_order: list[set[int]],
                                       cooperation_order: list[int]) -> None:
-        p1 = self.get_vehicle_by_name('p1')
+        p1 = self.get_vehicle_by_name("p1")
         p1.set_platoon_lane_change_order((lane_change_order, cooperation_order))
 
     def set_verbose(self, value: bool) -> None:
@@ -320,7 +320,10 @@ class VehicleGroup:
             d[self.vehicles[veh_id].get_name()] = values[veh_id]
         return d
 
-    def prepare_to_start_simulation(self, n_samples: int) -> None:
+    def prepare_to_start_simulation(
+            self, n_samples: int,
+            platoon_lc_strategy: lc_strategies.StrategyMap = None
+    ) -> None:
         """
         Sets all internal states, inputs and other simulation-related variables
         to zero.
@@ -328,7 +331,7 @@ class VehicleGroup:
         self.mode_sequence = som.ModeSequence()
         for vehicle in self.vehicles.values():
             vehicle.prepare_to_start_simulation(n_samples)
-        self.initialize_platoons()
+        self.initialize_platoons(platoon_lc_strategy)
 
         dest_lane_vehicles = [veh for veh in self.vehicles.values()
                               if veh.get_current_lane() > 0]
@@ -440,7 +443,11 @@ class VehicleGroup:
         for veh in self.vehicles.values():
             veh.reset_platoon()
 
-    def initialize_platoons(self) -> None:
+    # TODO [Apr 5]: check if this function needs a default param or if we
+    #  only call it when there is a strategy
+    def initialize_platoons(
+            self, platoon_lc_strategy: lc_strategies.StrategyMap = None
+    ) -> None:
         """
         Based on vehicles parameters and initial position, create platoons
         of vehicles
@@ -452,7 +459,7 @@ class VehicleGroup:
         # Then, we run their internal algorithms to form platoons
         for veh_id, veh in self.vehicles.items():
             veh.initialize_platoons(
-                self.vehicles, self._platoon_lane_change_strategy)
+                self.vehicles, platoon_lc_strategy)
 
         # TODO: poor organization. The platoon strategy only has to be set once
         #  per platoon. The code is also confusing cause self._maneuver_order

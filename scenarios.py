@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
+import datetime
 import os
 import pickle
+import time
+import warnings
 from typing import Union
 
 import control as ct
@@ -23,6 +25,8 @@ import post_processing as pp
 import vehicle_group as vg
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
+import vehicle_models.three_state_vehicles as tsv
+
 
 config = configuration.Configuration
 
@@ -38,6 +42,117 @@ all_platoon_simulation_configurations = {
     "orig_and_dest_lane_speeds": [(70, 50), (70, 70), (70, 90)],
     "platoon_size": [2, 3, 4, 5],
 }
+
+
+# ================== Functions to quickly run simulations ==================== #
+def run_no_lc_scenario():
+    time_start = time.time()
+    tf = 10
+    scenario = VehicleFollowingScenario(2)
+    scenario.create_initial_state()
+    scenario.run(tf)
+    analysis.plot_vehicle_following(scenario.response_to_dataframe())
+    exec_time = datetime.timedelta(seconds=time.time() - time_start)
+    print("run_no_lc_scenario time:", str(exec_time).split(".")[0])
+
+
+def run_fast_lane_change():
+    time_start = time.time()
+    tf = 5
+    scenario = FastLaneChange()
+    scenario.run(tf)
+    data = scenario.response_to_dataframe()
+    analysis.plot_lane_change(data)
+    exec_time = datetime.timedelta(seconds=time.time() - time_start)
+    print("run_fast_lane_change time:", str(exec_time).split(".")[0])
+
+
+def run_base_ocp_scenario():
+    trajectory_file_name = 'trajectory_data.pickle'  # temp
+    v_ff = 10
+    tf = 10
+
+    scenario = ExampleScenarioExternal()
+    vehicles = [
+        [tsv.ThreeStateVehicleRearWheel()],
+        [tsv.ThreeStateVehicleRearWheel()]
+    ]
+    scenario.create_vehicle_group(vehicles)
+    scenario.set_free_flow_speeds(v_ff)
+    scenario.create_initial_state()
+    scenario.set_desired_final_states(tf)
+    scenario.solve()
+    scenario.run(tf)
+    scenario.save_response_data(trajectory_file_name)
+    data = scenario.response_to_dataframe()
+    analysis.plot_lane_change(data)
+
+
+def run_optimal_platoon_test(
+        n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
+        n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool,
+        are_vehicles_cooperative: bool):
+    trajectory_file_name = 'trajectory_data.pickle'  # temp
+    cost_file_name = 'cost_data.pickle'
+    v_ref = dict()  # TODO: make param
+    delta_x = dict()  # TODO: make param
+    scenario = LaneChangeScenario(n_platoon,
+    are_vehicles_cooperative)
+    scenario.set_control_type('optimal', is_acceleration_optimal)
+    scenario.create_test_scenario(n_dest_ahead, n_dest_behind, n_orig_ahead,
+                                  n_orig_behind, v_ref, delta_x)
+    # scenario.create_optimal_control_test_scenario(
+    #     n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind)
+    tf = configuration.Configuration.time_horizon + 2
+    # run_save_and_plot(scenario, tf)
+    scenario.run(tf)
+    scenario.save_response_data(trajectory_file_name)
+    data = scenario.response_to_dataframe()
+    analysis.plot_trajectory(data)
+    if scenario.get_n_platoon() < 1:
+        analysis.plot_constrained_lane_change(data, 'p1')  # TODO: ego or p1
+    else:
+        analysis.plot_platoon_lane_change(data)
+    scenario.save_cost_data(cost_file_name)
+    running_cost, terminal_cost = scenario.get_opc_cost_history()
+    analysis.plot_costs_vs_iteration(running_cost, terminal_cost)
+
+
+def run_with_external_controller(
+        n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
+        n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool,
+        are_vehicles_cooperative: bool, v_ref: Mapping[str, float],
+        delta_x: Mapping[str, float]):
+    trajectory_file_name = 'trajectory_data.pickle'  # temp
+    cost_file_name = 'cost_data.pickle'
+    # Set-up
+    tf = configuration.Configuration.time_horizon
+    scenario = LaneChangeWithExternalController(
+        n_platoon, are_vehicles_cooperative)
+    scenario.create_initial_state(
+        n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind, v_ref,
+        delta_x, is_acceleration_optimal)
+    scenario.set_desired_final_states(configuration.Configuration.time_horizon)
+    # Solve
+    print("Calling OCP solver")
+    scenario.solve()
+    # run_save_and_plot(scenario, tf)
+    scenario.run(tf)
+    scenario.save_response_data(trajectory_file_name)
+    data = scenario.response_to_dataframe()
+    analysis.plot_trajectory(data)
+    if scenario.get_n_platoon() < 1:
+        analysis.plot_constrained_lane_change(data, 'p1')  # TODO: ego or p1
+    else:
+        analysis.plot_platoon_lane_change(data)
+    scenario.save_cost_data(cost_file_name)
+    running_cost, terminal_cost = scenario.get_opc_cost_history()
+    analysis.plot_costs_vs_iteration(running_cost, terminal_cost)
+
+    # analysis.plot_constrained_lane_change(
+    #     scenario.ocp_simulation_to_dataframe(), 'p1')
+    # analysis.compare_desired_and_actual_final_states(
+    #     scenario.boundary_conditions_to_dataframe(), data)
 
 
 def run_all_scenarios_for_comparison(warmup: bool = False):
@@ -57,6 +172,7 @@ def run_all_scenarios_for_comparison(warmup: bool = False):
     n_platoon = all_platoon_simulation_configurations["platoon_size"]
     are_vehicles_cooperative = False
 
+    start_time = time.time()
     for n in n_platoon:
         sim_time = 20.0 * n
         configuration.Configuration.set_scenario_parameters(
@@ -69,6 +185,10 @@ def run_all_scenarios_for_comparison(warmup: bool = False):
                 are_vehicles_cooperative, strategies,
                 has_plots=False, save=save_results
             )
+
+    warmup_time = datetime.timedelta(seconds=time.time() - start_time)
+    print("Time to run all platoon scenarios:",
+          str(warmup_time).split(".")[0])
 
 
 def run_scenarios_for_comparison(
@@ -844,15 +964,16 @@ class LaneChangeScenario(SimulationScenario):
         reference_gap = center_vehicle.compute_non_connected_reference_gap(
             v_dest)
 
-        min_gap_to_decelerate = (
-                (center_vehicle.get_vel() ** 2 - v_dest ** 2)
-                / 2 / np.abs(center_vehicle.brake_comfort_max)
-                )
-        gap_to_leader = max(reference_gap, min_gap_to_decelerate)
-        # safe_gap_leader = center_vehicle.compute_safe_lane_change_gap(
-        #     configuration.SAFE_TIME_HEADWAY, v_dest,
-        #     center_vehicle.brake_max, is_other_ahead=True
-        # )
+        # min_gap_to_decelerate = (
+        #         (center_vehicle.get_vel() ** 2 - v_dest ** 2)
+        #         / 2 / np.abs(center_vehicle.brake_comfort_max)
+        #         )
+        # gap_to_leader = max(reference_gap, min_gap_to_decelerate)
+        safe_gap_leader = center_vehicle.compute_safe_lane_change_gap(
+            configuration.SAFE_TIME_HEADWAY, v_dest,
+            center_vehicle.brake_max, is_other_ahead=True
+        )
+        gap_to_leader = safe_gap_leader
         safe_gap_follower = center_vehicle.compute_safe_lane_change_gap(
             configuration.SAFE_TIME_HEADWAY, v_dest,
             center_vehicle.brake_max, is_other_ahead=False
@@ -888,29 +1009,12 @@ class LaneChangeScenario(SimulationScenario):
             self.vehicle_group.add_vehicle(veh)
             x0 -= reference_gap
         self.n_per_lane.append(n_ahead + n_behind)
-        # while x0 > pN.get_x() - n_behind * reference_gap:
-        #     if np.abs(x0 - x_gap) > 0.1:  # skip the vehicle at x_gap
-        #         veh = fsv.ClosedLoopVehicle(False, is_acceleration_optimal,
-        #                                     self._are_vehicles_cooperative)
-        #         if x0 > x_gap:
-        #             veh_name = "ld" + str(ld_counter)
-        #             ld_counter += 1
-        #         else:
-        #             veh_name = "fd" + str(fd_counter)
-        #             fd_counter += 1
-        #         veh.set_name(veh_name)
-        #         veh.set_free_flow_speed(v_dest)
-        #         veh.set_initial_state(x0, configuration.LANE_WIDTH, 0., v_dest)
-        #         self.vehicle_group.add_vehicle(veh)
-        #     # print(f"x0={x0:.1f}, #ld={ld_counter}, #fd={fd_counter}")
-        #     x0 -= reference_gap
-        # self.n_per_lane.append(fd_counter + ld_counter + 1)
-        # print(f"Final: #ld={ld_counter}, #fd={fd_counter} ")
 
     def set_lane_change_strategy(self,
                                  platoon_strategy: lc_strategy.StrategyMap):
-        self.vehicle_group.set_platoon_lane_change_strategy(
-            platoon_strategy)
+        self._platoon_strategy = platoon_strategy
+        # self.vehicle_group.set_platoon_lane_change_strategy(
+        #     platoon_strategy)
 
     def make_control_centralized(self):
         self.vehicle_group.centralize_control()
@@ -928,34 +1032,50 @@ class LaneChangeScenario(SimulationScenario):
          the vehicle states to equal this value at the lane change intention
          time.
         """
-        time = self.create_simulation_time_steps(final_time)
-        self.vehicle_group.prepare_to_start_simulation(len(time))
-        for i in range(len(time) - 1):
-            if np.abs(time[i] - self._lc_intention_time) < self.dt / 10:
+        sim_time = self.create_simulation_time_steps(final_time)
+        for i in range(len(sim_time) - 1):
+            if np.abs(sim_time[i] - self._lc_intention_time) < self.dt / 10:
                 self.vehicle_group.set_vehicles_lane_change_direction(
                     1, self.lc_vehicle_names)
             # There's a one dt delay between setting the intention and starting
             # the procedure for the maneuver
             elif (expected_states_at_lc_time is not None
-                  and (np.abs(time[i] - (self._lc_intention_time + self.dt))
+                  and (np.abs(sim_time[i] - (self._lc_intention_time + self.dt))
                        < self.dt / 10)):
                 self.vehicle_group.force_state(expected_states_at_lc_time)
-            self.vehicle_group.simulate_one_time_step(time[i + 1],
+            self.vehicle_group.simulate_one_time_step(sim_time[i + 1],
                                                       detect_collision=True)
             # Early termination conditions
             if self.vehicle_group.is_platoon_out_of_range():
-                print(f"Platoon out of simulation range at {time[i]}")
+                print(f"Platoon out of simulation range at {sim_time[i]}")
                 self.vehicle_group.truncate_simulation_history()
                 break
             if (self._allow_early_termination
-                    and time[i] > self._lc_intention_time + self.dt
+                    and sim_time[i] > self._lc_intention_time + self.dt
                     and self.vehicle_group.are_all_at_target_lane_center()):
-                print(f"Lane change finished at {time[i]}")
+                print(f"Lane change finished at {sim_time[i]}")
                 self.vehicle_group.truncate_simulation_history()
                 break
 
 
+class LaneChangeWithClosedLoopControl(LaneChangeScenario):
+    _platoon_lc_strategy: lc_strategy.StrategyMap
+
+    def run(self, final_time: float,
+            expected_states_at_lc_time: Mapping[str, np.ndarray] = None
+            ) -> None:
+        pass
+        # self.vehicle_group.prepare_to_start_simulation(
+        #     len(time), self._platoon_lc_strategy)
+
+
+class LaneChangeWithOptimalControl(LaneChangeScenario):
+    pass
+
 class AllLaneChangeStrategies(LaneChangeScenario):
+    """
+    Class to run all possible one-by-one strategies and pick the best
+    """
 
     def __init__(self, n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
                  n_dest_ahead: int, n_dest_behind: int,
@@ -980,7 +1100,6 @@ class AllLaneChangeStrategies(LaneChangeScenario):
             expected_states_at_lc_time: Mapping[str, np.ndarray] = None
             ) -> None:
         sg = lc_strategy.StrategyGenerator()
-        strategy = lc_strategy.StrategyMap.template
         all_positions = [i for i in range(self._n_platoon)]
 
         ldf_lc_order = all_positions
@@ -996,13 +1115,7 @@ class AllLaneChangeStrategies(LaneChangeScenario):
         best_result = self.vehicle_group
         counter = 0
         for i in range(self._n_platoon):
-
             print("Starting with veh", i)
-
-            # all_merging_orders, all_coop_orders = sg.get_all_orders(
-            #     self._n_platoon, [i])
-            # for merging_order, coop_order in zip(all_merging_orders[6:7],
-            #                                      all_coop_orders[6:7]):
             for merging_order, coop_order in sg.generate_order_all(
                     i, [], [], remaining_vehicles.copy()):
                 if (merging_order == ldf_lc_order
@@ -1020,8 +1133,10 @@ class AllLaneChangeStrategies(LaneChangeScenario):
                 self.vehicle_group = vg.VehicleGroup()
                 self.set_test_initial_state(self._nda, self._ndb, self._noa,
                                             self._nob, self.v_ref, self.delta_x)
+                strategy = lc_strategy.TemplateStrategy()
+                strategy.set_maneuver_order(merging_order, coop_order)
                 self.vehicle_group.set_platoon_lane_change_strategy(
-                    strategy)
+                    lc_strategy.StrategyMap.template)
                 self.vehicle_group.set_predefined_lane_change_order(
                     merging_order, coop_order)
                 self.vehicle_group.set_verbose(False)
@@ -1127,6 +1242,7 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
         self.set_desired_lane_changes()
 
     def solve(self):
+        time_start = time.time()
         self.vehicle_group.update_surrounding_vehicles()
         self.controller = opt_ctrl.VehicleOptimalController()
         self.controller.set_time_horizon(self.tf)
@@ -1134,7 +1250,10 @@ class ExternalOptimalControlScenario(SimulationScenario, ABC):
             [self.vehicle_group.get_vehicle_id_by_name(veh_name) for veh_name
              in self.lc_vehicle_names])
         self.controller.find_trajectory(self.vehicle_group.vehicles)
+        solve_time = datetime.timedelta(seconds=time.time() - time_start)
+        print("solve time:", str(solve_time).split(".")[0])
         # return self.controller.ocp_result
+
 
     def run_ocp_solution(self) -> None:
         """

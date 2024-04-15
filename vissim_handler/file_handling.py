@@ -5,7 +5,6 @@ import shutil
 from typing import Union
 
 from vissim_handler.vissim_vehicle import VehicleType, PlatoonLaneChangeStrategy
-from vissim_handler.scenario_handling import ScenarioInfo
 import vissim_handler.scenario_handling as scenario_handling
 
 
@@ -148,7 +147,8 @@ class FileHandler:
     def get_vissim_test_folder(self) -> str:
         return os.path.join(self.get_results_base_folder(), "test")
 
-    def get_vissim_data_folder(self, scenario_info: ScenarioInfo) -> str:
+    def get_vissim_data_folder(
+            self, scenario_info: scenario_handling.ScenarioInfo) -> str:
         """
         Creates a string with the full path of the VISSIM simulation results
         data folder.
@@ -163,7 +163,8 @@ class FileHandler:
 
         return create_file_path(base_folder, scenario_info)
 
-    def get_moves_data_folder(self, scenario_info: ScenarioInfo) -> str:
+    def get_moves_data_folder(
+            self, scenario_info: scenario_handling.ScenarioInfo) -> str:
         """
         Creates a string with the full path of the MOVES data
         folder.
@@ -173,7 +174,7 @@ class FileHandler:
 
     def find_min_max_file_number(
             self, data_identifier: str, file_format: str,
-            scenario_info: ScenarioInfo) -> tuple[int, int]:
+            scenario_info: scenario_handling.ScenarioInfo) -> tuple[int, int]:
         """"
         Looks for the file with the highest simulation number. This is
         usually the file containing results from all simulations.
@@ -233,8 +234,10 @@ class FileHandler:
         self.export_multiple_results_to_cloud(scenarios)
 
     def import_all_vissim_platoon_scenarios_from_cloud(self):
-        strategies = scenario_handling.all_vissim_simulation_configurations[
+        strategies = (
+            scenario_handling.all_vissim_simulation_configurations[
             "strategies"]
+        )
         other_vehicles = [{VehicleType.HDV: 100}]
         vehicles_per_lane = (
             scenario_handling.all_vissim_simulation_configurations[
@@ -253,16 +256,18 @@ class FileHandler:
             platoon_size=platoon_size)
         self.import_multiple_results_from_cloud(scenarios)
 
-    def export_multiple_results_to_cloud(self, scenarios: list[ScenarioInfo]
+    def export_multiple_results_to_cloud(
+            self, scenarios: list[scenario_handling.ScenarioInfo]
                                          ) -> None:
         self._move_multiple_results(True, scenarios)
 
     def import_multiple_results_from_cloud(
-            self, scenarios: list[ScenarioInfo]) -> None:
+            self, scenarios: list[scenario_handling.ScenarioInfo]) -> None:
         self._move_multiple_results(False, scenarios)
 
     def _move_multiple_results(
-            self, is_exporting: bool, scenarios: list[ScenarioInfo]) -> None:
+            self, is_exporting: bool,
+            scenarios: list[scenario_handling.ScenarioInfo]) -> None:
         for sc in scenarios:
             try:
                 self.move_result_files(is_exporting, sc)
@@ -272,8 +277,9 @@ class FileHandler:
                       "folder.".format(sc, destination))
                 continue
 
-    def move_result_files(self, is_exporting: bool,
-                          scenario_info: ScenarioInfo) -> None:
+    def move_result_files(
+            self, is_exporting: bool,
+            scenario_info: scenario_handling.ScenarioInfo) -> None:
         """
         Moves data collections, link segments, and all post-processed data
         from the local to cloud folder is is_exporting is true, or from cloud
@@ -379,7 +385,7 @@ def create_speeds_folder_name(orig_and_dest_lane_speeds: tuple[int, str]
 
 
 def create_file_path(
-        base_folder: str, scenario_info: ScenarioInfo) -> str:
+        base_folder: str, scenario_info: scenario_handling.ScenarioInfo) -> str:
     """
     Creates a string with the full path of the data
     folder.

@@ -198,3 +198,43 @@ class VelocityController:
         else:
             filtered_variation = (1 - self._alpha) * variation
         self._v_ref += filtered_variation
+
+
+def filter_test():
+    tf = 40
+    dt = configuration.Configuration.time_step
+    v0 = 0.
+    max_vel = 20.
+    vel_ctrl = VelocityController(-4, 2)
+    vel_ctrl.reset(v0)
+    sim_time = []
+    accel = []
+    v_ego = []
+    v_ref = []
+    v_ff = []
+    for i in range(int(tf / dt)):
+        if i == 0:
+            sim_time.append(0)
+            v_ego.append(v0)
+        else:
+            sim_time.append(sim_time[-1] + dt)
+            v_ego.append(v_ego[-1] + accel[-1] * dt)
+
+        if np.isclose(sim_time[-1], 5):
+            vel_ctrl.reset(v_ego[-1])
+            v_ref.append(25)
+        else:
+            v_ref.append(max_vel)
+        v_ff.append(vel_ctrl.get_v_ff())
+        accel.append(vel_ctrl.compute_input(v_ego[-1], v_ref[-1]))
+
+    fig, ax = plt.subplots(2)
+    ax[0].grid(visible=True)
+    ax[0].plot(sim_time, v_ref, label='v_ref')
+    ax[0].plot(sim_time, v_ff, label='v_ff')
+    ax[0].plot(sim_time, v_ego, label='v_ego')
+    ax[0].legend()
+    ax[1].grid(visible=True)
+    ax[1].plot(sim_time, accel, label='accel')
+    ax[1].legend()
+    fig.show()
