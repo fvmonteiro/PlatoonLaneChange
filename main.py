@@ -57,22 +57,23 @@ def main():
     configuration.Configuration.set_scenario_parameters(
         sim_time=10 * n_platoon
     )
-    configuration.Configuration.set_solver_parameters(
-        max_iter=100, discretization_step=0.2,
-        ftol=1.0e-3, estimate_gradient=True
-    )
-    configuration.Configuration.set_optimal_controller_parameters(
-        max_iter=3, time_horizon=configuration.Configuration.sim_time - 2,
-        has_terminal_lateral_constraints=False,
-        has_lateral_safety_constraint=False,
-        initial_input_guess='mode',
-        jumpstart_next_solver_call=True, has_initial_mode_guess=True
-    )
+    # configuration.Configuration.set_solver_parameters(
+    #     max_iter=100, discretization_step=0.2,
+    #     ftol=1.0e-3, estimate_gradient=True
+    # )
+    # configuration.Configuration.set_optimal_controller_parameters(
+    #     max_iter=3, time_horizon=configuration.Configuration.sim_time - 2,
+    #     has_terminal_lateral_constraints=False,
+    #     has_lateral_safety_constraint=False,
+    #     initial_input_guess='mode',
+    #     jumpstart_next_solver_call=True, has_initial_mode_guess=True
+    # )
     scenarios.run_scenarios_for_comparison(
         n_platoon, v_orig, v_dest, v_ff_platoon, are_vehicles_cooperative,
-        [platoon_lane_change_strategies.StrategyMap.last_vehicle_first],
-        gap_positions=[1])
-    scenarios.run_base_ocp_scenario()
+        [platoon_lane_change_strategies.StrategyMap.graph_min_time],
+        gap_positions=[1]
+    )
+    # scenarios.run_base_ocp_scenario()
 
     # scenarios.run_all_scenarios_for_comparison(warmup=True)
 
@@ -90,9 +91,11 @@ def main():
     # scenarios.run_all_scenarios_for_comparison()
     # post_processing.export_results_to_cloud()
 
-    # analyzer = analysis.ResultAnalyzer(save_figs=False)
+    analyzer = analysis.ResultAnalyzer(save_figs=False)
+    # analyzer.get_python_results_for_paper()
     # analyzer.print_average_number_of_maneuver_steps()
     # analyzer.compare_approaches()
+    # analyzer.compare_to_approach("time")
 
     # vissim_interface.run_platoon_simulations()
 
