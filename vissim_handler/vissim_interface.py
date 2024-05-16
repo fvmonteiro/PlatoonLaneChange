@@ -16,14 +16,20 @@ import vissim_handler.scenario_handling as scenario_handling
 from vissim_handler.vissim_vehicle import VehicleType, PlatoonLaneChangeStrategy
 
 
-def run_platoon_simulations(is_warm_up: bool = False):
+def run_platoon_simulations(is_warm_up: bool = False, platoon_size: int = None):
     if is_warm_up:
         strategies = [PlatoonLaneChangeStrategy.graph_min_accel]
-        special_case = ["warmup"]
+        # special_case = ["warmup"]
+        special_case = None
     else:
         strategies = scenario_handling.all_vissim_simulation_configurations[
             "strategies"]
         special_case = None
+    if platoon_size is None:
+        platoon_size = (
+            scenario_handling.all_vissim_simulation_configurations[
+                "platoon_size"])
+
     scenario_name = "platoon_discretionary_lane_change"
     other_vehicles = [{VehicleType.HDV: 100}]
     # vehicles_per_lane = [1000]
@@ -35,9 +41,6 @@ def run_platoon_simulations(is_warm_up: bool = False):
     orig_and_dest_lane_speeds = (
         scenario_handling.all_vissim_simulation_configurations[
             "orig_and_dest_lane_speeds"])
-    # platoon_size = [5]
-    platoon_size = (
-        scenario_handling.all_vissim_simulation_configurations["platoon_size"])
 
     scenarios = scenario_handling.create_multiple_scenarios(
         other_vehicles, vehicles_per_lane, lane_change_strategies=strategies,
@@ -57,17 +60,22 @@ def run_platoon_warm_up():
     run_platoon_simulations(is_warm_up=True)
 
 
-def run_a_platoon_simulation():
+def run_a_platoon_simulation(
+        vehicles_per_lane: int = 500,
+        strategy: PlatoonLaneChangeStrategy
+        = PlatoonLaneChangeStrategy.graph_min_accel,
+        orig_and_dest_lane_speeds: tuple[str, str] = ("70", "50"),
+        platoon_size: int = 2,
+        random_seed: int = 7):
     scenario_name = "platoon_discretionary_lane_change"
     other_vehicles = {VehicleType.HDV: 100}
-    strategy = PlatoonLaneChangeStrategy.graph_min_accel
     scenario = scenario_handling.ScenarioInfo(
-        other_vehicles, 500, platoon_lane_change_strategy=strategy,
-        orig_and_dest_lane_speeds=("70", "50"), platoon_size=2,
+        other_vehicles, vehicles_per_lane, strategy,
+        orig_and_dest_lane_speeds, platoon_size,
         special_case="warmup")
     vi = VissimInterface()
     vi.load_simulation(scenario_name)
-    # vi.set_random_seed(8)
+    vi.set_random_seed(random_seed)
     # vi.set_logged_vehicle_id(280)
     vi.run_platoon_scenario_sample(scenario, number_of_runs=1,
                                    is_simulation_verbose=True)
@@ -891,7 +899,9 @@ class VissimInterface:
                         + extra_margin)
         filter_str = "[Pos]<=" + str(min_position)
         vehicles_to_delete = vehicles_in_link.FilteredBy(filter_str)
+        non_platoon_desired_speed = 0
         for veh in vehicles_to_delete:
+            non_platoon_desired_speed = veh.AttValue("DesSpeed")
             vehicles.RemoveVehicle(veh)
 
         # Create the platoon
@@ -903,6 +913,13 @@ class VissimInterface:
                 desired_speed, interaction)
             # print("[Client] Vehicle created at position", position)
             position += added_vehicle.AttValue("Length") + platoon_safe_gap
+        # We create an HDV in front of the platoon in case we had to delete any.
+        # This guarantees (hopefully) that platoons of all sizes reach the
+        # lc position at the same time.
+        if non_platoon_desired_speed > 0:
+            vehicles.AddVehicleAtLinkPosition(
+                VehicleType.HDV.get_vissim_id(), right_lane_link, lane,
+                position, non_platoon_desired_speed, interaction)
 
     def _periodically_set_desired_speed(
             self, simulation, first_platoon_time: int, break_period: int,

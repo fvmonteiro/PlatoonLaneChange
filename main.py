@@ -54,41 +54,46 @@ def main():
     is_acceleration_optimal = True
     are_vehicles_cooperative = False
 
-    configuration.Configuration.set_scenario_parameters(
-        sim_time=10 * n_platoon
-    )
-    configuration.Configuration.set_solver_parameters(
-        max_iter=100, discretization_step=0.2,
-        ftol=1.0e-3, estimate_gradient=True
-    )
-    configuration.Configuration.set_optimal_controller_parameters(
-        max_iter=3, time_horizon=configuration.Configuration.sim_time - 2,
-        has_terminal_lateral_constraints=False,
-        has_lateral_safety_constraint=False,
-        initial_input_guess='mode',
-        jumpstart_next_solver_call=True, has_initial_mode_guess=True
-    )
-    scenarios.run_scenarios_for_comparison(
-        n_platoon, v_orig, v_dest, v_ff_platoon, are_vehicles_cooperative,
-        [platoon_lane_change_strategies.StrategyMap.last_vehicle_first],
-        gap_positions=[1])
-    scenarios.run_base_ocp_scenario()
+    # configuration.Configuration.set_scenario_parameters(
+    #     sim_time=10 * n_platoon
+    # )
+    # configuration.Configuration.set_solver_parameters(
+    #     max_iter=100, discretization_step=0.2,
+    #     ftol=1.0e-3, estimate_gradient=True
+    # )
+    # configuration.Configuration.set_optimal_controller_parameters(
+    #     max_iter=3, time_horizon=configuration.Configuration.sim_time - 2,
+    #     has_terminal_lateral_constraints=False,
+    #     has_lateral_safety_constraint=False,
+    #     initial_input_guess='mode',
+    #     jumpstart_next_solver_call=True, has_initial_mode_guess=True
+    # )
+    # scenarios.run_scenarios_for_comparison(
+    #     n_platoon, v_orig, v_dest, v_ff_platoon, are_vehicles_cooperative,
+    #     [platoon_lane_change_strategies.StrategyMap.last_vehicle_first],
+    #     gap_positions=[1])
 
     # scenarios.run_all_scenarios_for_comparison(warmup=True)
+    vissim_interface.run_platoon_simulations(is_warm_up=True)
 
-    # for n_platoon in [5]:
-    #     print(f"===== Exploring scenario with platoon size {n_platoon} =====")
-    #     graph_creator = graph_tools.GraphCreator(n_platoon)
-    #     graph_creator.solve_queries_from_simulations("python", "as")
-    # #     graph_creator.solve_queries_from_simulations("vissim", "as")
-    #     try:
-    #         post_processing.export_strategy_maps_to_cloud([n_platoon])
-    #     except FileNotFoundError:
-    #         print("Couldn't share strategy maps")
-    #         continue
+    for n_platoon in [2, 3, 4, 5]:
+        print(f"===== Exploring scenario with platoon size {n_platoon} =====")
+        graph_creator = graph_tools.GraphCreator(n_platoon)
+        # graph_creator.solve_queries_from_simulations("python", "as")
+        graph_creator.solve_queries_from_simulations("vissim", "as")
+        try:
+            post_processing.export_strategy_maps_to_cloud([n_platoon])
+        except FileNotFoundError:
+            print("Couldn't share strategy maps")
+            continue
+        try:
+            vissim_interface.run_platoon_simulations(platoon_size=n_platoon)
+        except:
+            print("Some error when running vissim after computing graphs")
+            continue
 
     # scenarios.run_all_scenarios_for_comparison()
-    # post_processing.export_results_to_cloud()
+    # post_processing.import_results_from_cloud()
 
     # analyzer = analysis.ResultAnalyzer(save_figs=False)
     # analyzer.print_average_number_of_maneuver_steps()
