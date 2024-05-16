@@ -68,10 +68,12 @@ def main():
     #     initial_input_guess='mode',
     #     jumpstart_next_solver_call=True, has_initial_mode_guess=True
     # )
+
     # scenarios.run_scenarios_for_comparison(
     #     n_platoon, v_orig, v_dest, v_ff_platoon, are_vehicles_cooperative,
     #     [platoon_lane_change_strategies.StrategyMap.last_vehicle_first],
     #     gap_positions=[1])
+    # scenarios.run_base_ocp_scenario()
 
     # scenarios.run_all_scenarios_for_comparison(warmup=True)
     vissim_interface.run_platoon_simulations(is_warm_up=True)
@@ -95,9 +97,11 @@ def main():
     # scenarios.run_all_scenarios_for_comparison()
     # post_processing.import_results_from_cloud()
 
-    # analyzer = analysis.ResultAnalyzer(save_figs=False)
+    analyzer = analysis.ResultAnalyzer(save_figs=False)
+    # analyzer.get_python_results_for_paper()
     # analyzer.print_average_number_of_maneuver_steps()
     # analyzer.compare_approaches()
+    # analyzer.compare_to_approach("time")
 
     # vissim_interface.run_platoon_simulations()
 

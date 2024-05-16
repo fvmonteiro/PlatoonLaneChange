@@ -41,7 +41,7 @@ class ResultAnalyzer:
     def get_python_results_for_paper(self) -> None:
         self.print_average_number_of_maneuver_steps()
         self.compare_approaches()
-        self.compare_graph_to_best_heuristic()
+        # self.compare_graph_to_best_heuristic()
 
     def print_average_number_of_maneuver_steps(self):
         self.results["K"] = self.results["cooperation_order"].str.strip(
@@ -152,11 +152,15 @@ class ResultAnalyzer:
                         fig, c + "_comparison_to_" + other)
 
     def compare_to_approach(self, cost_name: str) -> None:
-        our_approach = "Graph-based" + "_" + cost_name
+        accepted_cost_name = {"time", "control"}
+        if cost_name.lower() not in accepted_cost_name:
+            raise ValueError(f"cost_name must be one of {accepted_cost_name}")
+        our_approach = "Graph Min " + cost_name.title()
         strategies = self.results["strategy"].unique()
         platoon_sizes = self.results["n_platoon"].unique()
         all_main_results = self.results.loc[
-            self.results["strategy"] == our_approach].reset_index(drop=True)
+            self.results["strategy"] == our_approach].sort_values(
+            by=["vd", "gap_position"]).reset_index(drop=True)
         for strat in strategies:
             if strat == our_approach:
                 continue
@@ -166,7 +170,8 @@ class ResultAnalyzer:
                 other_results = self.results.loc[
                     (self.results["strategy"] == strat)
                     & (self.results["n_platoon"] == n)
-                    ].reset_index(drop=True)
+                    ].sort_values(by=["vd", "gap_position"]).reset_index(
+                    drop=True)
                 # other_success = other_results.loc[other_results["success"]]
                 main_success_count = main_results["success"].sum()
                 other_success_count = other_results["success"].sum()

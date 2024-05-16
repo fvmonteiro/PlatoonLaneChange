@@ -211,12 +211,6 @@ def run_scenarios_for_comparison(
         else:
             for gp in gap_positions:
                 scenario_manager.run_single_gap_scenario(s, gp)
-                # result = scenario_manager.get_results()
-                # print(result.groupby('strategy')[
-                #           ['success', 'completion_time', 'accel_cost',
-                #            'decision_time']
-                #       ].mean())
-                # result.to_csv('results_temp_name.csv', index=False)
     if save:
         scenario_manager.append_results_to_csv()
 
@@ -869,6 +863,7 @@ class SimulationScenario(ABC):
 
 
 class LaneChangeScenario(SimulationScenario):
+    _platoon_strategy: lc_strategy.StrategyMap
 
     def __init__(self, n_platoon: int,
                  are_vehicles_cooperative: bool = False):
@@ -919,8 +914,6 @@ class LaneChangeScenario(SimulationScenario):
         self.place_dest_lane_vehicles_with_single_gap(
             v_dest_leader, gap_position, self._is_acceleration_optimal,
             delta_x_ld)
-        # analysis.plot_state_vector(
-        #     self.vehicle_group.get_full_initial_state_vector())
 
     def place_dest_lane_vehicles_with_single_gap(
             self, v_dest: float, gap_position: int,
@@ -1012,9 +1005,11 @@ class LaneChangeScenario(SimulationScenario):
 
     def set_lane_change_strategy(self,
                                  platoon_strategy: lc_strategy.StrategyMap):
+        # TODO: this is mess. Either we save the strategy in the scenario or
+        #  in the vehicle group
         self._platoon_strategy = platoon_strategy
-        # self.vehicle_group.set_platoon_lane_change_strategy(
-        #     platoon_strategy)
+        self.vehicle_group.set_platoon_lane_change_strategy(
+            platoon_strategy)
 
     def make_control_centralized(self):
         self.vehicle_group.centralize_control()
@@ -1033,6 +1028,9 @@ class LaneChangeScenario(SimulationScenario):
          time.
         """
         sim_time = self.create_simulation_time_steps(final_time)
+        self.vehicle_group.prepare_to_start_simulation(
+            len(sim_time), self._platoon_strategy)
+
         for i in range(len(sim_time) - 1):
             if np.abs(sim_time[i] - self._lc_intention_time) < self.dt / 10:
                 self.vehicle_group.set_vehicles_lane_change_direction(
