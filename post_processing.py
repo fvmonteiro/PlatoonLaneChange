@@ -109,7 +109,7 @@ def _exchange_strategy_maps_with_cloud(is_exporting: bool,
                                        n_platoon: Iterable[int] = None,
                                        cost_names: Iterable[str] = None):
     if n_platoon is None:
-        n_platoon = [2, 3, 4]
+        n_platoon = [2, 3, 4, 5]
     if cost_names is None:
         cost_names = ['time', 'accel']
 

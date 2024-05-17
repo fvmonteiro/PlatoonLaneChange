@@ -76,9 +76,11 @@ def main():
     # scenarios.run_base_ocp_scenario()
 
     # scenarios.run_all_scenarios_for_comparison(warmup=True)
-    vissim_interface.run_platoon_simulations(is_warm_up=True)
-
-    for n_platoon in [2, 3, 4, 5]:
+    platoon_sizes = [4]
+    # vissim_interface.run_platoon_simulations(is_warm_up=True,
+    #                                          platoon_size=platoon_sizes)
+    post_processing.import_strategy_maps_from_cloud(platoon_sizes)
+    for n_platoon in platoon_sizes:
         print(f"===== Exploring scenario with platoon size {n_platoon} =====")
         graph_creator = graph_tools.GraphCreator(n_platoon)
         # graph_creator.solve_queries_from_simulations("python", "as")
@@ -88,16 +90,15 @@ def main():
         except FileNotFoundError:
             print("Couldn't share strategy maps")
             continue
-        try:
-            vissim_interface.run_platoon_simulations(platoon_size=n_platoon)
-        except:
-            print("Some error when running vissim after computing graphs")
-            continue
+    # try:
+    #     vissim_interface.run_platoon_simulations(platoon_size=platoon_sizes)
+    # except:
+    #     print("Some error when running vissim after computing graphs")
 
     # scenarios.run_all_scenarios_for_comparison()
-    # post_processing.import_results_from_cloud()
 
-    analyzer = analysis.ResultAnalyzer(save_figs=False)
+
+    # analyzer = analysis.ResultAnalyzer(save_figs=False)
     # analyzer.get_python_results_for_paper()
     # analyzer.print_average_number_of_maneuver_steps()
     # analyzer.compare_approaches()

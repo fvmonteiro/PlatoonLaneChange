@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 import os
 import datetime
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 import time
 from typing import Callable, Union
 import warnings
@@ -16,7 +16,8 @@ import vissim_handler.scenario_handling as scenario_handling
 from vissim_handler.vissim_vehicle import VehicleType, PlatoonLaneChangeStrategy
 
 
-def run_platoon_simulations(is_warm_up: bool = False, platoon_size: int = None):
+def run_platoon_simulations(is_warm_up: bool = False,
+                            platoon_size: Iterable[int] = None):
     if is_warm_up:
         strategies = [PlatoonLaneChangeStrategy.graph_min_accel]
         # special_case = ["warmup"]

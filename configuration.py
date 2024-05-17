@@ -8,7 +8,7 @@ import numpy as np
 # =================================== Types ================================== #
 LCOrder = list[set[int]]
 CoopOrder = list[int]
-QuantizedState = tuple[int]
+QuantizedState = tuple[int, ...]
 Query = tuple[QuantizedState, set[int]]
 Strategy = tuple[LCOrder, CoopOrder]
 StrategyMap = dict[QuantizedState,

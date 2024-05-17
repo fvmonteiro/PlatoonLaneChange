@@ -46,6 +46,7 @@ class VehicleGroup:
         # self._strategy_map = None
         self._maneuver_order = None
         self._is_verbose = True
+        self._ids_must_change_lanes = []
 
     def get_n_vehicles(self) -> int:
         return len(self.vehicles)
@@ -475,7 +476,19 @@ class VehicleGroup:
     def simulate_one_time_step(
             self, new_time: float,
             open_loop_controls: Mapping[int, np.ndarray] = None,
-            detect_collision: bool = True) -> None:
+            detect_collision: bool = True
+    ) -> None:
+        """
+        Advances the simulation by one time step
+        :param new_time:
+        :param open_loop_controls:
+        :param detect_collision: If true, raises an error when there is a
+         collision. Otherwise, collisions happen silently.
+        :param must_change_lanes: List of vehicle that must start longitudinal
+         adjustments for lane change at the beginning of the simulation
+         independent of safety criteria. This should only be used when expanding
+         a root node.
+        """
         if open_loop_controls is None:
             open_loop_controls = {}
 
@@ -487,10 +500,11 @@ class VehicleGroup:
         # whether it is safe to perform a lane change
         self.update_surrounding_vehicles(detect_collision)
         for veh in self.vehicles.values():
-            # veh.update_target_leader(self.vehicles)
             veh.update_virtual_leader(self.vehicles)
             if veh.has_lane_change_intention():
                 veh.check_surrounding_gaps_safety(self.vehicles)
+                if veh.get_id() in self._ids_must_change_lanes:
+                    veh._is_lane_change_gap_suitable = True
 
         # Then, we check the new system mode
         new_mode = som.SystemMode(self.vehicles)
@@ -694,3 +708,6 @@ class ShortSimulationVehicleGroup(VehicleGroup):
             None if vehicle_position_in_platoon < 0
             else self.vehicles[platoon_veh_ids[vehicle_position_in_platoon]]
         )
+
+    def set_ids_must_change_lanes(self, veh_ids: Iterable[int]):
+        self._ids_must_change_lanes = veh_ids

@@ -92,7 +92,7 @@ class VehicleStateGraph:
         return ret
 
     def save_to_file(self, n_platoon: int, has_fd: bool):
-        self.register_quantization_boundaries()
+        # self.register_quantization_boundaries()
 
         file_name = VehicleStateGraph.get_graph_file_name(n_platoon, has_fd)
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
@@ -323,6 +323,9 @@ class GraphCreator:
         self.vehicle_state_graph = VehicleStateGraph()
         self.state_quantizer: StateQuantizer = (
             self.vehicle_state_graph.get_state_quantizer())
+        # We can load a strategy map to check whether some query has already
+        # been solved
+        self._strategy_maps: dict[str, configuration.StrategyMap] = dict()
 
     @staticmethod
     def load_initial_states_seen_in_simulations(
@@ -370,6 +373,31 @@ class GraphCreator:
         df = df.drop_duplicates(ignore_index=True)
         df.to_csv(file_path, index=False)
         return df, file_path
+
+    def is_query_solved(self, initial_state: configuration.QuantizedState,
+                        first_movers_set: set[int], verbose=False) -> bool:
+        message = ""
+        if self.vehicle_state_graph.is_query_in_graph(initial_state,
+                                                      first_movers_set):
+            message += ": already in graph."
+            ret = True
+        elif self.is_query_in_strategy_table(initial_state, first_movers_set):
+            message += ": already in strategy table."
+            ret = True
+        else:
+            message += (f": Q(X)={initial_state}, L1={first_movers_set} "
+                        "not solved.")
+            ret = False
+        if verbose:
+            print(message)
+        return ret
+
+    def is_query_in_strategy_table(
+            self, initial_state: configuration.QuantizedState,
+            first_movers_set: set[int]) -> bool:
+        return (initial_state in self._strategy_maps["time"]
+                and (frozenset(first_movers_set)
+                     in self._strategy_maps["time"][initial_state]))
 
     def solve_initial_states_from_simulations(
             self, simulator_name: str, mode: str,
@@ -431,12 +459,15 @@ class GraphCreator:
         if scenario_number is not None:
             df = df.iloc[scenario_number: scenario_number + 1]
 
+        # We load them to check if queries have already been solved
         self.load_a_graph()
+        self.load_strategy_map()
+
         visited_nodes = set(self.vehicle_state_graph.states_graph.nodes)
         n_queries = len(df.index)
         print(f"{n_queries} queries to solve.")
         for index, row in df.iterrows():
-            initial_state = tuple(int(x) for x in row["qx"].split(","))
+            initial_state = tuple([int(x) for x in row["qx"].split(",")])
             if isinstance(row["first_movers_set"], str):
                 first_movers_set = set(int(x) for x
                                        in row["first_movers_set"].split(","))
@@ -445,14 +476,16 @@ class GraphCreator:
             else:
                 first_movers_set = set(int(x) for x in row["first_movers_set"])
 
-            if self.vehicle_state_graph.is_query_in_graph(
-                    initial_state, first_movers_set):
+            print(f"#{index}", end="")
+            if self.is_query_solved(initial_state, first_movers_set,
+                                    verbose=True):
                 n_queries -= 1
-                print(f"Query {index} already in graph.")
             else:
-                print(f"Query {index} not in graph.")
                 # To ensure the node will be explored
                 visited_nodes.discard(initial_state)
+                for sm in self._strategy_maps.values():
+                    sm.pop(initial_state, None)
+
             free_flow_speeds = self._get_free_flow_speeds_from_node(
                 initial_state)
             self.add_all_from_initial_state_to_graph(
@@ -461,7 +494,7 @@ class GraphCreator:
             # solved_nodes.add(initial_state)
         print(f"{n_queries} new queries solved.")
         self.save_vehicle_state_graph_to_file()
-        self.save_quantization_parameters_to_file()
+        # self.save_quantization_parameters_to_file()
         self.save_minimum_cost_strategies_to_json()
         graph_time = datetime.timedelta(seconds=time.time() - start_time)
         print(f"Graph n={self._n_platoon} expansion time:",
@@ -474,6 +507,13 @@ class GraphCreator:
         vsg = VehicleStateGraph.load_from_file(self._n_platoon, self._has_fd)
         self.vehicle_state_graph = vsg
         self.state_quantizer = self.vehicle_state_graph.get_state_quantizer()
+
+    def load_strategy_map(self):
+        cost_names = ["time", "accel"]
+        for c in cost_names:
+            self._strategy_maps[c] = (
+                LaneChangeStrategyManager.load_strategy_map(
+                    self._n_platoon, c))
 
     def save_vehicle_state_graph_to_file(self) -> None:
         self.vehicle_state_graph.save_to_file(self._n_platoon, self._has_fd)
@@ -513,16 +553,12 @@ class GraphCreator:
                 self.save_minimum_cost_strategies_to_json(c)
             return
 
-        # if mode.startswith("a"):
-        #     existing_strategy_map = (
-        #         LaneChangeStrategyManager.load_saved_strategies(
-        #             self._n_platoon, cost_name)
-        #     )
-        # else:
-        #     existing_strategy_map = [dict()]
-
-        strategy_map = self.create_strategies_map(cost_name)
-        json_data = json.dumps(strategy_map, indent=2)
+        overwrite = mode == "w" or mode[1] == "o"
+        existing_list = LaneChangeStrategyManager.strategy_map_to_dict_list(
+            self._strategy_maps[cost_name], cost_name)
+        strategy_list = self.create_strategies_map(cost_name, overwrite)
+        strategy_list += existing_list
+        json_data = json.dumps(strategy_list, indent=2)
         file_name = "_".join(["min", cost_name, "strategies_for",
                               str(self._n_platoon), "vehicles.json"])
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
@@ -613,7 +649,8 @@ class GraphCreator:
             )
 
     def add_all_from_initial_state_to_graph(
-            self, initial_state: tuple[int], visited_states: set[tuple],
+            self, initial_state: configuration.QuantizedState,
+            visited_states: set[tuple],
             free_flow_speeds: Sequence[float], mode: str,
             first_movers_set: set[int] = None):
         """
@@ -621,8 +658,7 @@ class GraphCreator:
         succeeding states.
         :return: Number of new nodes
         """
-        if self.vehicle_state_graph.is_query_in_graph(initial_state,
-                                                      first_movers_set):
+        if self.is_query_solved(initial_state, first_movers_set):
             if mode.endswith("s"):
                 return 0
             elif mode.endswith("o"):
@@ -647,28 +683,35 @@ class GraphCreator:
 
     def create_strategies_map(
             self, cost_name: str,  # existing_strategy_map: list[dict],
-            # overwrite_results: bool
-    ) -> list[dict]:
+            overwrite: bool = False
+    ) -> list[dict[str, Any]]:
         strategy_map: list[dict] = []
         roots_with_issues = []
         dag = self.vehicle_state_graph.states_graph
         for root in self.vehicle_state_graph.get_initial_states():
             for next_node in dag.successors(root):
                 first_mover_set = dag[root][next_node]["lc_vehicles"].copy()
-                # if not overwrite_results
-                strategy = ([first_mover_set], [-1])
-                strategy_from_node, cost = (
-                    self.vehicle_state_graph.
-                    find_minimum_cost_strategy_from_node(next_node, cost_name)
-                )
-                if strategy_from_node is None:
-                    warnings.warn(f"Could not find a strategy from root "
-                                  f"{root} with first mover set "
-                                  f"{first_mover_set}")
-                    roots_with_issues.append(root)
-                    continue
-                strategy[0].extend(strategy_from_node[0])
-                strategy[1].extend(strategy_from_node[1])
+                if (self.is_query_in_strategy_table(root, first_mover_set)
+                        and not overwrite):
+                    # It's easier to copy the current solutions and rewrite
+                    # the whole json file than to append to it
+                    strategy, cost = self._strategy_maps[root][
+                        frozenset(first_mover_set)]
+                else:
+                    strategy = ([first_mover_set], [-1])
+                    strategy_from_node, cost = (
+                        self.vehicle_state_graph.
+                        find_minimum_cost_strategy_from_node(next_node,
+                                                             cost_name)
+                    )
+                    if strategy_from_node is None:
+                        warnings.warn(f"Could not find a strategy from root "
+                                      f"{root} with first mover set "
+                                      f"{first_mover_set}")
+                        roots_with_issues.append(root)
+                        continue
+                    strategy[0].extend(strategy_from_node[0])
+                    strategy[1].extend(strategy_from_node[1])
                 strategy_map.append(
                     {"root": [int(i) for i in root],
                      "first_mover_set": list(first_mover_set),
@@ -764,9 +807,9 @@ class GraphCreator:
         Assumes all non-platoon vehicles are traveling at free flow speed
         :return:
         """
-        self.state_quantizer.dequantize_state(node)
+        state = self.state_quantizer.dequantize_state(node)
         initial_state_per_vehicle = (
-            VehicleStateGraph.split_state_vector(node)
+            VehicleStateGraph.split_state_vector(state)
         )
         v_idx = fsv.FourStateVehicle.get_idx_of_state("v")
         return VehicleStateGraph.order_values(
@@ -885,6 +928,7 @@ class GraphCreator:
         """
         source_node = (PlatoonLCTracker(self._n_platoon), initial_state)
         nodes: deque[tuple[PlatoonLCTracker, tuple]] = deque([source_node])
+        force_lc_start = True  # only true when expanding the source node
         while len(nodes) > 0:
             tracker, quantized_state = nodes.pop()
             if quantized_state in visited_states:
@@ -909,7 +953,7 @@ class GraphCreator:
                     success = _simulate_till_lane_change(
                         vehicle_group, next_initial_state,
                         free_flow_speeds, next_positions_to_move,
-                        next_pos_to_coop
+                        next_pos_to_coop, force_lc_start
                     )
                 except vg.CollisionException:
                     GraphCreator._save_collision_scenario_info(
@@ -918,6 +962,7 @@ class GraphCreator:
                         next_positions_to_move, next_pos_to_coop
                     )
                     success = False
+                force_lc_start = False
                 # vehicle_group.truncate_simulation_history()
                 # data = vehicle_group.to_dataframe()
                 # analysis.plot_trajectory(data)
@@ -1080,6 +1125,21 @@ class LaneChangeStrategyManager:
             strategy_map[key1][key2] = ((lc_order, sl["coop_order"]),
                                         sl[cost_name])
         return strategy_map
+
+    @staticmethod
+    def strategy_map_to_dict_list(strategy_map: configuration.StrategyMap,
+                                  cost_name: str) -> list[dict[str, Any]]:
+        strategy_list = []
+        for key1 in strategy_map:
+            for key2, value2 in strategy_map[key1].items():
+                strategy, cost = value2[0], value2[1]
+                strategy_list.append(
+                    {"root": [int(i) for i in key1],
+                     "first_mover_set": list(key2),
+                     "lc_order": [list(s) for s in strategy[0]],
+                     "coop_order": strategy[1], cost_name: cost}
+                )
+        return strategy_list
 
     @staticmethod
     def load_saved_strategies(n_platoon: int, cost_name: str
@@ -1466,7 +1526,8 @@ def _simulate_till_lane_change(
         initial_state: np.ndarray,
         free_flow_speeds: Sequence[float],
         next_platoon_positions_to_move: set[int],
-        next_platoon_position_to_coop: int
+        next_platoon_position_to_coop: int,
+        force_lc_start: bool = False
 ) -> bool:
     """
     Simulates the vehicle group until all listed platoon vehicles have finished
@@ -1477,6 +1538,8 @@ def _simulate_till_lane_change(
     :param free_flow_speeds:
     :param next_platoon_positions_to_move:
     :param next_platoon_position_to_coop:
+    :param force_lc_start: If true, the next positions to move will start
+     longitudinal adjustments for lane change independent of safety constraints
     :return:
     """
     vehicle_group.set_verbose(False)
@@ -1495,8 +1558,8 @@ def _simulate_till_lane_change(
 
     dt = 1.0e-2
     tf = 40.
-    time = np.arange(0, tf + dt, dt)
-    vehicle_group.prepare_to_start_simulation(len(time))
+    sim_time = np.arange(0, tf + dt, dt)
+    vehicle_group.prepare_to_start_simulation(len(sim_time))
     [veh.set_lane_change_direction(1) for veh
      in vehicle_group.vehicles.values()
      if (veh.is_in_a_platoon() and veh.get_current_lane() == 0)]
@@ -1518,12 +1581,17 @@ def _simulate_till_lane_change(
         if ld.get_x() < front_most_vehicle.get_x():
             return False
 
+    if force_lc_start:
+        vehicle_group.set_ids_must_change_lanes(
+            [veh.get_id() for veh in next_vehs_to_move])
+
     i = 0
     success = False
-    while i < len(time) - 1 and not success:
+    while i < len(sim_time) - 1 and not success:
         i += 1
-        vehicle_group.simulate_one_time_step(time[i],
-                                             detect_collision=True)
+        vehicle_group.simulate_one_time_step(
+            sim_time[i], detect_collision=True
+        )
         success = np.all([not veh.has_lane_change_intention()
                           for veh in next_vehs_to_move])
     return success
