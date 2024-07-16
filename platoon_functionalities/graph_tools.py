@@ -1050,9 +1050,9 @@ class GraphCreator:
                 )
                 next_maneuver_steps |= first_maneuver_steps
                 # Debugging
-                analysis.plot_state_vector(
-                    vehicle_group.get_full_initial_state_vector())
-                print(next_maneuver_steps)
+                # analysis.plot_state_vector(
+                #     vehicle_group.get_full_initial_state_vector())
+                # print(next_maneuver_steps)
             else:
                 for i in range(len(remaining_vehicles)):
                     next_positions_to_move = set()

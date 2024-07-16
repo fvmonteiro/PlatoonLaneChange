@@ -17,7 +17,6 @@ from platoon_functionalities import platoon_lane_change_strategies \
     as lc_strategies
 
 
-
 class FourStateVehicle(base.BaseVehicle, ABC):
     """
     States: [x, y, theta, v], inputs: [a, phi], centered at the C.G.

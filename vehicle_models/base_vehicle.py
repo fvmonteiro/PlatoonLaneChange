@@ -271,7 +271,7 @@ class BaseVehicle(ABC):
     #     else:
     #         return self.brake_comfort_max
 
-    def get_virtual_leader_id(self):
+    def get_virtual_leader_id(self) -> int:
         return self._virtual_leader_id[self._iter_counter]
 
     def get_relevant_surrounding_vehicle_ids(self) -> dict[str, int]:

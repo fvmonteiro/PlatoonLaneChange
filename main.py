@@ -14,8 +14,8 @@ from vissim_handler import file_handling
 
 
 def load_and_plot_latest_scenario():
-    trajectory_file_name = 'trajectory_data.pickle'  # temp
-    cost_file_name = 'cost_data.pickle'
+    trajectory_file_name = 'data/trajectory_data.pickle'  # temp
+    cost_file_name = 'data/cost_data.pickle'
     trajectory_data = analysis.load_latest_simulated_scenario(
         trajectory_file_name)
     analysis.plot_trajectory(trajectory_data)
@@ -42,17 +42,40 @@ def create_graph(n_platoon: int, has_fd: bool, vel_orig_lane: Sequence[float],
     graph_creator.save_minimum_cost_strategies_to_json()
 
 
+def q_learning_tests():
+    from platoon_functionalities import q_learning
+    grid_size = (5, 5)
+    # obstacles = {(i, i) for i in range(1, min(grid_size) - 1)}
+    # obstacles.add((9, 8))
+    obstacles = {(1, i) for i in range(1, grid_size[1])}
+    obstacles.update({(3, i) for i in range(grid_size[1] - 1)})
+    goal_nodes = [(grid_size[0] - 1, 0),
+                  (0, grid_size[1] - 1)]
+    q_learning_agent = q_learning.QLearningAgent(
+        grid_size, goal_nodes, obstacles, alpha=1.)
+    q_learning_agent.train((2, 2), 1000)
+
+
+def run_q_learning_unit_tests():
+    import unittest
+    loader = unittest.TestLoader()
+    suite = loader.discover('platoon_functionalities',
+                            pattern='q_learning_test.py')
+    runner = unittest.TextTestRunner()
+    runner.run(suite)
+
+
 def main():
     start_time = time.time()
-
-    n_platoon = 2
-    n_orig_ahead, n_orig_behind = 1, 1
-    n_dest_ahead, n_dest_behind = 1, 1
-    v_orig = 70 / 3.6
-    v_ff_platoon = 110 / 3.6
-    v_dest = 50 / 3.6
-    is_acceleration_optimal = True
-    are_vehicles_cooperative = False
+    q_learning_tests()
+    # n_platoon = 2
+    # n_orig_ahead, n_orig_behind = 1, 1
+    # n_dest_ahead, n_dest_behind = 1, 1
+    # v_orig = 70 / 3.6
+    # v_ff_platoon = 110 / 3.6
+    # v_dest = 50 / 3.6
+    # is_acceleration_optimal = True
+    # are_vehicles_cooperative = False
 
     # configuration.Configuration.set_scenario_parameters(
     #     sim_time=10 * n_platoon
@@ -79,24 +102,23 @@ def main():
     platoon_sizes = [4]
     # vissim_interface.run_platoon_simulations(is_warm_up=True,
     #                                          platoon_size=platoon_sizes)
-    post_processing.import_strategy_maps_from_cloud(platoon_sizes)
-    for n_platoon in platoon_sizes:
-        print(f"===== Exploring scenario with platoon size {n_platoon} =====")
-        graph_creator = graph_tools.GraphCreator(n_platoon)
-        # graph_creator.solve_queries_from_simulations("python", "as")
-        graph_creator.solve_queries_from_simulations("vissim", "as")
-        try:
-            post_processing.export_strategy_maps_to_cloud([n_platoon])
-        except FileNotFoundError:
-            print("Couldn't share strategy maps")
-            continue
+    # post_processing.import_strategy_maps_from_cloud(platoon_sizes)
+    # for n_platoon in platoon_sizes:
+    #     print(f"===== Exploring scenario with platoon size {n_platoon} =====")
+    #     graph_creator = graph_tools.GraphCreator(n_platoon)
+    #     # graph_creator.solve_queries_from_simulations("python", "as")
+    #     graph_creator.solve_queries_from_simulations("vissim", "as")
+    #     try:
+    #         post_processing.export_strategy_maps_to_cloud([n_platoon])
+    #     except FileNotFoundError:
+    #         print("Couldn't share strategy maps")
+    #         continue
     # try:
     #     vissim_interface.run_platoon_simulations(platoon_size=platoon_sizes)
     # except:
     #     print("Some error when running vissim after computing graphs")
 
-    # scenarios.run_all_scenarios_for_comparison()
-
+    # scenarios.run_all_scenarios_for_comparison(
 
     # analyzer = analysis.ResultAnalyzer(save_figs=False)
     # analyzer.get_python_results_for_paper()

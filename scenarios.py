@@ -68,7 +68,7 @@ def run_fast_lane_change():
 
 
 def run_base_ocp_scenario():
-    trajectory_file_name = 'trajectory_data.pickle'  # temp
+    trajectory_file_name = 'data/trajectory_data.pickle'  # temp
     v_ff = 10
     tf = 10
 
@@ -92,8 +92,8 @@ def run_optimal_platoon_test(
         n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
         n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool,
         are_vehicles_cooperative: bool):
-    trajectory_file_name = 'trajectory_data.pickle'  # temp
-    cost_file_name = 'cost_data.pickle'
+    trajectory_file_name = 'data/trajectory_data.pickle'  # temp
+    cost_file_name = 'data/cost_data.pickle'
     v_ref = dict()  # TODO: make param
     delta_x = dict()  # TODO: make param
     scenario = LaneChangeScenario(n_platoon,
@@ -123,8 +123,8 @@ def run_with_external_controller(
         n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool,
         are_vehicles_cooperative: bool, v_ref: Mapping[str, float],
         delta_x: Mapping[str, float]):
-    trajectory_file_name = 'trajectory_data.pickle'  # temp
-    cost_file_name = 'cost_data.pickle'
+    trajectory_file_name = 'data/trajectory_data.pickle'  # temp
+    cost_file_name = 'data/cost_data.pickle'
     # Set-up
     tf = configuration.Configuration.time_horizon
     scenario = LaneChangeWithExternalController(
@@ -248,8 +248,8 @@ class LaneChangeScenarioManager:
                  v_ref: Mapping[str, float],
                  delta_x: Mapping[str, float] = None):
         # TODO: names should depend on the scenario
-        self.trajectory_file_name = "trajectory_data.pickle"
-        self.cost_file_name = "cost_data.pickle"
+        self.trajectory_file_name = "data/trajectory_data.pickle"
+        self.cost_file_name = "data/cost_data.pickle"
         self.results: dict[str, list] = defaultdict(list)
         self._has_plots = True
 
