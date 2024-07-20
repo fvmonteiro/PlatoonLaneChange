@@ -276,7 +276,8 @@ class PlatoonLCTracker:
                 f"{self._remaining_vehicles}|{self._dest_lane_vehicles}|"
                 f"{self._cooperating_order}")
 
-    def get_remaining_vehicles(self) -> set[int]:
+    @property
+    def remaining_vehicles(self) -> set[int]:
         return self._remaining_vehicles
 
     def get_possible_cooperative_vehicles(self) -> list[int]:
@@ -287,14 +288,19 @@ class PlatoonLCTracker:
         return (self._dest_lane_vehicles if len(self._dest_lane_vehicles) > 0
                 else [-1])
 
-    def get_cooperating_order(self) -> list[int]:
+    @property
+    def cooperating_order(self) -> list[int]:
         return self._cooperating_order
 
-    def get_lane_change_order(self) -> list[set[int]]:
+    @property
+    def lane_change_order(self) -> list[set[int]]:
         return self._lane_change_order
 
     def get_completed_steps(self) -> int:
         return len(self._cooperating_order)
+
+    def get_platoon_size(self) -> int:
+        return len(self._remaining_vehicles) + len(self._dest_lane_vehicles)
 
     def move_vehicles(self, position_in_platoon: set[int],
                       cooperative_vehicle_position: int):
@@ -743,9 +749,9 @@ class GraphCreator:
         """
         # Simulate until the collision state
         next_node = root
-        for i in range(len(tracker.get_lane_change_order())):
-            next_pos_to_coop = tracker.get_cooperating_order()[i]
-            next_positions_to_move = tracker.get_lane_change_order()[i]
+        for i in range(len(tracker.lane_change_order)):
+            next_pos_to_coop = tracker.cooperating_order[i]
+            next_positions_to_move = tracker.lane_change_order[i]
             next_initial_state = self.state_quantizer.dequantize_state(
                 next_node)
             vehicle_group = self._create_vehicle_group()
@@ -1039,7 +1045,7 @@ class GraphCreator:
          in vehicle_group.vehicles.values()
          if (veh.is_in_a_platoon() and veh.get_current_lane() == 0)]
         vehicle_group.update_surrounding_vehicles()
-        remaining_vehicles = sorted(tracker.get_remaining_vehicles())
+        remaining_vehicles = sorted(tracker.remaining_vehicles)
 
         next_maneuver_steps: list[tuple[int, set[int]]] = []
         for next_pos_to_coop in tracker.get_possible_cooperative_vehicles():

@@ -42,6 +42,15 @@ def create_graph(n_platoon: int, has_fd: bool, vel_orig_lane: Sequence[float],
     graph_creator.save_minimum_cost_strategies_to_json()
 
 
+def run_q_learning_unit_tests():
+    import unittest
+    loader = unittest.TestLoader()
+    suite = loader.discover('platoon_functionalities',
+                            pattern='q_learning_test.py')
+    runner = unittest.TextTestRunner()
+    runner.run(suite)
+
+
 def q_learning_tests():
     from platoon_functionalities import q_learning
     grid_size = (5, 5)
@@ -56,18 +65,25 @@ def q_learning_tests():
     q_learning_agent.train((2, 2), 1000)
 
 
-def run_q_learning_unit_tests():
-    import unittest
-    loader = unittest.TestLoader()
-    suite = loader.discover('platoon_functionalities',
-                            pattern='q_learning_test.py')
-    runner = unittest.TextTestRunner()
-    runner.run(suite)
+def test_graph_explorer():
+    from platoon_functionalities import map_2d_example
+    grid_size = (9, 9)
+    # obstacles = {(i, i) for i in range(1, min(grid_size) - 1)}
+    # obstacles.add((9, 8))
+    start_state = (grid_size[0] // 2, grid_size[1] // 2)
+    obstacles = {(start_state[0]-1, i) for i in range(1, grid_size[1])}
+    obstacles.update({(start_state[0]+1, i) for i in range(grid_size[1] - 1)})
+    goal_states = [(grid_size[0] - 1, 0),
+                   (0, grid_size[1] - 1)]
+    my_map = map_2d_example.ProblemMap(grid_size, obstacles, start_state,
+                                       goal_states)
+    print(my_map.to_string())
+    map_2d_example.train(start_state, my_map, 1000)
 
 
 def main():
     start_time = time.time()
-    q_learning_tests()
+    test_graph_explorer()
     # n_platoon = 2
     # n_orig_ahead, n_orig_behind = 1, 1
     # n_dest_ahead, n_dest_behind = 1, 1
