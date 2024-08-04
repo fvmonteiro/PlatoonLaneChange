@@ -1,66 +1,64 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-import random
 from typing import Callable
+# import weakref
 
 from platoon_functionalities import graph_explorer
 
 import configuration
+from platoon_functionalities.graph_explorer import Node, ActionBase
 
 State = configuration.QuantizedState
 Action2D = tuple[int, int]
 
 
-def train(initial_state: State, problem_map: ProblemMap, max_episodes: int,
-          epsilon: float = 0.5):
+def train(initial_state: State, max_episodes: int, problem_map: ProblemMap,
+          epsilon: float = 0.5, verbose_level: int = 0):
     # TODO: we're not dealing with self loop well, but whatever, right?
 
     sim_fun = problem_map.simulate
-    initial_node = Node2D(initial_state, sim_fun)
-    for episode in range(max_episodes):
-        if (episode/max_episodes*100) % 10 == 0:
-            print(f'Episode: {episode / max_episodes * 100:.2f}%')
-            print(f'Best cost to go: {initial_node.best_cost_to_go}')
-        # if episode / max_episodes >= 0.5:
-        #     self._epsilon = self._default_epsilon
 
-        current_node = initial_node
-        path = []
-        while not problem_map.is_goal_state(current_node.state):
-            if current_node.is_new():
-                current_node.generate_possible_actions()
-            if random.uniform(0, 1) < epsilon:  # explore
-                edge = current_node.explore()
-            else:  # exploit
-                edge = current_node.exploit()
-            # Save
-            path.append((current_node, edge))
-            # Update
-            current_node.update_best_edge(edge)
-            # Advance
-            current_node = edge.destination_node
-        current_node.set_as_terminal()
-        graph_explorer.update_along_path(path)
-    print(initial_node.best_cost_to_go)
-    
-    
+    def is_goal_node(node: Node2D) -> bool:
+        if problem_map.is_goal_state(node.state):
+            node.set_as_terminal()
+            return True
+        return False
+
+    initial_node = Node2D(initial_state, sim_fun)
+    graph_explorer.train_base(initial_node, max_episodes,
+                              is_goal_node, epsilon, verbose_level)
+
+
 class Node2D(graph_explorer.Node):
     _possible_actions: list[Action2D]
     _explored_actions: dict[Action2D, Edge2D]
-    _simulate: Callable[[State, Action2D], Node2D]
+    _simulate: Callable[[State, Action2D], tuple[State, float]]
 
-    def __init__(self, state: State,
-                 sim_fun: Callable[[State, Action2D], 
-                                   tuple[State, float]]):
+    def __init__(
+            self, state: State,
+            sim_fun: Callable[[State, Action2D], tuple[State, float]]
+    ):
         super().__init__(state, sim_fun)
 
     def generate_possible_actions(self):
         self._possible_actions = [(1, 0), (0, 1), (-1, 0), (0, -1)]
 
-    def set_as_terminal(self):
-        self._best_cost_to_go = 0
-        
+    def add_edge_from_state(self, successor_state: State, action: Action2D,
+                            cost: float) -> None:
+        if successor_state == self.state:
+            next_node = self
+        else:
+            next_node = Node2D(successor_state, self._simulate)
+        self.add_edge_from_node(next_node, action, cost)
+        # self._explored_actions[action] = Edge2D(next_node, action, cost)
+
+    def add_edge_from_node(self, successor: Node2D, action: Action2D,
+                           cost: float) -> None:
+        if self == successor:
+            self._possible_actions.remove(action)
+        self._explored_actions[action] = Edge2D(successor, action, cost)
+
 
 class Edge2D(graph_explorer.Edge):
     _action: Action2D
@@ -71,8 +69,8 @@ class Edge2D(graph_explorer.Edge):
     @property
     def action(self) -> Action2D:
         return self._action
-    
-        
+
+
 class ProblemMap:
     def __init__(self, grid_size: tuple[int, int],
                  obstacles: set[State], initial_state: State,

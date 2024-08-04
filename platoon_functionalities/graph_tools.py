@@ -17,6 +17,7 @@ import pandas as pd
 
 import analysis
 import configuration
+import helper
 import platoon_functionalities.vehicle_platoon as vehicle_platoon
 import platoon_functionalities.platoon_lane_change_strategies as lc_strategies
 import vehicle_group as vg
@@ -55,39 +56,10 @@ class VehicleStateGraph:
         return f"graph_{n_platoon}_vehicles_with{'' if has_fd else 'out'}_fd"
 
     @staticmethod
-    def order_values(lo_value: Any, platoon_value: Iterable[Any],
-                     ld_value: Any, fd_value: Any = None) -> np.ndarray:
-        """
-        Used to ensure any stacked vectors always places the vehicles in the
-        same order
-        :param lo_value:
-        :param platoon_value:
-        :param ld_value:
-        :param fd_value:
-        :return:
-        """
-        if fd_value is None:
-            fd_value = []
-        platoon_value_array = np.array(platoon_value).flatten()
-        return np.hstack((lo_value, platoon_value_array, ld_value, fd_value))
-
-    @staticmethod
-    def split_state_vector(values: Sequence[Any]) -> dict[str, Any]:
-        # TODO remove hard coded indices?
-        n_states = fsv.FourStateVehicle.get_n_states()
-        n_vehicles = len(values) // n_states
-        by_vehicle = {"lo": values[:n_states], "ld": values[-n_states:]}
-        for idx in range(n_vehicles - 2):
-            by_vehicle["p" + str(idx + 1)] = values[n_states * (idx + 1)
-                                                    : n_states * (idx + 2)]
-        return by_vehicle
-
-    @staticmethod
     def split_matrix(matrix: Iterable[Sequence[Any]]) -> dict[str, Any]:
         ret = defaultdict(list)
         for array in matrix:
-            for key, split_array in (VehicleStateGraph.
-                    split_state_vector(array).items()):
+            for key, split_array in (helper.split_state_vector(array).items()):
                 ret[key].append(split_array)
         return ret
 
@@ -302,7 +274,7 @@ class PlatoonLCTracker:
     def get_platoon_size(self) -> int:
         return len(self._remaining_vehicles) + len(self._dest_lane_vehicles)
 
-    def move_vehicles(self, position_in_platoon: set[int],
+    def move_vehicles(self, position_in_platoon: Union[set[int], frozenset[int]],
                       cooperative_vehicle_position: int):
         for p in position_in_platoon:
             self._remaining_vehicles.remove(p)
@@ -332,53 +304,6 @@ class GraphCreator:
         # We can load a strategy map to check whether some query has already
         # been solved
         self._strategy_maps: dict[str, configuration.StrategyMap] = dict()
-
-    @staticmethod
-    def load_initial_states_seen_in_simulations(
-            n_platoon: int, simulator_name: str) -> tuple[pd.DataFrame, str]:
-        """
-        Reads the file containing the initial states (at lane change intention
-        time) encountered during simulations and returns the dataframe with
-        the data together with the file path. We remove duplicates before
-        returning the dataframe.
-        """
-        if simulator_name not in {"python", "vissim"}:
-            raise ValueError(
-                "Invalid value for parameter 'simulator'. Unsolved nodes must "
-                "be loaded either from python or vissim simulations.")
-        file_name = "_".join([simulator_name + "_x0", str(n_platoon),
-                              "vehicles.csv"])
-        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 "vehicle_state_graphs", file_name)
-        # Load the initial states found during simulation, and keep only
-        # unique values in the file
-        df: pd.DataFrame = pd.read_csv(file_path)
-        df = df.drop_duplicates(ignore_index=True)
-        df.to_csv(file_path, index=False)
-        return df, file_path
-
-    @staticmethod
-    def load_queries_from_simulations(
-            n_platoon: int, simulator_name: str) -> tuple[pd.DataFrame, str]:
-        """
-        Reads the file containing the queries encountered during simulations
-        and returns the dataframe with the data together with the file path.
-        We remove duplicates before returning the dataframe.
-        """
-        if simulator_name not in {"python", "vissim"}:
-            raise ValueError(
-                "Invalid value for parameter 'simulator'. Unsolved nodes must "
-                "be loaded either from python or vissim simulations.")
-        file_name = "_".join([simulator_name + "_queries", str(n_platoon),
-                              "vehicles.csv"])
-        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 "vehicle_state_graphs", file_name)
-        # Load the initial states found during simulation, and keep only
-        # unique values in the file
-        df: pd.DataFrame = pd.read_csv(file_path, skipinitialspace=True)
-        df = df.drop_duplicates(ignore_index=True)
-        df.to_csv(file_path, index=False)
-        return df, file_path
 
     def is_query_solved(self, initial_state: configuration.QuantizedState,
                         first_movers_set: set[int], verbose=False) -> bool:
@@ -416,7 +341,7 @@ class GraphCreator:
         if mode not in {"ao", "as"}:
             raise ValueError("Mode must be 'as' or 'ao' when exploring "
                              "unsolved nodes.")
-        df, file_path = GraphCreator.load_initial_states_seen_in_simulations(
+        df, file_path = helper.load_initial_states_seen_in_simulations(
             self._n_platoon, simulator_name)
         if scenario_number is not None:
             df = df.iloc[scenario_number: scenario_number + 1]
@@ -433,7 +358,7 @@ class GraphCreator:
         # solved_nodes = set()
         for index, row in df.iterrows():
             print(index)
-            free_flow_speeds = VehicleStateGraph.order_values(
+            free_flow_speeds = helper.order_values(
                 row["orig"], [row["platoon"]] * self._n_platoon, row["dest"])
             source_node = tuple(row.iloc[states_idx].to_numpy(int))
             if source_node in self.vehicle_state_graph.get_initial_states():
@@ -460,7 +385,7 @@ class GraphCreator:
             sim_time=sim_time, increase_lc_time_headway=False
         )
 
-        df, file_path = GraphCreator.load_queries_from_simulations(
+        df, file_path = helper.load_queries_from_simulations(
             self._n_platoon, simulator_name)
         if scenario_number is not None:
             df = df.iloc[scenario_number: scenario_number + 1]
@@ -568,7 +493,7 @@ class GraphCreator:
         file_name = "_".join(["min", cost_name, "strategies_for",
                               str(self._n_platoon), "vehicles.json"])
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 "strategy_maps", file_name)
+                                 "strategy_maps_bfs", file_name)
         with open(file_path, "w") as file:
             file.write(json_data)
             print("Saved file ", file_name)
@@ -621,7 +546,7 @@ class GraphCreator:
             print(f"  {len(initial_states)} roots")
 
             v0_fd = v0_dest if self._has_fd else None
-            free_flow_speeds = VehicleStateGraph.order_values(
+            free_flow_speeds = helper.order_values(
                 v0_lo, [vel_ff_platoon] * self._n_platoon, v0_dest, v0_fd)
             for x0 in initial_states:
                 n_new = self.add_all_from_initial_state_to_graph(
@@ -648,7 +573,7 @@ class GraphCreator:
             initial_state_matrix = np.reshape(initial_state, [-1, 4])
             v0_lo = initial_state_matrix[0, v_idx]
             v0_dest = initial_state_matrix[-1, v_idx]
-            free_flow_speeds = VehicleStateGraph.order_values(
+            free_flow_speeds = helper.order_values(
                 v0_lo, [vel_ff_platoon] * self._n_platoon, v0_dest)
             self.add_all_from_initial_state_to_graph(
                 initial_state, visited_states, free_flow_speeds, mode="ao"
@@ -815,10 +740,10 @@ class GraphCreator:
         """
         state = self.state_quantizer.dequantize_state(node)
         initial_state_per_vehicle = (
-            VehicleStateGraph.split_state_vector(state)
+            helper.split_state_vector(state)
         )
         v_idx = fsv.FourStateVehicle.get_idx_of_state("v")
-        return VehicleStateGraph.order_values(
+        return helper.order_values(
             initial_state_per_vehicle["lo"][v_idx],
             [configuration.FREE_FLOW_SPEED * configuration.KMH_TO_MS]
             * self._n_platoon,
@@ -912,7 +837,7 @@ class GraphCreator:
             fd.set_name("fd")
         else:
             fd = None
-        all_vehicles = VehicleStateGraph.order_values(lo, platoon_vehicles,
+        all_vehicles = helper.order_values(lo, platoon_vehicles,
                                                       ld, fd)
         vehicle_group = vg.ShortSimulationVehicleGroup()
         vehicle_group.fill_vehicle_array(all_vehicles)
@@ -1127,7 +1052,7 @@ class LaneChangeStrategyManager:
         for sl in strategy_list:
             key1 = tuple(sl["root"])
             key2 = frozenset(sl["first_mover_set"])
-            lc_order = [set(i) for i in sl["lc_order"]]
+            lc_order = [frozenset(i) for i in sl["lc_order"]]
             strategy_map[key1][key2] = ((lc_order, sl["coop_order"]),
                                         sl[cost_name])
         return strategy_map
@@ -1153,7 +1078,7 @@ class LaneChangeStrategyManager:
         file_name = "_".join(["min", cost_name, "strategies_for",
                               str(n_platoon), "vehicles.json"])
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 "strategy_maps", file_name)
+                                 "strategy_maps_bfs", file_name)
         with open(file_path) as f:
             strategy_list: list[dict] = json.load(f)
         return strategy_list
@@ -1386,7 +1311,7 @@ class StateQuantizer:
         qx_platoon = [qx for name, qx in qx_by_vehicle.items()
                       if name.startswith("p")]
         return tuple(
-            VehicleStateGraph.order_values(
+            helper.order_values(
                 qx_by_vehicle["lo"], qx_platoon, qx_by_vehicle["ld"], None)
             .astype(int))
 
@@ -1409,7 +1334,7 @@ class StateQuantizer:
         qx_platoon = [qx for name, qx in qx_by_vehicle.items()
                       if name.startswith("p")]
         return tuple(
-            VehicleStateGraph.order_values(
+            helper.order_values(
                 qx_by_vehicle["lo"], qx_platoon, qx_by_vehicle["ld"], None)
             .astype(int))
 
@@ -1460,10 +1385,21 @@ class StateQuantizer:
         idx = np.argmin(np.abs(possible_values - vel))
         return possible_values[idx]
 
-    # def quantize_free_flow_velocities(self, velocities):
-    #     qv = []
-    #     for v in velocities:
-    #         qv.append(v - self.min_value)
+    def infer_free_flow_speeds_from_state(
+            self, state: configuration.QuantizedState, n_platoon: int
+    ) -> np.ndarray:
+        """
+        Assumes all non-platoon vehicles are traveling at free flow speed
+        :return:
+        """
+        state = self.dequantize_state(state)
+        initial_state_per_vehicle = helper.split_state_vector(state)
+        v_idx = fsv.FourStateVehicle.get_idx_of_state("v")
+        return helper.order_values(
+            initial_state_per_vehicle["lo"][v_idx],
+            [configuration.FREE_FLOW_SPEED * configuration.KMH_TO_MS]
+            * n_platoon,
+            initial_state_per_vehicle["ld"][v_idx])
 
 
 # ================== Exploring simulations with issues ======================= #

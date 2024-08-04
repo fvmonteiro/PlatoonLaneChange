@@ -6,7 +6,7 @@ from typing import Mapping, Union
 import numpy as np
 
 # =================================== Types ================================== #
-LCOrder = list[set[int]]
+LCOrder = list[Union[set[int], frozenset[int]]]
 CoopOrder = list[int]
 QuantizedState = tuple[int, ...]
 Query = tuple[QuantizedState, set[int]]
@@ -69,6 +69,7 @@ class Configuration:
     time_step: float = 1.0e-2  # [s]
     platoon_strategies = [0]
     increase_lc_time_headway: bool = False
+    is_warm_up: bool = False
 
     @staticmethod
     def set_solver_parameters(
@@ -157,7 +158,8 @@ class Configuration:
     def set_scenario_parameters(
             sim_time: float = None, time_step: float = None,
             platoon_strategies: Union[list[int], int] = None,
-            increase_lc_time_headway: bool = None):
+            increase_lc_time_headway: bool = None,
+            is_warm_up: bool = None):
         """
         Sets scenario parameters. If a certain parameter is not set, we
         keep its current value.
@@ -171,6 +173,8 @@ class Configuration:
         :param increase_lc_time_headway: If True, the safe time headway for
          lane changing is greater than the safe time headway for lane keeping.
          approach. Accepted values are 'time' and 'accel'
+        :param is_warm_up: when true, simulations stop as soon as the
+         platoon finds a suitable lc gap, and stores the query
         :return:
         """
         if sim_time:
@@ -183,6 +187,8 @@ class Configuration:
             Configuration.platoon_strategies = platoon_strategies
         if increase_lc_time_headway is not None:
             Configuration.increase_lc_time_headway = increase_lc_time_headway
+        if is_warm_up is not None:
+            Configuration.is_warm_up = is_warm_up
 
 
 # TODO: remove default value. Each caller should know. Or maybe remove this

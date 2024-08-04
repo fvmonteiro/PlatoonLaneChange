@@ -10,10 +10,137 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from scipy.interpolate import interp1d
 
 import configuration
+import helper
+from platoon_functionalities import (graph_tools, graph_explorer,
+                                     traffic_state_graph)
 import post_processing as pp
 
+
+# ============================================================================ #
+# Analysis tools for new graph exploration approach
+
+
+def compare_bfs_and_dfs(n_platoon):
+    """
+    Compare the results from the original approach (BFS full graph exploration
+    then shortest path) to the newer DFS with epsilon-greedy exploration
+    """
+
+    cost_name = "time"
+    simulator_name = "vissim"
+
+    results = traffic_state_graph.load_best_results(n_platoon)
+    strategy_map = graph_tools.LaneChangeStrategyManager.load_strategy_map(
+        n_platoon, cost_name)
+
+    disagreement_count = 0
+    for initial_state, outer_dict in results.items():
+        for first_mover_set, query_result in outer_dict.items():
+            dfs_solution = (query_result["lc_order"], query_result["coop_order"])
+            try:
+                bfs_solution = strategy_map[initial_state][first_mover_set][0]
+                if not dfs_solution == bfs_solution:
+                    print(f"BFS sol.: {bfs_solution}")
+                    print(f"DFS sol.: {dfs_solution}")
+                    initial_node = traffic_state_graph.TrafficStateNode(
+                        initial_state)
+                    bfs_commands = helper.tuple_of_lists_to_list(bfs_solution)
+                    bfs_cost = graph_explorer.traverse_action_sequence(
+                        initial_node, bfs_commands)
+                    dfs_commands = helper.tuple_of_lists_to_list(dfs_solution)
+                    dfs_cost = graph_explorer.traverse_action_sequence(
+                        initial_node, dfs_commands)
+                    print(f"BFS cost: {bfs_cost}")
+                    print(f"DFS cost: {dfs_cost}")
+                    disagreement_count += 1
+            except KeyError:
+                print(f"Query x0 = {initial_state}, L0 = {first_mover_set} "
+                      f"not found in bfs solution.")
+                disagreement_count += 1
+    if disagreement_count > 0:
+        print(f"Disagreement count: {disagreement_count}")
+    else:
+        print("All results agree")
+
+
+def plot_several_cost_vs_computation_time(
+        n_platoon: Iterable[int], cost_type: Iterable[str],
+        epsilon: Iterable[float]):
+    for cost in cost_type:
+        for n in n_platoon:
+            for eps in epsilon:
+                plot_average_cost_vs_computation_time(n, cost, eps)
+
+
+def plot_average_cost_vs_computation_time(
+        n_platoon: int, cost_type: str, epsilon: float):
+    data = traffic_state_graph.read_from_json(n_platoon, cost_type, epsilon)
+
+    # Determine a common set of time values
+    first_times, end_times = [], []
+    max_time, min_time = -np.inf, np.inf
+    for d in data:
+        first_times.append(d["time"][0])
+        end_times.append(d["time"][-1])
+        max_time = max(max_time, d["time"][-1])
+        min_time = min(min_time, d["time"][0])
+        # Force first time to zero
+        d["time"] = np.array(d["time"]) - d["time"][0]
+        # Normalize costs
+        min_cost = np.min(d["cost"])
+        max_cost = np.max(d["cost"])
+        if min_cost != max_cost:
+            d["norm_cost"] = ((np.array(d["cost"]) - min_cost)
+                              / (max_cost - min_cost))
+        else:
+            d["norm_cost"] = np.array([0])
+
+    common_x = np.linspace(min_time, max_time, num=100)
+    # Interpolate y values to common x values using zero-order hold
+    all_y_interp = []
+    for d in data:
+        f = interp1d(d["time"], d["norm_cost"], kind='previous',
+                     fill_value="extrapolate",
+                     bounds_error=False)
+        y_interp = f(common_x)
+        all_y_interp.append(y_interp)
+
+    # Create a DataFrame suitable for Seaborn
+    df = pd.DataFrame(all_y_interp, columns=common_x)
+
+    # Convert DataFrame from wide to long format
+    df_long = df.melt(var_name='time', value_name='norm_cost')
+
+    # === Outputs === #
+    print(f"Avg. first sol. time: {np.mean(first_times)}")
+    print(f"Worst. first sol. time: {np.max(first_times)}")
+    print(f"Avg. total time: {np.mean(end_times)}")
+    print(f"Worst. total time: {np.max(end_times)}")
+
+    # Set the Seaborn style
+    sns.set(style="whitegrid")
+
+    # Create the plot
+    pi = 90
+    plt.figure(figsize=(10, 6))
+    ax = sns.lineplot(x='time', y='norm_cost', data=df_long,
+                      # errorbar=("pi", pi),
+                      estimator=np.mean, marker='o')
+
+    # Set plot labels and title
+    ax.set_xlabel('time')
+    ax.set_ylabel(f'normalized {cost_type}')
+    ax.set_title(f'n={n_platoon}, epsilon={epsilon}')
+    # ax.legend([f'Mean with {pi} percentile interval'])
+
+    # Show the plot
+    plt.show()
+
+
+# ============================================================================ #
 # TODO: create a class for optimal control results and one for
 #  plotting simulations
 

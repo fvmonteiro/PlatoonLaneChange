@@ -471,6 +471,11 @@ class GraphLaneChangeApproach(TemplateStrategy):
         all_queries_answered = True
         for q in queries:
             quantized_state, first_movers = q
+            if configuration.Configuration.is_warm_up:
+                print(f"[GraphLaneChangeApproach] Query {quantized_state}, "
+                      f"{first_movers} being saved to file")
+                self.save_query_to_file(q)
+                raise KeyError  # to stop simulation
             try:
                 strategy, cost = self._strategy_map[quantized_state][
                     frozenset(first_movers)]
@@ -699,9 +704,9 @@ class GraphLaneChangeApproach(TemplateStrategy):
     def save_query_to_file(self, query: configuration.Query):
         n_platoon = self._platoon.get_size()
         file_name = "_".join(["python_queries", str(n_platoon),
-                                          "vehicles.csv"])
+                              "vehicles.csv"])
         file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 "vehicle_state_graphs", file_name)
+                                 "queries", file_name)
         new_line = ("\"" + ",".join(str(x) for x in query[0]) + "\",\""
                     + ",".join(str(x) for x in query[1]) + "\"\n")
         if not os.path.isfile(file_path):

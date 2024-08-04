@@ -7,6 +7,7 @@ import time
 import configuration
 import analysis
 from platoon_functionalities import graph_tools, platoon_lane_change_strategies
+from platoon_functionalities import traffic_state_graph
 import post_processing
 import scenarios
 from vissim_handler import vissim_interface
@@ -65,9 +66,9 @@ def q_learning_tests():
     q_learning_agent.train((2, 2), 1000)
 
 
-def test_graph_explorer():
+def test_map_2d_example():
     from platoon_functionalities import map_2d_example
-    grid_size = (9, 9)
+    grid_size = (7, 7)
     # obstacles = {(i, i) for i in range(1, min(grid_size) - 1)}
     # obstacles.add((9, 8))
     start_state = (grid_size[0] // 2, grid_size[1] // 2)
@@ -78,20 +79,43 @@ def test_graph_explorer():
     my_map = map_2d_example.ProblemMap(grid_size, obstacles, start_state,
                                        goal_states)
     print(my_map.to_string())
-    map_2d_example.train(start_state, my_map, 1000)
+    map_2d_example.train(start_state, 1000, my_map, epsilon=0.8,
+                         verbose_level=1)
+
+
+def run_traffic_graph_explorer():
+    for n_platoon in range(2, 6):
+        for epsilon_idx in range(1, 11):
+            for cost_type in ["time", "accel_cost"]:
+                epsilon = epsilon_idx/10
+                print("=" * 79 + f"\nCost type f{cost_type}, eps={epsilon}")
+                try:
+                    traffic_state_graph.solve_queries_from_simulations(
+                        "vissim", "", n_platoon, cost_type=cost_type,
+                        epsilon=epsilon, verbose_level=0)
+                except MemoryError:
+                    print("MEMORY ERROR! but following on to next")
+                    continue
 
 
 def main():
     start_time = time.time()
-    test_graph_explorer()
-    # n_platoon = 2
+    n_platoon = 3
+    test_map_2d_example()
+    # run_traffic_graph_explorer()
+
+    # analysis.compare_bfs_and_dfs(n_platoon)
+
+    # analysis.plot_several_cost_vs_computation_time(
+    #     [4], ["accel_cost"], [i/10 for i in range(1, 11)])
+
     # n_orig_ahead, n_orig_behind = 1, 1
     # n_dest_ahead, n_dest_behind = 1, 1
-    # v_orig = 70 / 3.6
-    # v_ff_platoon = 110 / 3.6
-    # v_dest = 50 / 3.6
+    v_orig = 70 / 3.6
+    v_ff_platoon = 110 / 3.6
+    v_dest = 50 / 3.6
     # is_acceleration_optimal = True
-    # are_vehicles_cooperative = False
+    are_vehicles_cooperative = False
 
     # configuration.Configuration.set_scenario_parameters(
     #     sim_time=10 * n_platoon
@@ -108,14 +132,17 @@ def main():
     #     jumpstart_next_solver_call=True, has_initial_mode_guess=True
     # )
 
+    # configuration.Configuration.set_scenario_parameters(is_warm_up=True)
+    #
     # scenarios.run_scenarios_for_comparison(
     #     n_platoon, v_orig, v_dest, v_ff_platoon, are_vehicles_cooperative,
-    #     [platoon_lane_change_strategies.StrategyMap.last_vehicle_first],
-    #     gap_positions=[1])
+    #     [platoon_lane_change_strategies.StrategyMap.graph_min_time],
+    #     gap_positions=[1]
+    # )
     # scenarios.run_base_ocp_scenario()
 
     # scenarios.run_all_scenarios_for_comparison(warmup=True)
-    platoon_sizes = [4]
+    # platoon_sizes = [3]
     # vissim_interface.run_platoon_simulations(is_warm_up=True,
     #                                          platoon_size=platoon_sizes)
     # post_processing.import_strategy_maps_from_cloud(platoon_sizes)

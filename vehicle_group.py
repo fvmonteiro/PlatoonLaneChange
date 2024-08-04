@@ -7,7 +7,9 @@ import numpy as np
 import pandas as pd
 
 import controllers.optimal_controller as opt_ctrl
+import helper
 import platoon_functionalities.platoon_lane_change_strategies as lc_strategies
+from platoon_functionalities import vehicle_platoon
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
 import operating_modes.system_operating_mode as som
@@ -227,8 +229,9 @@ class VehicleGroup:
             cooperation_order: list[int]) -> None:
         self._maneuver_order = (lane_change_order, cooperation_order)
 
-    def set_platoon_lane_change_order(self, lane_change_order: list[set[int]],
-                                      cooperation_order: list[int]) -> None:
+    def set_platoon_lane_change_order(
+            self, lane_change_order: list[Union[set[int], frozenset[int]]],
+            cooperation_order: list[int]) -> None:
         p1 = self.get_vehicle_by_name("p1")
         p1.set_platoon_lane_change_order((lane_change_order, cooperation_order))
 
@@ -590,7 +593,7 @@ class VehicleGroup:
                 print(f' ==== COLLISION DETECTED ====\n'
                       f't={self.get_current_time():.2f} between vehicles '
                       f'{veh1} and {veh2}')
-                raise CollisionException
+                # raise CollisionException
 
     def update_states(self, new_time) -> None:
         for vehicle in self.vehicles.values():
@@ -686,6 +689,56 @@ class ShortSimulationVehicleGroup(VehicleGroup):
         super().__init__()
         self.vehicles: dict[int, fsv.ShortSimulationVehicle] = {}
 
+    @staticmethod
+    def create_platoon_scenario(
+            n_platoon: int, initial_state: np.ndarray,
+            next_platoon_positions_to_move: frozenset[int],
+            next_platoon_position_to_coop: int,
+            has_ld: bool = True, has_fd: bool = False
+    ) -> ShortSimulationVehicleGroup:
+        # TODO: must make the method name clearer
+        base.BaseVehicle.reset_vehicle_counter()
+        lo = fsv.ShortSimulationVehicle(False)
+        lo.set_name("lo")
+        platoon_vehicles = []
+        for i in range(n_platoon):
+            veh = fsv.ShortSimulationVehicle(True, is_connected=True)
+            veh.set_name("p" + str(i + 1))
+            platoon_vehicles.append(veh)
+
+        leader_platoon = vehicle_platoon.ClosedLoopPlatoon(
+            platoon_vehicles[0], lc_strategies.StrategyMap.template)
+        platoon_vehicles[0].set_platoon(leader_platoon)
+        for i in range(1, len(platoon_vehicles)):
+            leader_platoon.append_vehicle(platoon_vehicles[i])
+            platoon_vehicles[i].set_platoon(leader_platoon)
+
+        if has_ld:
+            ld = fsv.ShortSimulationVehicle(False)
+            ld.set_name("ld")
+            leader_platoon._dest_lane_leader_id = ld.get_id()
+        else:
+            ld = []
+        if has_fd:
+            fd = fsv.ShortSimulationVehicle(False)
+            fd.set_name("fd")
+        else:
+            fd = None
+        all_vehicles = helper.order_values(lo, platoon_vehicles,
+                                           ld, fd)
+        vehicle_group = ShortSimulationVehicleGroup()
+        vehicle_group.fill_vehicle_array(all_vehicles)
+        vehicle_group.set_platoon_lane_change_strategy(
+            lc_strategies.StrategyMap.template)
+
+        vehicle_group.set_verbose(False)
+        vehicle_group.set_vehicles_initial_states_from_array(
+            initial_state)
+        vehicle_group.set_platoon_lane_change_order(
+            [next_platoon_positions_to_move],
+            [next_platoon_position_to_coop])
+        return vehicle_group
+
     def get_vehicle_by_id(self, veh_id: int) -> fsv.ShortSimulationVehicle:
         return self.vehicles[veh_id]
 
@@ -708,6 +761,18 @@ class ShortSimulationVehicleGroup(VehicleGroup):
             None if vehicle_position_in_platoon < 0
             else self.vehicles[platoon_veh_ids[vehicle_position_in_platoon]]
         )
+
+    def count_completed_lane_changes(self):
+        """
+        Counts how many platoon vehicles are at the destination lane
+        """
+        # origin_lane = self.get_vehicle_by_name("lo").get_current_lane()
+        dest_lane = self.get_vehicle_by_name("ld").get_current_lane()
+        count = 0
+        for veh in self.vehicles.values():
+            if veh.get_name()[0] == "p" and veh.get_current_lane() == dest_lane:
+                count += 1
+        return count
 
     def set_ids_must_change_lanes(self, veh_ids: Iterable[int]):
         self._ids_must_change_lanes = veh_ids

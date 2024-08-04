@@ -19,6 +19,7 @@ import analysis
 import controllers.optimal_controller as opt_ctrl
 import controllers.optimal_control_costs as occ
 import configuration
+import helper
 import platoon_functionalities.graph_tools as graph_tools
 import platoon_functionalities.platoon_lane_change_strategies as lc_strategy
 import post_processing as pp
@@ -285,7 +286,7 @@ class LaneChangeScenarioManager:
          scenario
         """
         df, _ = (
-            graph_tools.GraphCreator.load_initial_states_seen_in_simulations(
+            helper.load_initial_states_seen_in_simulations(
                 self.n_platoon, simulator_name)
         )
         if scenario_number is not None:
@@ -311,7 +312,7 @@ class LaneChangeScenarioManager:
             quantized_initial_state = tuple(row.iloc[states_idx].to_numpy(int))
             initial_state = quantizer.dequantize_state(quantized_initial_state)
             initial_state_per_vehicle = (
-                graph_tools.VehicleStateGraph.split_state_vector(initial_state)
+                helper.split_state_vector(initial_state)
             )
             # Helps ensure that
             initial_state_per_vehicle["p1"][0] = 0
@@ -468,8 +469,8 @@ class LaneChangeScenarioManager:
                   "found in the graph.")
             return
         except KeyError:
-            print("Simulation interrupted because a query was not "
-                  "found in the strategies map.")
+            print("Simulation interrupted because and query was saved to file."
+                  )
             return
 
         self.store_results(scenario, gap_position)
