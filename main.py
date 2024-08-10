@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Sequence
 import datetime
 import time
@@ -12,6 +13,21 @@ import post_processing
 import scenarios
 from vissim_handler import vissim_interface
 from vissim_handler import file_handling
+
+
+def run_optimal_control_scenario():
+    configuration.Configuration.set_solver_parameters(
+        max_iter=100, discretization_step=0.2,
+        ftol=1.0e-3, estimate_gradient=True
+    )
+    configuration.Configuration.set_optimal_controller_parameters(
+        max_iter=3, time_horizon=configuration.Configuration.sim_time - 2,
+        has_terminal_lateral_constraints=False,
+        has_lateral_safety_constraint=False,
+        initial_input_guess='mode',
+        jumpstart_next_solver_call=True, has_initial_mode_guess=True
+    )
+    scenarios.run_base_ocp_scenario()
 
 
 def load_and_plot_latest_scenario():
@@ -68,7 +84,7 @@ def q_learning_tests():
 
 def test_map_2d_example():
     from platoon_functionalities import map_2d_example
-    grid_size = (7, 7)
+    grid_size = (11, 11)
     # obstacles = {(i, i) for i in range(1, min(grid_size) - 1)}
     # obstacles.add((9, 8))
     start_state = (grid_size[0] // 2, grid_size[1] // 2)
@@ -79,69 +95,84 @@ def test_map_2d_example():
     my_map = map_2d_example.ProblemMap(grid_size, obstacles, start_state,
                                        goal_states)
     print(my_map.to_string())
-    map_2d_example.train(start_state, 1000, my_map, epsilon=0.8,
+    map_2d_example.train(start_state, 100, my_map, epsilon=0.8,
                          verbose_level=1)
 
 
 def run_traffic_graph_explorer():
-    for n_platoon in range(2, 6):
-        for epsilon_idx in range(1, 11):
-            for cost_type in ["time", "accel_cost"]:
+    platoon_sizes = [i for i in range(5, 6)]
+    epsilon_range = [i for i in range(1, 11, 3)]
+    all_cost_types = ["time", "accel"]
+    # configuration.Configuration.set_graph_exploration_parameters(should_use_bfs=True)
+    for n_platoon in platoon_sizes:
+        for epsilon_idx in epsilon_range:
+            for cost_type in all_cost_types:
+                random.seed(1)
                 epsilon = epsilon_idx/10
-                print("=" * 79 + f"\nCost type f{cost_type}, eps={epsilon}")
+                print("=" * 79 + f"\nCost type: {cost_type}, eps={epsilon}")
                 try:
                     traffic_state_graph.solve_queries_from_simulations(
-                        "vissim", "", n_platoon, cost_type=cost_type,
+                        "python", "", n_platoon, cost_type=cost_type,
                         epsilon=epsilon, verbose_level=0)
                 except MemoryError:
                     print("MEMORY ERROR! but following on to next")
                     continue
 
 
+def test_analysis():
+    # analyzer = analysis.ResultAnalyzer(save_figs=False)
+    # analyzer.get_python_results_for_paper()
+    # analyzer.print_average_number_of_maneuver_steps()
+    # analyzer.compare_approaches()
+    # analyzer.compare_to_approach("time")
+
+    n_platoon = 5
+
+    # analysis.compare_bfs_and_dfs(n_platoon, "time")
+    ra = analysis.ResultAnalyzer(is_bfs=False)
+    ra.plot_cost_vs_max_computation_time()
+
+    # for i in range(1, 11):
+    #     analysis.plot_average_cost_vs_computation_time(5, "time", i/10)
+
+    # scenarios.run_with_varying_max_computation_time(1.0)
+    # analysis.plot_several_cost_vs_computation_time(
+    #     [5], ["time", "accel"], [i/10 for i in range(1, 11, 3)])
+
+
 def main():
     start_time = time.time()
-    n_platoon = 3
-    test_map_2d_example()
+
+    # test_map_2d_example()
     # run_traffic_graph_explorer()
-
-    # analysis.compare_bfs_and_dfs(n_platoon)
-
-    # analysis.plot_several_cost_vs_computation_time(
-    #     [4], ["accel_cost"], [i/10 for i in range(1, 11)])
 
     # n_orig_ahead, n_orig_behind = 1, 1
     # n_dest_ahead, n_dest_behind = 1, 1
+    n_platoon = 2
     v_orig = 70 / 3.6
     v_ff_platoon = 110 / 3.6
     v_dest = 50 / 3.6
     # is_acceleration_optimal = True
     are_vehicles_cooperative = False
 
+    test_analysis()
     # configuration.Configuration.set_scenario_parameters(
     #     sim_time=10 * n_platoon
     # )
-    # configuration.Configuration.set_solver_parameters(
-    #     max_iter=100, discretization_step=0.2,
-    #     ftol=1.0e-3, estimate_gradient=True
-    # )
-    # configuration.Configuration.set_optimal_controller_parameters(
-    #     max_iter=3, time_horizon=configuration.Configuration.sim_time - 2,
-    #     has_terminal_lateral_constraints=False,
-    #     has_lateral_safety_constraint=False,
-    #     initial_input_guess='mode',
-    #     jumpstart_next_solver_call=True, has_initial_mode_guess=True
-    # )
 
-    # configuration.Configuration.set_scenario_parameters(is_warm_up=True)
+    # scenarios.run_with_varying_max_computation_time(epsilon=0.4)
+
+    # configuration.Configuration.set_graph_exploration_parameters(
+    #     should_use_bfs=False, epsilon=0.1, max_computation_time=0.1)
     #
     # scenarios.run_scenarios_for_comparison(
     #     n_platoon, v_orig, v_dest, v_ff_platoon, are_vehicles_cooperative,
     #     [platoon_lane_change_strategies.StrategyMap.graph_min_time],
-    #     gap_positions=[1]
+    #     # gap_positions=[0]
     # )
-    # scenarios.run_base_ocp_scenario()
 
-    # scenarios.run_all_scenarios_for_comparison(warmup=True)
+    # scenarios.run_all_scenarios_for_comparison()
+
     # platoon_sizes = [3]
     # vissim_interface.run_platoon_simulations(is_warm_up=True,
     #                                          platoon_size=platoon_sizes)
@@ -162,12 +193,6 @@ def main():
     #     print("Some error when running vissim after computing graphs")
 
     # scenarios.run_all_scenarios_for_comparison(
-
-    # analyzer = analysis.ResultAnalyzer(save_figs=False)
-    # analyzer.get_python_results_for_paper()
-    # analyzer.print_average_number_of_maneuver_steps()
-    # analyzer.compare_approaches()
-    # analyzer.compare_to_approach("time")
 
     # vissim_interface.run_platoon_simulations()
 

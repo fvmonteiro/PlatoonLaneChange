@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from typing import Mapping, Union
 
 import numpy as np
@@ -70,6 +71,11 @@ class Configuration:
     platoon_strategies = [0]
     increase_lc_time_headway: bool = False
     is_warm_up: bool = False
+
+    # Graph exploration parameters
+    should_use_bfs = False
+    epsilon: float = 1.0
+    max_computation_time: float = 1e5
 
     @staticmethod
     def set_solver_parameters(
@@ -189,6 +195,26 @@ class Configuration:
             Configuration.increase_lc_time_headway = increase_lc_time_headway
         if is_warm_up is not None:
             Configuration.is_warm_up = is_warm_up
+
+    @staticmethod
+    def set_graph_exploration_parameters(
+            should_use_bfs: bool = None, epsilon: float = None,
+            max_computation_time: float = None):
+        # TODO: there could be more checks
+        if should_use_bfs is not None and should_use_bfs:
+            Configuration.should_use_bfs = should_use_bfs
+            if epsilon is not None:
+                warnings.warn("Parameter epsilon only makes sense if "
+                              "should_use_bfs is False")
+            if max_computation_time is not None:
+                warnings.warn("Parameter max_computation_time only makes sense "
+                              "if should_use_bfs is False")
+        elif epsilon is not None:
+            Configuration.should_use_bfs = False
+            Configuration.epsilon = epsilon
+
+        if max_computation_time is not None:
+            Configuration.max_computation_time = max_computation_time
 
 
 # TODO: remove default value. Each caller should know. Or maybe remove this

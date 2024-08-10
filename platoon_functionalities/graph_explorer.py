@@ -19,8 +19,8 @@ State = configuration.QuantizedState
 def train_base(
         initial_node: Node, max_episodes: int,
         terminal_check_function: Callable[[Any], bool],
-        epsilon: float = 0.5, verbose_level: int = 0,
-        visited_nodes: dict[State, Node] = None
+        epsilon: float = 0.5, visited_nodes: dict[State, Node] = None,
+        verbose_level: int = 0
 ) -> dict[str, list]:
     """
     Basic training script.
@@ -29,6 +29,8 @@ def train_base(
     :param terminal_check_function: Function that determines whether a node is
      terminal
     :param epsilon: Epsilon for epsilon-greedy policy
+    :param visited_nodes: A dictionary of visited nodes helps prevent creating
+     repeated nodes.
     :param verbose_level: If 0, only prints the final cost to go. If 1, prints
      the best results every 10% done. If 2, also prints the explored path at
      every episode
@@ -36,55 +38,54 @@ def train_base(
      best cost found so far.
     """
 
-    results = {"cost": [], "best_path": [], "time": []}
     if visited_nodes is None:
         visited_nodes = dict()
     visited_nodes[initial_node.state] = initial_node
-    best_path = []
+    # if path_type is None:
+    #     path_type = Path
+
+    best_path = Path(initial_node)
+    results = {"cost": [], "best_path": [], "time": []}
     start_time = time.time()
     for episode in range(max_episodes):
         current_node = initial_node
-        path = []
-        path_cost = 0
+        path = Path(initial_node)
         while (not terminal_check_function(current_node)
-               and path_cost < initial_node.best_cost_to_go):
+               and path.cost < initial_node.best_cost_to_go):
             if (current_node.is_new()
                     or current_node.is_best_edge_fully_explored()
                     or random.uniform(0, 1) < epsilon):
-                edge = current_node.explore(visited_nodes)
+                edge, next_node = current_node.explore(visited_nodes)
             else:
-                edge = current_node.exploit()
-            path.append((current_node, edge))
-            path_cost += edge.cost
-            if path_cost >= initial_node.best_cost_to_go:
+                edge, next_node = current_node.exploit()
+            path.add_edge(edge)
+            if path.cost >= initial_node.best_cost_to_go:
                 current_node.discard_edge(edge)
             current_node.update_best_edge(edge)
-            current_node = edge.destination_node
+            current_node = next_node
             visited_nodes[current_node.state] = current_node
-        update_along_path(path)
+        path.update_nodes()
         best_cost = initial_node.best_cost_to_go
         if len(results["cost"]) < 1 or best_cost < results["cost"][-1]:
-            best_path = get_best_path(initial_node,
-                                      terminal_check_function)
+            best_path = initial_node.get_best_path()
             results["cost"].append(initial_node.best_cost_to_go)
             results["best_path"].append(best_path)
             results["time"].append(time.time() - start_time)
 
         if initial_node.is_fully_explored:
-            print(f"Graph fully explored in {episode} episodes")
+            print(f"Best solution found in {episode} episodes")
             break
 
         if (verbose_level > 0 and episode > 0
                 and (episode/max_episodes*100) % 10 == 0):
             print(f"Episode: {episode / max_episodes * 100:.2f}%")
             print(f"Best cost to go: {best_cost:.2f}")
-            print("Path:\n", path_to_string(best_path), sep="")
+            print("Path:\n", best_path.to_string(), sep="")
         if verbose_level > 1:
-            print(f"Episode: {episode}. Searched path:\n{path_to_string(path)}")
+            print(f"Episode: {episode}. Searched path:\n{path.to_string()}")
             print(f"Cost: {initial_node.best_cost_to_go}")
     if verbose_level > 0:
-        final_best_path = results["best_path"][-1]
-        terminal_node = final_best_path[-1][1].destination_node
+        terminal_node = best_path.get_terminal_node()
         print(f"{Node.count} created nodes")
         print(f"{len(visited_nodes)} visited nodes")
         print(f"Final cost-to-go from {initial_node.state} to "
@@ -92,59 +93,12 @@ def train_base(
     return results
 
 
-def update_along_path(path: Path) -> None:
-    for node, edge in path[::-1]:
-        node.update_best_edge(edge)
-        node.update_is_explored(edge)
-
-
-def get_best_path(node: Node, terminal_check_function: Callable[[Any], bool],
-                  ) -> Path:
-    path = []
-    current_node = node
-    while not terminal_check_function(current_node):
-        try:
-            path.append((current_node, current_node.best_edge))
-        except AttributeError:
-            print(f"There's no path from node {node.state} to a "
-                  f"terminal node.")
-            break
-        current_node = current_node.best_edge.destination_node
-    # path.append((current_node, None))
-    return path
-
-
-def path_to_string(path: Path):
-    ret_str = ""
-    if len(path[0][0].state_to_str()) > 10:
-        sep = "\n"
-    else:
-        sep = " "
-
-    for node, edge in path:
-        ret_str += f"{node.state_to_str()}{sep}-{edge.action_to_str()}->{sep}"
-    ret_str += f"{path[-1][1].destination_node.state_to_str()}\n"
-    return ret_str
-
-
-def traverse_action_sequence(initial_node: Node,
-                             actions: Iterable[ActionBase]) -> float:
-    node = initial_node
-    visited_nodes = {node.state: node}
-    cost = 0
-    for action in actions:
-        edge = node.take_action(action, visited_nodes)
-        cost += edge.cost
-        node = edge.destination_node
-    return cost
-
-
 class Node (ABC):
 
     _state: State
     _possible_actions: list[ActionBase]
     # This dict is needed to prevent simulating the same scenario twice
-    _explored_actions: dict[ActionBase, Edge]
+    _explored_actions: dict[ActionBase, (Edge, Node)]
     _best_edge: Edge
     _simulate: Callable[[State, ActionBase], tuple[State, float]]
 
@@ -181,25 +135,30 @@ class Node (ABC):
 
     def is_best_edge_fully_explored(self) -> bool:
         try:
-            return self._best_edge.destination_node.is_fully_explored
+            return self.get_destination_node(self._best_edge).is_fully_explored
         except AttributeError:  # no best_edge yet
             warnings.warn("Trying to read best edge too soon")
             return False
 
-    def exploit(self) -> Edge:
+    def exploit(self) -> tuple[Edge, Node]:
         if len(self._explored_actions) == 0:
             raise RuntimeError("Trying to exploit a node without any explored "
                                "actions")
-        return self._best_edge
+        return self.take_action(self._best_edge.action)
 
-    def explore(self, visited_nodes: dict[State, Node]) -> Edge:
+    def explore(self, visited_nodes: dict[State, Node]
+                ) -> tuple[Edge, Node]:
         if self.is_new():
             self.generate_possible_actions()
         action = random.choice(self._possible_actions)
         return self.take_action(action, visited_nodes)
 
-    def take_action(self, action: ActionBase, visited_nodes: dict[State, Node]
-                    ) -> Edge:
+    def take_action(
+            self, action: ActionBase, visited_nodes: dict[State, Node] = None
+    ) -> tuple[Edge, Node]:
+        if visited_nodes is None:
+            visited_nodes = dict()
+
         if action not in self._explored_actions:
             next_state, cost = self._simulate(self._state, action)
             if next_state in visited_nodes:
@@ -209,13 +168,20 @@ class Node (ABC):
                 self.add_edge_from_state(next_state, action, cost)
         return self._explored_actions[action]
 
+    def follow_edge(self, edge: Edge) -> tuple[Edge, Node]:
+        action = edge.action
+        return self.take_action(action)
+
+    def get_destination_node(self, edge: Edge) -> Node:
+        return self._explored_actions[edge.action][1]
+
     def update_best_edge(self, edge: Edge) -> bool:
         """
         Returns true if the given edge leas to smaller cost than the current
         best edge
         """
         cost_to_next = edge.cost
-        next_node: Node = edge.destination_node
+        next_node: Node = self._explored_actions[edge.action][1]
         cost_to_go = cost_to_next + next_node.best_cost_to_go
         try:
             # In the beginning, we set best edge even without knowing
@@ -236,12 +202,16 @@ class Node (ABC):
         Looks for the edge with the lowest cost to go among all explored edges
         and updates the best edge accordingly
         """
-        min_cost_edge = min(self._explored_actions.values(),
-                            key=lambda x: x.destination_node.best_cost_to_go)
-        self._best_edge = min_cost_edge
+        min_cost_action = random.choice(list(self._explored_actions.keys()))
+        _, dest_node = self.take_action(min_cost_action)
+        best_cost_to_go = dest_node.best_cost_to_go
+        for action in self._explored_actions:
+            _, dest_node = self.take_action(action)
+            if dest_node.best_cost_to_go < best_cost_to_go:
+                min_cost_action = action
+        self._best_edge, _ = self.take_action(min_cost_action)
 
     def discard_edge(self, edge: Edge) -> None:
-        # self._discarded_edges.add(edge)
         try:
             self._possible_actions.remove(edge.action)
         except ValueError:
@@ -253,7 +223,9 @@ class Node (ABC):
             self._is_fully_explored = True
 
     def update_is_explored(self, edge: Edge) -> None:
-        if edge.destination_node.is_fully_explored:
+        next_node = self.get_destination_node(edge)
+        # next_node = self._explored_actions[edge.action][1]
+        if next_node.is_fully_explored:
             # TODO: is this too time-consuming?
             try:
                 self._possible_actions.remove(edge.action)
@@ -268,6 +240,30 @@ class Node (ABC):
     def set_as_terminal(self) -> None:
         self._is_fully_explored = True
         self._best_cost_to_go = 0
+
+    def get_best_path(self) -> Path:
+        path = Path(self)
+        current_node = self
+        while not current_node._best_cost_to_go != 0:
+            try:
+                edge, next_node = current_node.exploit()
+                path.add_edge(edge)
+            except AttributeError:
+                print(f"There's no path from node {self.state} to a "
+                      f"terminal node.")
+                break
+            current_node = next_node
+        return path
+
+    def traverse_action_sequence(self, actions: Iterable[ActionBase]) -> float:
+        node = self
+        visited_nodes = {node.state: node}
+        cost = 0
+        for action in actions:
+            edge, next_node = node.take_action(action, visited_nodes)
+            cost += edge.cost
+            node = next_node
+        return cost
 
     def state_to_str(self) -> str:
         return str(self.state)
@@ -299,19 +295,13 @@ class Node (ABC):
 
 
 class Edge:
-    _destination_node: Node
+    # _destination_node: Node
     _action: ActionBase
     _cost: float
 
-    def __init__(self, destination_node: Node, action: ActionBase,
-                 cost: float):
-        self._destination_node = destination_node
+    def __init__(self, action: ActionBase, cost: float):
         self._action = action
         self._cost = cost
-
-    @property
-    def destination_node(self) -> Node:
-        return self._destination_node
 
     @property
     def action(self) -> ActionBase:
@@ -325,4 +315,56 @@ class Edge:
         return str(self.action)
 
 
-Path = list[tuple[Node, Edge]]
+class Path:
+    _edges: list[Edge]
+    _cost = 0
+
+    def __init__(self, root_node: Node):
+        self._root_node = root_node
+        self._edges = []
+
+    @property
+    def root_node(self) -> Node:
+        return self._root_node
+
+    @property
+    def edges(self) -> list[Edge]:
+        return self._edges
+
+    @property
+    def cost(self) -> float:
+        return self._cost
+
+    def add_edge(self, edge: Edge) -> None:
+        self._edges.append(edge)
+        self._cost += edge.cost
+
+    def get_terminal_node(self) -> Node:
+        node = self._root_node
+        for e in self._edges:
+            node = node.get_destination_node(e)
+        return node
+
+    def update_nodes(self):
+        nodes = [self._root_node]
+        for edge in self._edges:
+            nodes.append(nodes[-1].get_destination_node(edge))
+
+        for i in range(len(self._edges) - 1, -1, -1):
+            nodes[i].update_best_edge(self._edges[i])
+            nodes[i].update_is_explored(self._edges[i])
+
+    def to_string(self):
+        ret_str = ""
+        if len(self._root_node.state_to_str()) > 10:
+            sep = "\n"
+        else:
+            sep = " "
+
+        node = self._root_node
+        for edge in self._edges:
+            ret_str += (f"{node.state_to_str()}{sep}"
+                        f"-{edge.action_to_str()}->{sep}")
+            node = node.get_destination_node(edge)
+        ret_str += f"{node.state_to_str()}\n"
+        return ret_str

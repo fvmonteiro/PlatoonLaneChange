@@ -377,6 +377,8 @@ class GraphCreator:
     ) -> None:
         """
         Expands the graph to include queries made during simulations.
+        BFS approach: constructs the entire graph and then searches for the min
+        cost path
         """
         start_time = time.time()
 
@@ -1046,6 +1048,16 @@ class LaneChangeStrategyManager:
     @staticmethod
     def load_strategy_map(n_platoon: int, cost_name: str
                           ) -> configuration.StrategyMap:
+        if configuration.Configuration.should_use_bfs:
+            return LaneChangeStrategyManager.load_bfs_strategy_map(
+                n_platoon, cost_name)
+        else:
+            return LaneChangeStrategyManager.load_dfs_strategy_map(
+                n_platoon, cost_name)  # TODO!!!
+
+    @staticmethod
+    def load_bfs_strategy_map(n_platoon: int, cost_name: str
+                              ) -> configuration.StrategyMap:
         strategy_list = LaneChangeStrategyManager.load_saved_strategies(
             n_platoon, cost_name)
         strategy_map: configuration.StrategyMap = defaultdict(dict)
@@ -1055,6 +1067,28 @@ class LaneChangeStrategyManager:
             lc_order = [frozenset(i) for i in sl["lc_order"]]
             strategy_map[key1][key2] = ((lc_order, sl["coop_order"]),
                                         sl[cost_name])
+        return strategy_map
+
+    @staticmethod
+    def load_dfs_strategy_map(n_platoon: int, cost_name: str,
+                              # max_computation_time: float  # TODO
+    ) -> configuration.StrategyMap:
+        max_computation_time = configuration.Configuration.max_computation_time
+        strategy_list = LaneChangeStrategyManager.load_saved_strategies(
+            n_platoon, cost_name)
+        strategy_map: configuration.StrategyMap = dict()
+        for sl in strategy_list:
+            key1 = tuple(sl["root"])
+            if key1 not in strategy_map:
+                strategy_map[key1] = dict()
+            key2 = frozenset(sl["first_mover_set"])
+            max_computation_time += sl["time"][0]
+            i = 0
+            while i < len(sl["time"]) and max_computation_time >= sl["time"][i]:
+                i += 1
+            lc_order = [frozenset(i) for i in sl["lc_order"][i - 1]]
+            strategy_map[key1][key2] = ((lc_order, sl["coop_order"][i - 1]),
+                                        sl["cost"][i - 1])
         return strategy_map
 
     @staticmethod
@@ -1077,8 +1111,16 @@ class LaneChangeStrategyManager:
                               ) -> list[dict[str, Any]]:
         file_name = "_".join(["min", cost_name, "strategies_for",
                               str(n_platoon), "vehicles.json"])
-        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 "strategy_maps_bfs", file_name)
+        if configuration.Configuration.should_use_bfs:
+            file_folder = os.path.join(
+                configuration.DATA_FOLDER_PATH, "strategy_maps_bfs")
+        else:
+            epsilon = configuration.Configuration.epsilon
+            file_folder = os.path.join(
+                configuration.DATA_FOLDER_PATH, "strategy_maps",
+                f"epsilon_{int(epsilon*100)}")
+
+        file_path = os.path.join(file_folder, file_name)
         with open(file_path) as f:
             strategy_list: list[dict] = json.load(f)
         return strategy_list
@@ -1187,39 +1229,6 @@ class LaneChangeStrategyManager:
             frozenset(first_mover_platoon_positions)][1]
 
         return opt_strategy, opt_cost
-
-    # def find_minimum_cost_strategy_from_node(
-    #         self, starting_node: configuration.QuantizedState, cost_name: str
-    # ) -> tuple[configuration.Strategy, float]:
-    #     dag: nx.DiGraph = self.vehicle_state_graph
-    #     all_costs = []  # for debugging
-    #     all_strategies = []  # for debugging
-    #     opt_cost = np.inf
-    #     opt_strategy = None
-    #
-    #     if dag.nodes[starting_node].get("is_terminal", False):
-    #         return ([], []), 0
-    #
-    #     for node in nx.descendants(dag, starting_node):
-    #         if dag.nodes[node].get("is_terminal", False):
-    #             cost, path = nx.single_source_dijkstra(
-    #                 dag, starting_node, node, weight=cost_name)
-    #             strategy = self.get_maneuver_order_from_path(path)
-    #             all_costs.append(cost)
-    #             all_strategies.append(strategy)
-    #             if cost < opt_cost:
-    #                 opt_cost = cost
-    #                 opt_strategy = strategy
-    #     return opt_strategy, opt_cost
-    #
-    # def get_maneuver_order_from_path(self, path) -> configuration.Strategy:
-    #     lc_order = []
-    #     coop_order = []
-    #     for source_node, target_node in nx.utils.pairwise(path):
-    #         edge = self.vehicle_state_graph[source_node][target_node]
-    #         lc_order.append(edge["lc_vehicles"])
-    #         coop_order.append(edge["coop_vehicle"])
-    #     return lc_order, coop_order
 
 
 class StateQuantizer:

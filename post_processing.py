@@ -6,8 +6,63 @@ import shutil
 
 import numpy as np
 import pandas as pd
+from scipy.interpolate import interp1d
 
 import configuration as config
+from platoon_functionalities import traffic_state_graph
+
+
+def process_graph_exploration_results(
+        n_platoon: Iterable[int], cost_type: Iterable[str],
+        epsilon: Iterable[float]):
+    data = []
+    for cost in cost_type:
+        for n in n_platoon:
+            for eps in epsilon:
+                data.append(process_single_graph_exploration_result(
+                    n, cost, eps))
+    return pd.concat(data)
+
+
+def process_single_graph_exploration_result(
+        n_platoon: int, cost_type: str, epsilon: float):
+    data = traffic_state_graph.read_from_json(n_platoon, cost_type, epsilon)
+    # first_times, end_times = [], []  # TODO: de we want these stats?
+    max_time = -np.inf
+    for d in data:
+        # first_times.append(d["time"][0])
+        # end_times.append(d["time"][-1])
+        # min_time = min(min_time, d["time"][0])
+        # Force first time to zero
+        d["time"] = np.array(d["time"]) - d["time"][0]
+        max_time = max(max_time, d["time"][-1])
+        # Normalize costs
+        min_cost = np.min(d["cost"])
+        max_cost = np.max(d["cost"])
+        if min_cost != max_cost:
+            d["norm_cost"] = ((np.array(d["cost"]) - min_cost)
+                              / (max_cost - min_cost))
+        else:
+            d["norm_cost"] = np.array([0])
+    common_x = np.linspace(0., max_time, num=100)
+    # Interpolate y values to common x values using zero-order hold
+    all_y_interp = []
+    for d in data:
+        f = interp1d(d["time"], d["norm_cost"], kind='previous',
+                     fill_value="extrapolate",
+                     bounds_error=False)
+        y_interp = f(common_x)
+        all_y_interp.append(y_interp)
+
+    # Create a DataFrame suitable for Seaborn
+    df = pd.DataFrame(all_y_interp, columns=common_x)
+
+    # Convert DataFrame from wide to long format
+    df_long = df.melt(var_name='time', value_name='norm_cost')
+    df_long["cost_type"] = cost_type
+    df_long["n_platoon"] = n_platoon
+    df_long["epsilon"] = epsilon
+    return df_long
 
 
 def compute_acceleration_costs(

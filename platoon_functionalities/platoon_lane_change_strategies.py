@@ -383,11 +383,15 @@ class GraphLaneChangeApproach(TemplateStrategy):
     def get_name(cls) -> str:
         return '_'.join([cls._name, cls._cost_name])
 
+    @classmethod
+    def get_cost_name(cls) -> str:
+        return cls._cost_name
+
     def _load_data(self):
         n = len(self._platoon.vehicles)
-        self._lane_change_strategy_manager = (
-            graph_tools.LaneChangeStrategyManager(
-                n, has_fd=self._includes_fd))
+        # self._lane_change_strategy_manager = (
+        #     graph_tools.LaneChangeStrategyManager(
+        #         n, has_fd=self._includes_fd))
         self._strategy_map = (
             graph_tools.LaneChangeStrategyManager.load_strategy_map(
                 n, self._cost_name))
@@ -402,25 +406,9 @@ class GraphLaneChangeApproach(TemplateStrategy):
         queries = self._create_all_queries(vehicles)
         opt_strategy = self.get_query_results_from_map(queries)
         if opt_strategy is not None:
+            print(queries)
+            print(opt_strategy)
             self.set_maneuver_order(opt_strategy[0], opt_strategy[1])
-
-        # self._set_maneuver_initial_state_for_all_vehicles(vehicles)
-        # start_time = time.time()
-        # opt_strategy_from_graph = self._find_best_strategy_from_graph()
-        # if opt_strategy_from_graph is not None:
-        #     final_time = time.time()
-        #     self._decision_time = final_time - start_time
-        #     print(f'Graph min cost took '
-        #           f'{self._decision_time:.2e} seconds')
-        #     self.set_maneuver_order(opt_strategy_from_graph[0],
-        #                             opt_strategy_from_graph[1])
-        #
-        # # Testing
-        # opt_strategy_from_map = self._find_best_strategy_from_map()
-        # if opt_strategy_from_map != opt_strategy_from_graph:
-        #     print(f'Different strategies.\n'
-        #           f'From graph: {opt_strategy_from_graph}\n'
-        #           f'From map: {opt_strategy_from_map}')
 
     def _create_all_queries(self, vehicles: Mapping[int, base.BaseVehicle]
                             ) -> list[configuration.Query]:
@@ -475,7 +463,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
                 print(f"[GraphLaneChangeApproach] Query {quantized_state}, "
                       f"{first_movers} being saved to file")
                 self.save_query_to_file(q)
-                raise KeyError  # to stop simulation
+                all_queries_answered = False
             try:
                 strategy, cost = self._strategy_map[quantized_state][
                     frozenset(first_movers)]
@@ -491,194 +479,6 @@ class GraphLaneChangeApproach(TemplateStrategy):
         if not all_queries_answered:
             raise KeyError
         return best_strategy
-
-    def _set_maneuver_initial_state_for_all_vehicles(
-            self, all_vehicles: Mapping[int, base.BaseVehicle]) -> None:
-        """
-        Method should only be called by the platoon leader and if the
-        lane change has not yet started.
-        :param all_vehicles:
-        :return:
-        """
-
-        states = self._platoon.get_centered_vehicles_states()
-        platoon_leader = self._platoon.get_platoon_leader()
-        leader_x = platoon_leader.get_x()
-        leader_y = platoon_leader.get_y()
-        x_idx = fsv.FourStateVehicle.get_idx_of_state("x")
-        y_idx = fsv.FourStateVehicle.get_idx_of_state("y")
-        if platoon_leader.has_origin_lane_leader():
-            lo = all_vehicles[platoon_leader.get_origin_lane_leader_id()]
-            lo_states = lo.get_states()
-        else:
-            lo_states = platoon_leader.get_states()
-            lo_states[x_idx] += configuration.MAX_DISTANCE
-        lo_states[x_idx] -= leader_x
-        lo_states[y_idx] -= leader_y
-        states["lo"] = lo_states
-
-        error_flag = False
-        for pos, veh in enumerate(self._platoon.vehicles):
-            if veh.get_is_lane_change_gap_suitable():
-                if veh.has_destination_lane_leader():
-                    ld = all_vehicles[veh.get_destination_lane_leader_id()]
-                    ld_states = ld.get_states()
-                else:
-                    ld_states = platoon_leader.get_states()
-                    ld_states[x_idx] += configuration.MAX_DISTANCE
-                    ld_states[y_idx] = platoon_leader.get_target_y()
-                ld_states[x_idx] -= leader_x
-                ld_states[y_idx] -= leader_y
-                states["ld"] = ld_states
-
-                if self._includes_fd:
-                    if veh.has_destination_lane_follower():
-                        fd = all_vehicles[
-                            veh.get_destination_lane_follower_id()]
-                        fd_states = fd.get_states()
-                    else:
-                        pN = self._platoon.get_last_platoon_vehicle()
-                        fd_states = pN.get_states()
-                        fd_states[x_idx] -= configuration.MAX_DISTANCE
-                        fd_states[y_idx] = pN.get_target_y()
-                    states["fd"] = fd_states
-
-                try:
-                    (self._lane_change_strategy_manager.
-                     set_maneuver_initial_state(pos, states))
-                except nx.NodeNotFound as error:
-                    # We want to save all errors before stopping the simulation
-                    error_flag = True
-                    missing_node = error.args[0]
-                    v_idx = fsv.FourStateVehicle.get_idx_of_state("v")
-                    v_ref = {"dest": ld_states[v_idx],
-                             "orig": lo_states[v_idx],
-                             "platoon": platoon_leader.get_free_flow_speed()}
-                    self.save_state_info_to_csv(missing_node, v_ref)
-            else:
-                self._set_empty_maneuver_initial_state(veh.get_id())
-
-        if error_flag:
-            raise nx.NodeNotFound
-
-    def _set_empty_maneuver_initial_state(self, ego_position_in_platoon: int):
-        """
-        When the vehicle at the given position cannot be in the first group
-        to move to the destination lane, we must set its maneuver initial state
-        to an empty value
-        :param ego_position_in_platoon:
-        :return:
-        """
-        # if not self._is_data_loaded:
-        #     self._load_data()
-        if not self._is_initialized:
-            self._lane_change_strategy_manager.set_empty_maneuver_initial_state(
-                ego_position_in_platoon)
-
-    def _find_best_strategy_from_graph(self) -> configuration.Strategy:
-        opt_strategy = None
-        opt_cost = np.inf
-
-        # First, we check if any vehicles are already at safe position to
-        # start the maneuver
-        all_costs = []
-        all_strategies = []
-        for pos1 in range(len(self._platoon.vehicles)):
-            first_movers = set()
-            pos2 = pos1
-            while (pos2 < len(self._platoon.vehicles)
-                   and self._platoon.vehicles[pos2].get_is_lane_change_safe()):
-                first_movers.add(pos2)
-                pos2 += 1
-                try:
-                    strategy, cost = (
-                        self._lane_change_strategy_manager.
-                        find_min_cost_strategy_given_first_mover(
-                            first_movers, self._cost_name))
-                    all_costs.append(cost)
-                    all_strategies.append(strategy)
-                except nx.NetworkXNoPath:
-                    continue
-
-                if cost < opt_cost:
-                    opt_cost = cost
-                    opt_strategy = strategy
-
-        # If there are no vehicles at safe positions, we check if any are
-        # close to a suitable gap
-        if opt_strategy is None:
-            for veh_pos in range(len(self._platoon.vehicles)):
-                veh = self._platoon.vehicles[veh_pos]
-                if veh.get_is_lane_change_gap_suitable():
-                    try:
-                        strategy, cost = (
-                            self._lane_change_strategy_manager.
-                            find_min_cost_strategy_given_first_mover(
-                                {veh_pos}, self._cost_name))
-                    except nx.NetworkXNoPath:
-                        continue
-                    if cost < opt_cost:
-                        opt_cost = cost
-                        opt_strategy = strategy
-        return opt_strategy
-
-    def _find_best_strategy_from_map(self) -> configuration.Strategy:
-        opt_strategy = None
-        opt_cost = np.inf
-        # First, we check if any vehicles are already at safe position to
-        # start the maneuver
-        all_costs_from_map = []
-        all_strategies_from_map = []
-        for pos1 in range(len(self._platoon.vehicles)):
-            first_movers = set()
-            pos2 = pos1
-            while (pos2 < len(self._platoon.vehicles)
-                   and self._platoon.vehicles[pos2].get_is_lane_change_safe()):
-                first_movers.add(pos2)
-                pos2 += 1
-                try:
-                    strategy, cost = (
-                        self._lane_change_strategy_manager.
-                        find_min_cost_strategy_given_first_mover_2(
-                            first_movers, self._strategy_map))
-                except KeyError:
-                    continue
-
-                all_costs_from_map.append(opt_cost)
-                all_strategies_from_map.append(opt_strategy)
-                if cost < opt_cost:
-                    opt_cost = cost
-                    opt_strategy = strategy
-
-        # If there are no vehicles at safe positions, we check if any are
-        # close to a suitable gap
-        if opt_strategy is None:
-            for veh_pos in range(len(self._platoon.vehicles)):
-                veh = self._platoon.vehicles[veh_pos]
-                if veh.get_is_lane_change_gap_suitable():
-                    try:
-                        strategy, cost = (
-                            self._lane_change_strategy_manager.
-                            find_min_cost_strategy_given_first_mover_2(
-                                {veh_pos}, self._strategy_map))
-                    except KeyError:
-                        continue
-                    if cost < opt_cost:
-                        opt_cost = cost
-                        opt_strategy = strategy
-        return opt_strategy
-
-    def _decide_lane_change_order_from_root(self, cost_name: str):
-        # To be used if we include fd's state in the graph node's state
-        # representation.
-        path, min_cost = (
-            self._lane_change_strategy_manager
-            .find_minimum_cost_maneuver_from_root(cost_name=cost_name)
-        )
-        if path is not None:
-            self.set_maneuver_order(path[0], path[1])
-            # self._is_initialized = True
-            print(f'Path chosen from graph: {path[0]}, {path[1]}')
 
     def save_state_info_to_csv(
             self, node: configuration.QuantizedState, v_ref: dict[str: float]
@@ -714,6 +514,198 @@ class GraphLaneChangeApproach(TemplateStrategy):
             new_line = header + new_line
         with open(file_path, "a") as file:
             file.write(new_line)
+
+    # ====== Old implementation ===== #
+    # def _set_maneuver_initial_state_for_all_vehicles(
+    #         self, all_vehicles: Mapping[int, base.BaseVehicle]) -> None:
+    #     """
+    #     Method should only be called by the platoon leader and if the
+    #     lane change has not yet started.
+    #     :param all_vehicles:
+    #     :return:
+    #     """
+    #
+    #     states = self._platoon.get_centered_vehicles_states()
+    #     platoon_leader = self._platoon.get_platoon_leader()
+    #     leader_x = platoon_leader.get_x()
+    #     leader_y = platoon_leader.get_y()
+    #     x_idx = fsv.FourStateVehicle.get_idx_of_state("x")
+    #     y_idx = fsv.FourStateVehicle.get_idx_of_state("y")
+    #     if platoon_leader.has_origin_lane_leader():
+    #         lo = all_vehicles[platoon_leader.get_origin_lane_leader_id()]
+    #         lo_states = lo.get_states()
+    #     else:
+    #         lo_states = platoon_leader.get_states()
+    #         lo_states[x_idx] += configuration.MAX_DISTANCE
+    #     lo_states[x_idx] -= leader_x
+    #     lo_states[y_idx] -= leader_y
+    #     states["lo"] = lo_states
+    #
+    #     error_flag = False
+    #     for pos, veh in enumerate(self._platoon.vehicles):
+    #         if veh.get_is_lane_change_gap_suitable():
+    #             if veh.has_destination_lane_leader():
+    #                 ld = all_vehicles[veh.get_destination_lane_leader_id()]
+    #                 ld_states = ld.get_states()
+    #             else:
+    #                 ld_states = platoon_leader.get_states()
+    #                 ld_states[x_idx] += configuration.MAX_DISTANCE
+    #                 ld_states[y_idx] = platoon_leader.get_target_y()
+    #             ld_states[x_idx] -= leader_x
+    #             ld_states[y_idx] -= leader_y
+    #             states["ld"] = ld_states
+    #
+    #             if self._includes_fd:
+    #                 if veh.has_destination_lane_follower():
+    #                     fd = all_vehicles[
+    #                         veh.get_destination_lane_follower_id()]
+    #                     fd_states = fd.get_states()
+    #                 else:
+    #                     pN = self._platoon.get_last_platoon_vehicle()
+    #                     fd_states = pN.get_states()
+    #                     fd_states[x_idx] -= configuration.MAX_DISTANCE
+    #                     fd_states[y_idx] = pN.get_target_y()
+    #                 states["fd"] = fd_states
+    #
+    #             try:
+    #                 (self._lane_change_strategy_manager.
+    #                  set_maneuver_initial_state(pos, states))
+    #             except nx.NodeNotFound as error:
+    #                 # We want to save all errors before stopping the simulation
+    #                 error_flag = True
+    #                 missing_node = error.args[0]
+    #                 v_idx = fsv.FourStateVehicle.get_idx_of_state("v")
+    #                 v_ref = {"dest": ld_states[v_idx],
+    #                          "orig": lo_states[v_idx],
+    #                          "platoon": platoon_leader.get_free_flow_speed()}
+    #                 self.save_state_info_to_csv(missing_node, v_ref)
+    #         else:
+    #             self._set_empty_maneuver_initial_state(veh.get_id())
+    #
+    #     if error_flag:
+    #         raise nx.NodeNotFound
+    #
+    # def _set_empty_maneuver_initial_state(self,
+    #                                       ego_position_in_platoon: int):
+    #     """
+    #     When the vehicle at the given position cannot be in the first group
+    #     to move to the destination lane, we must set its maneuver initial state
+    #     to an empty value
+    #     :param ego_position_in_platoon:
+    #     :return:
+    #     """
+    #     # if not self._is_data_loaded:
+    #     #     self._load_data()
+    #     if not self._is_initialized:
+    #         self._lane_change_strategy_manager.set_empty_maneuver_initial_state(
+    #             ego_position_in_platoon)
+    #
+    # def _find_best_strategy_from_graph(self) -> configuration.Strategy:
+    #     opt_strategy = None
+    #     opt_cost = np.inf
+    #
+    #     # First, we check if any vehicles are already at safe position to
+    #     # start the maneuver
+    #     all_costs = []
+    #     all_strategies = []
+    #     for pos1 in range(len(self._platoon.vehicles)):
+    #         first_movers = set()
+    #         pos2 = pos1
+    #         while (pos2 < len(self._platoon.vehicles)
+    #                and self._platoon.vehicles[
+    #                    pos2].get_is_lane_change_safe()):
+    #             first_movers.add(pos2)
+    #             pos2 += 1
+    #             try:
+    #                 strategy, cost = (
+    #                     self._lane_change_strategy_manager.
+    #                     find_min_cost_strategy_given_first_mover(
+    #                         first_movers, self._cost_name))
+    #                 all_costs.append(cost)
+    #                 all_strategies.append(strategy)
+    #             except nx.NetworkXNoPath:
+    #                 continue
+    #
+    #             if cost < opt_cost:
+    #                 opt_cost = cost
+    #                 opt_strategy = strategy
+    #
+    #     # If there are no vehicles at safe positions, we check if any are
+    #     # close to a suitable gap
+    #     if opt_strategy is None:
+    #         for veh_pos in range(len(self._platoon.vehicles)):
+    #             veh = self._platoon.vehicles[veh_pos]
+    #             if veh.get_is_lane_change_gap_suitable():
+    #                 try:
+    #                     strategy, cost = (
+    #                         self._lane_change_strategy_manager.
+    #                         find_min_cost_strategy_given_first_mover(
+    #                             {veh_pos}, self._cost_name))
+    #                 except nx.NetworkXNoPath:
+    #                     continue
+    #                 if cost < opt_cost:
+    #                     opt_cost = cost
+    #                     opt_strategy = strategy
+    #     return opt_strategy
+    #
+    # def _find_best_strategy_from_map(self) -> configuration.Strategy:
+    #     opt_strategy = None
+    #     opt_cost = np.inf
+    #     # First, we check if any vehicles are already at safe position to
+    #     # start the maneuver
+    #     all_costs_from_map = []
+    #     all_strategies_from_map = []
+    #     for pos1 in range(len(self._platoon.vehicles)):
+    #         first_movers = set()
+    #         pos2 = pos1
+    #         while (pos2 < len(self._platoon.vehicles)
+    #                and self._platoon.vehicles[
+    #                    pos2].get_is_lane_change_safe()):
+    #             first_movers.add(pos2)
+    #             pos2 += 1
+    #             try:
+    #                 strategy, cost = (
+    #                     self._lane_change_strategy_manager.
+    #                     find_min_cost_strategy_given_first_mover_2(
+    #                         first_movers, self._strategy_map))
+    #             except KeyError:
+    #                 continue
+    #
+    #             all_costs_from_map.append(opt_cost)
+    #             all_strategies_from_map.append(opt_strategy)
+    #             if cost < opt_cost:
+    #                 opt_cost = cost
+    #                 opt_strategy = strategy
+    #
+    #     # If there are no vehicles at safe positions, we check if any are
+    #     # close to a suitable gap
+    #     if opt_strategy is None:
+    #         for veh_pos in range(len(self._platoon.vehicles)):
+    #             veh = self._platoon.vehicles[veh_pos]
+    #             if veh.get_is_lane_change_gap_suitable():
+    #                 try:
+    #                     strategy, cost = (
+    #                         self._lane_change_strategy_manager.
+    #                         find_min_cost_strategy_given_first_mover_2(
+    #                             {veh_pos}, self._strategy_map))
+    #                 except KeyError:
+    #                     continue
+    #                 if cost < opt_cost:
+    #                     opt_cost = cost
+    #                     opt_strategy = strategy
+    #     return opt_strategy
+    #
+    # def _decide_lane_change_order_from_root(self, cost_name: str):
+    #     # To be used if we include fd's state in the graph node's state
+    #     # representation.
+    #     path, min_cost = (
+    #         self._lane_change_strategy_manager
+    #         .find_minimum_cost_maneuver_from_root(cost_name=cost_name)
+    #     )
+    #     if path is not None:
+    #         self.set_maneuver_order(path[0], path[1])
+    #         # self._is_initialized = True
+    #         print(f'Path chosen from graph: {path[0]}, {path[1]}')
 
 
 class GraphMinTime(GraphLaneChangeApproach):

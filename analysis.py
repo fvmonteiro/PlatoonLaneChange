@@ -10,12 +10,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from scipy.interpolate import interp1d
 
 import configuration
 import helper
-from platoon_functionalities import (graph_tools, graph_explorer,
-                                     traffic_state_graph)
+import post_processing
+from platoon_functionalities import graph_tools, traffic_state_graph
 import post_processing as pp
 
 
@@ -23,18 +22,17 @@ import post_processing as pp
 # Analysis tools for new graph exploration approach
 
 
-def compare_bfs_and_dfs(n_platoon):
+def compare_bfs_and_dfs(n_platoon: int, cost_type: str):
     """
     Compare the results from the original approach (BFS full graph exploration
     then shortest path) to the newer DFS with epsilon-greedy exploration
     """
 
-    cost_name = "time"
-    simulator_name = "vissim"
+    # simulator_name = "vissim"
 
-    results = traffic_state_graph.load_best_results(n_platoon)
+    results = traffic_state_graph.load_best_results(n_platoon, cost_type, 1.0)
     strategy_map = graph_tools.LaneChangeStrategyManager.load_strategy_map(
-        n_platoon, cost_name)
+        n_platoon, cost_type)
 
     disagreement_count = 0
     for initial_state, outer_dict in results.items():
@@ -48,11 +46,11 @@ def compare_bfs_and_dfs(n_platoon):
                     initial_node = traffic_state_graph.TrafficStateNode(
                         initial_state)
                     bfs_commands = helper.tuple_of_lists_to_list(bfs_solution)
-                    bfs_cost = graph_explorer.traverse_action_sequence(
-                        initial_node, bfs_commands)
+                    bfs_cost = initial_node.traverse_action_sequence(
+                        bfs_commands)
                     dfs_commands = helper.tuple_of_lists_to_list(dfs_solution)
-                    dfs_cost = graph_explorer.traverse_action_sequence(
-                        initial_node, dfs_commands)
+                    dfs_cost = initial_node.traverse_action_sequence(
+                        dfs_commands)
                     print(f"BFS cost: {bfs_cost}")
                     print(f"DFS cost: {dfs_cost}")
                     disagreement_count += 1
@@ -69,68 +67,44 @@ def compare_bfs_and_dfs(n_platoon):
 def plot_several_cost_vs_computation_time(
         n_platoon: Iterable[int], cost_type: Iterable[str],
         epsilon: Iterable[float]):
+    data = post_processing.process_graph_exploration_results(
+        n_platoon, cost_type, epsilon)
+    sns.set(style="whitegrid")
+    data['epsilon_str'] = data['epsilon'].astype(str)
     for cost in cost_type:
         for n in n_platoon:
-            for eps in epsilon:
-                plot_average_cost_vs_computation_time(n, cost, eps)
+            data_to_plot = data[(data["cost_type"] == cost)
+                                & (data["n_platoon"] == n)]
+            plt.figure(figsize=(10, 6))
+            ax = sns.lineplot(x='time', y='norm_cost', data=data_to_plot,
+                              hue='epsilon_str', errorbar=None,
+                              estimator=np.mean)
+            ax.set_xlabel('computation time')
+            ax.set_ylabel(f'normalized {cost}')
+            ax.set_title(f'platoon size: {n}')
+
+            # Show the plot
+            plt.show()
 
 
-def plot_average_cost_vs_computation_time(
+def plot_estimated_cost_vs_computation_time(
         n_platoon: int, cost_type: str, epsilon: float):
-    data = traffic_state_graph.read_from_json(n_platoon, cost_type, epsilon)
-
-    # Determine a common set of time values
-    first_times, end_times = [], []
-    max_time, min_time = -np.inf, np.inf
-    for d in data:
-        first_times.append(d["time"][0])
-        end_times.append(d["time"][-1])
-        max_time = max(max_time, d["time"][-1])
-        min_time = min(min_time, d["time"][0])
-        # Force first time to zero
-        d["time"] = np.array(d["time"]) - d["time"][0]
-        # Normalize costs
-        min_cost = np.min(d["cost"])
-        max_cost = np.max(d["cost"])
-        if min_cost != max_cost:
-            d["norm_cost"] = ((np.array(d["cost"]) - min_cost)
-                              / (max_cost - min_cost))
-        else:
-            d["norm_cost"] = np.array([0])
-
-    common_x = np.linspace(min_time, max_time, num=100)
-    # Interpolate y values to common x values using zero-order hold
-    all_y_interp = []
-    for d in data:
-        f = interp1d(d["time"], d["norm_cost"], kind='previous',
-                     fill_value="extrapolate",
-                     bounds_error=False)
-        y_interp = f(common_x)
-        all_y_interp.append(y_interp)
-
-    # Create a DataFrame suitable for Seaborn
-    df = pd.DataFrame(all_y_interp, columns=common_x)
-
-    # Convert DataFrame from wide to long format
-    df_long = df.melt(var_name='time', value_name='norm_cost')
+    data = post_processing.process_single_graph_exploration_result(
+        n_platoon, cost_type, epsilon)
 
     # === Outputs === #
-    print(f"Avg. first sol. time: {np.mean(first_times)}")
-    print(f"Worst. first sol. time: {np.max(first_times)}")
-    print(f"Avg. total time: {np.mean(end_times)}")
-    print(f"Worst. total time: {np.max(end_times)}")
+    # print(f"Avg. first sol. time: {np.mean(first_times)}")
+    # print(f"Worst. first sol. time: {np.max(first_times)}")
+    # print(f"Avg. total time: {np.mean(end_times)}")
+    # print(f"Worst. total time: {np.max(end_times)}")
 
-    # Set the Seaborn style
     sns.set(style="whitegrid")
-
-    # Create the plot
     pi = 90
     plt.figure(figsize=(10, 6))
-    ax = sns.lineplot(x='time', y='norm_cost', data=df_long,
+    ax = sns.lineplot(x='time', y='norm_cost', data=data,
                       # errorbar=("pi", pi),
                       estimator=np.mean, marker='o')
 
-    # Set plot labels and title
     ax.set_xlabel('time')
     ax.set_ylabel(f'normalized {cost_type}')
     ax.set_title(f'n={n_platoon}, epsilon={epsilon}')
@@ -161,9 +135,48 @@ class ResultAnalyzer:
     _simulation_identifiers = ["n_platoon", "vo", "vd", "gap_position"]
     _cost_names = ["completion_time", "accel_cost"]
 
-    def __init__(self, save_figs: bool = False):
-        self.results = self.load_result_summary()
+    def __init__(self, is_bfs: bool, save_figs: bool = False):
+        if is_bfs:
+            self.results = ResultAnalyzer.load_bfs_result_summary()
+        else:
+            self.results = ResultAnalyzer.load_result_summary()
         self.save_figs = save_figs
+
+    @staticmethod
+    def load_bfs_result_summary():
+        file_name = "result_summary_bfs.csv"
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 "platoon_strategy_results", file_name)
+        results = pd.read_csv(file_path)
+        # Pretty names
+        results["strategy_orig"] = results["strategy"]
+        results["strategy"] = results["strategy"].map(
+            ResultAnalyzer._category_plot_names).fillna(results["strategy"])
+
+        simulation_identifiers = ["n_platoon", "vo", "vd", "gap_position",
+                                  "strategy"]
+        # For each simulated configuration, get only the latest result
+        latest_results = results.loc[results.groupby(
+            simulation_identifiers)["experiment_counter"].idxmax()]
+        return latest_results
+
+    @staticmethod
+    def load_result_summary():
+        file_name = "result_summary.csv"
+        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
+                                 "platoon_strategy_results", file_name)
+        results = pd.read_csv(file_path)
+        # Pretty names
+        results["strategy_orig"] = results["strategy"]
+        results["strategy"] = results["strategy"].map(
+            ResultAnalyzer._category_plot_names).fillna(results["strategy"])
+
+        simulation_identifiers = ["n_platoon", "vo", "vd", "gap_position",
+                                  "strategy", "epsilon", "max_computation_time"]
+        # For each simulated configuration, get only the latest result
+        latest_results = results.loc[results.groupby(
+            simulation_identifiers)["experiment_counter"].idxmax()]
+        return latest_results
 
     def get_python_results_for_paper(self) -> None:
         self.print_average_number_of_maneuver_steps()
@@ -328,22 +341,6 @@ class ResultAnalyzer:
                       f"\ttime: {time_results['avg_of_changes'] * 100:+.1f}%\n"
                       f"\taccel: {accel_results['avg_of_changes'] * 100:+.1f}%")
 
-    def load_result_summary(self):
-        file_name = "result_summary.csv"
-        file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                                 "platoon_strategy_results", file_name)
-        results = pd.read_csv(file_path)
-        # Pretty names
-        results["strategy"] = results["strategy"].map(
-            self._category_plot_names).fillna(results["strategy"])
-
-        simulation_identifiers = ["n_platoon", "vo", "vd", "gap_position",
-                                  "strategy"]
-        # For each simulated configuration, get only the latest result
-        latest_results = results.loc[results.groupby(
-            simulation_identifiers)["experiment_counter"].idxmax()]
-        return latest_results
-
     def split_result_df(self, ignore_synchronous=False
                         ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
@@ -366,6 +363,21 @@ class ResultAnalyzer:
             self.results["strategy"].isin(graph_strategies)
         ].sort_values(by=self._simulation_identifiers)
         return graph_results, other_results
+
+    def plot_cost_vs_max_computation_time(self):
+        for strategy in self.results["strategy_orig"].unique():
+            data = self.results.loc[
+                (self.results["n_platoon"] == 5)
+                & (self.results["strategy_orig"] == strategy)]
+            cost_type = strategy.split("_")[1]
+            if cost_type == "time":
+                cost_col = "completion_time"
+            elif cost_type == "accel":
+                cost_col = "accel_cost"
+            else:
+                raise RuntimeError(f"Unknown cost_type {cost_type}")
+            sns.lineplot(data=data, x="max_computation_time", y=cost_col)
+            plt.show()
 
     def _get_plot_names(self, var_names: Iterable[str]) -> list[str]:
         res = []

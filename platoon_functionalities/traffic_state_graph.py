@@ -11,7 +11,6 @@ import os
 import pickle
 import time
 from typing import Callable
-# import weakref
 
 import configuration
 import helper
@@ -20,8 +19,6 @@ import platoon_functionalities.platoon_lane_change_strategies as lc_strategies
 import vehicle_group as vg
 import vehicle_models.base_vehicle as base
 import vehicle_models.four_state_vehicles as fsv
-from platoon_functionalities.graph_explorer import State
-from platoon_functionalities.graph_tools import StateQuantizer
 
 QuantizedState = configuration.QuantizedState
 Command = tuple[frozenset[int], int]
@@ -72,17 +69,20 @@ def solve_queries_from_simulations(
         query_results = train(
             initial_state, 1000, first_movers_set, epsilon,
             verbose_level, visited_nodes)
+        if len(query_results) == 0:
+            warnings.warn(
+                f"Query x0={initial_state}, first movers={first_movers_set} "
+                f"failed at the first step.")
         # Reduce results size: by storing the initial node, we'll have access
         # to the entire graph. No need to store all the paths
-        query_results["initial_node"] = query_results["best_path"][-1][0][0]
+        query_results["initial_node"] = query_results["best_path"][-1].root_node
         del query_results["best_path"]
         if initial_state not in results:
             results[initial_state] = dict()
         results[initial_state][first_movers_set] = query_results
 
-    pickle_results(n_platoon, results, cost_name=cost_type, epsilon=epsilon)
-    save_results_to_json(n_platoon, results, cost_name=cost_type,
-                         epsilon=epsilon)
+    pickle_results(n_platoon, results, cost_type, epsilon)
+    save_results_to_json(n_platoon, results, cost_type, epsilon)
     print(f"{n_queries} new queries solved.")
     graph_time = datetime.timedelta(seconds=time.time() - start_time)
     print(f"Graph n={n_platoon} expansion time:",
@@ -93,7 +93,7 @@ def train(
         initial_state: QuantizedState, max_episodes: int,
         first_movers_set: frozenset[int] = None, epsilon: float = 0.5,
         verbose_level: int = 0,
-        visited_nodes: dict[State, TrafficStateNode] = None
+        visited_nodes: dict[graph_explorer.State, TrafficStateNode] = None
         ) -> dict[str, list]:
 
     def is_goal_node(node: TrafficStateNode) -> bool:
@@ -102,31 +102,34 @@ def train(
     initial_node = TrafficStateNode(initial_state)
     if first_movers_set is not None:
         first_command = (first_movers_set, -1)
-        initial_node.take_action(first_command, dict())
+        _, next_node = initial_node.take_action(first_command, visited_nodes)
         initial_node.find_best_edge()
-        current_node = initial_node.exploit().destination_node
+        current_node = next_node
     else:
         current_node = initial_node
 
     if is_goal_node(current_node):
         print("Single-step solution")
+        best_path = TrafficPath(initial_node)
+        best_path.add_edge(initial_node.best_edge)
         results = {"cost": [initial_node.best_edge.cost],
-                   "best_path": [[(initial_node, initial_node.best_edge)]],
+                   "best_path": [best_path],
                    "time": [0.]}
     else:
         results = graph_explorer.train_base(
-            current_node, max_episodes, is_goal_node, epsilon, verbose_level,
-            visited_nodes)
+            current_node, max_episodes, is_goal_node, epsilon,
+            visited_nodes, verbose_level)
         for i in range(len(results["cost"])):
             results["cost"][i] += initial_node.best_edge.cost
-            if results["best_path"][i][0][0] != initial_node:
-                results["best_path"][i].insert(
-                    0, (initial_node, initial_node.best_edge))
+            if results["best_path"][i].root_node != initial_node:
+                results["best_path"][i].add_root(initial_node,
+                                                 initial_node.best_edge)
             else:
                 warnings.warn("Repeated path in results dict")
     if verbose_level > 0:
-        print("Query solution:\n", graph_explorer.path_to_string(
-            graph_explorer.get_best_path(initial_node, is_goal_node)), sep="")
+        print("Query solution:\n", initial_node.get_best_path().to_string(),
+              sep="")
+    # strategies = [p.get_strategy() for p in results["best_path"]]
     strategies = get_strategies_from_paths(results["best_path"])
     results["lc_order"] = []
     results["coop_order"] = []
@@ -143,19 +146,14 @@ def get_strategies_from_paths(paths: list[TrafficPath]
                               ) -> list[configuration.Strategy]:
     strategies = []
     for p in paths:
-        lc_order, coop_order = [], []
-        for element in p:
-            maneuver_step = element[1].action
-            lc_order.append(maneuver_step[0])
-            coop_order.append(maneuver_step[1])
-        strategies.append((lc_order, coop_order))
+        strategies.append(p.get_strategy())
     return strategies
 
 
 def load_best_results(
-        n_platoon: int
+        n_platoon: int, cost_type: str, epsilon: float
 ) -> dict[QuantizedState, dict[frozenset[int], dict[str, list]]]:
-    results = load_pickled_results(n_platoon)
+    results = load_pickled_results(n_platoon, cost_type, epsilon)
     # Desired: {root: first_mover_set: {cost: , lc_order: , coop_order:}
     best_results = dict()
     for initial_state, outer_dict in results.items():
@@ -164,31 +162,40 @@ def load_best_results(
         for first_mover_set, query_result in outer_dict.items():
             best_results[initial_state][first_mover_set] = dict()
             for key, value in query_result.items():
+                if key == 'initial_node':
+                    continue
                 best_results[initial_state][first_mover_set][key] = value[-1]
     return best_results
 
 
 def load_pickled_results(
-        n_platoon: int, cost_name: str = "time"
+        n_platoon: int, cost_type: str, epsilon: float
 ) -> dict[QuantizedState, dict[frozenset[int], dict[str, list]]]:
-    file_name = "_".join(["min", cost_name, "strategies_for",
-                          str(n_platoon), "vehicles.pickle"])
-    file_path = os.path.join(configuration.DATA_FOLDER_PATH,
-                             "strategy_maps", file_name)
+    folder_name = _get_result_folder_name(epsilon)
+    file_name = _create_file_name(n_platoon, cost_type, "pickle")
+    file_path = os.path.join(folder_name, file_name)
     with open(file_path, 'rb') as file:
         results = pickle.load(file)
+    return results
+
+
+def read_from_json(n_platoon: int, cost_type: str, epsilon: float
+                   ) -> list[dict[str, list]]:
+    folder_name = _get_result_folder_name(epsilon)
+    os.makedirs(folder_name, exist_ok=True)
+    file_name = _create_file_name(n_platoon, cost_type, "json")
+    file_path = os.path.join(folder_name, file_name)
+    with open(file_path, "r") as file:
+        results = json.load(file)
     return results
 
 
 def pickle_results(
         n_platoon: int,
         data: dict[QuantizedState, dict[frozenset[int], dict[str, list]]],
-        cost_name: str, epsilon: float):
-    file_name = "_".join(["min", cost_name, "strategies_for",
-                          str(n_platoon), "vehicles.pickle"])
-    epsilon_percent = int(epsilon * 100)
-    folder_name = os.path.join(configuration.DATA_FOLDER_PATH,
-                               "strategy_maps", f"epsilon_{epsilon_percent}")
+        cost_type: str, epsilon: float):
+    folder_name = _get_result_folder_name(epsilon)
+    file_name = _create_file_name(n_platoon, cost_type, "pickle")
     os.makedirs(folder_name, exist_ok=True)
     full_path = os.path.join(folder_name, file_name)
     with open(full_path, 'wb') as handle:
@@ -199,17 +206,18 @@ def pickle_results(
 def save_results_to_json(
         n_platoon: int,
         data: dict[QuantizedState, dict[frozenset[int], dict[str, list]]],
-        cost_name: str, epsilon: float,
+        cost_type: str, epsilon: float,
         mode: str = "as") -> None:
     """
     Saves the minimum cost maneuver for every initial condition and
     every first mover set, to a json file.
 
+    :param n_platoon:
     :param data: The data to save. The data is a dictionary with structure as:
      results[initial_state][first_mover_set] = {"cost": list[float],
      "lc_order": list[frozenset[int]], "coop_order": list[int],
      "time": list[float]}
-    :param cost_name: "accel" or "time". If left empty, computes both
+    :param cost_type: "accel" or "time". If left empty, computes both
     :param mode: "w": completely overwrites any existing file;
      "ao": appends to an existing strategy map (previously saved to a file)
      and overwrites previous results if there are repeated initial states;
@@ -223,9 +231,7 @@ def save_results_to_json(
     #     for c in ["time", "accel"]:
     #         save_minimum_cost_strategies_to_json(c)
     #     return
-    epsilon_percent = int(epsilon * 100)
-    folder_name = os.path.join(configuration.DATA_FOLDER_PATH,
-                               "strategy_maps", f"epsilon_{epsilon_percent}")
+    folder_name = _get_result_folder_name(epsilon)
     os.makedirs(folder_name, exist_ok=True)
 
     # TODO: add to existing solution
@@ -235,8 +241,7 @@ def save_results_to_json(
     strategy_list = _to_json_format(data)
     # strategy_list += existing_list
     json_data = json.dumps(strategy_list, indent=2)
-    file_name = "_".join(["min", cost_name, "strategies_for",
-                          str(n_platoon), "vehicles.json"])
+    file_name = _create_file_name(n_platoon, cost_type, "json")
     file_path = os.path.join(folder_name, file_name)
     with open(file_path, "w") as file:
         file.write(json_data)
@@ -265,24 +270,21 @@ def _to_json_format(
     return strategy_map
 
 
-def read_from_json(n_platoon: int, cost_name: str, epsilon: float
-                   ) -> list[dict[str, list]]:
+def _get_result_folder_name(epsilon: float) -> str:
     epsilon_percent = int(epsilon * 100)
-    folder_name = os.path.join(configuration.DATA_FOLDER_PATH,
-                               "strategy_maps", f"epsilon_{epsilon_percent}")
-    os.makedirs(folder_name, exist_ok=True)
-    file_name = "_".join(["min", cost_name, "strategies_for",
-                          str(n_platoon), "vehicles.json"])
-    file_path = os.path.join(folder_name, file_name)
-    with open(file_path, "r") as file:
-        results = json.load(file)
-    return results
+    return os.path.join(configuration.DATA_FOLDER_PATH,
+                        "strategy_maps", f"epsilon_{epsilon_percent}")
+
+
+def _create_file_name(n_platoon: int, cost_type: str, file_type: str):
+    return "_".join(["min", cost_type, "strategies_for", str(n_platoon),
+                     f"vehicles.{file_type}"])
 
 
 class TrafficStateNode(graph_explorer.Node):
     _possible_actions: list[Command]
-    _explored_actions: dict[Command, TrafficEdge]
-    _best_edge: TrafficEdge
+    _explored_actions: dict[Command, (TrafficEdge, TrafficStateNode)]
+    _best_edge: TrafficEdge  # TODO: check where best action is used
     _simulate: Callable[[QuantizedState, Command], tuple[QuantizedState, float]]
     _cost_type = "time"
 
@@ -304,18 +306,18 @@ class TrafficStateNode(graph_explorer.Node):
         self._continuous_state = state_quantizer.dequantize_state(state)
         super().__init__(state, sim_fun)
 
-    @property
-    def best_edge(self) -> TrafficEdge:
-        return self._best_edge
-
     @staticmethod
     def set_cost_type(cost_type: str):
         print(f"Cost set to: {cost_type}")
         TrafficStateNode._cost_type = cost_type
 
+    @property
+    def best_edge(self) -> TrafficEdge:
+        return self._best_edge
+
     def add_edge_from_node(self, successor: TrafficStateNode, action: Command,
                            cost: float) -> None:
-        self._explored_actions[action] = TrafficEdge(successor, action, cost)
+        self._explored_actions[action] = (TrafficEdge(action, cost), successor)
 
     def generate_possible_actions(self) -> None:
         initial_state = self._continuous_state
@@ -337,7 +339,7 @@ class TrafficStateNode(graph_explorer.Node):
                     self._determine_next_maneuver_steps_no_coop(
                         vehicle_group, remaining_vehicles)
                 )
-                self._possible_actions |= first_maneuver_steps
+                self._possible_actions.extend(first_maneuver_steps)
                 # Debugging
                 # analysis.plot_state_vector(
                 #     vehicle_group.get_full_initial_state_vector())
@@ -353,8 +355,8 @@ class TrafficStateNode(graph_explorer.Node):
                              next_pos_to_coop)
                              )
 
-    def add_edge_from_state(self, successor_state: State, action: Command,
-                            cost: float) -> None:
+    def add_edge_from_state(self, successor_state: graph_explorer.State,
+                            action: Command, cost: float) -> None:
         if np.isinf(cost):  # unsuccessful maneuver step
             next_node = self
         else:
@@ -365,6 +367,20 @@ class TrafficStateNode(graph_explorer.Node):
             next_node = TrafficStateNode(successor_state, next_tracker)
         self.add_edge_from_node(next_node, action, cost)
         # self._explored_actions[action] = Edge(next_node, action, cost)
+
+    def get_best_path(self) -> TrafficPath:
+        path = TrafficPath(self)
+        current_node = self
+        while current_node._best_cost_to_go != 0:
+            try:
+                edge, next_node = current_node.exploit()
+                path.add_edge(edge)
+            except AttributeError:
+                print(f"There's no path from node {self.state} to a "
+                      f"terminal node.")
+                break
+            current_node = next_node
+        return path
 
     def is_terminal(self):
         if self._tracker.is_lane_change_done():
@@ -398,7 +414,7 @@ class TrafficStateNode(graph_explorer.Node):
 
     def _determine_next_maneuver_steps_no_coop(
             self, vehicle_group: vg.VehicleGroup,
-            remaining_vehicles: list[int]) -> list[tuple[int, set[int]]]:
+            remaining_vehicles: list[int]) -> list[tuple[frozenset[int], int]]:
         """
         When there is no cooperation, we only allow steps including vehicles
         that are already at safe position or that can perform a "quick"
@@ -406,7 +422,7 @@ class TrafficStateNode(graph_explorer.Node):
         is cooperation.
         :return:
         """
-        next_maneuver_steps: list[tuple[int, set[int]]] = []
+        next_maneuver_steps: list[tuple[frozenset[int], int]] = []
         next_pos_to_coop = -1  # the caller should be sure of this
         for i in range(len(remaining_vehicles)):
             front_most_next_pos_to_move = remaining_vehicles[i]
@@ -427,15 +443,16 @@ class TrafficStateNode(graph_explorer.Node):
                                 | {remaining_vehicles[j]}
                         )
                         next_maneuver_steps.append(
-                            (next_pos_to_coop, next_positions_to_move))
+                            (frozenset(next_positions_to_move),
+                             next_pos_to_coop))
                     # We don't need to include cases that do not include
                     # the current front most vehicle if it is at a safe
                     # position
                     break
                 else:
                     next_maneuver_steps.append(
-                        (next_pos_to_coop,
-                         {front_most_next_pos_to_move})
+                        (frozenset([front_most_next_pos_to_move]),
+                         next_pos_to_coop)
                     )
         return next_maneuver_steps
 
@@ -473,16 +490,16 @@ class TrafficStateNode(graph_explorer.Node):
 
 
 class TrafficEdge(graph_explorer.Edge):
-    _destination_node: TrafficStateNode
+    # _destination_node: TrafficStateNode
     _action: Command
+    _cost = float
 
-    def __init__(self, destination_node: TrafficStateNode, action: Command,
-                 cost: float):
-        super().__init__(destination_node, action, cost)
+    def __init__(self, action: Command, cost: float):
+        super().__init__(action, cost)
 
-    @property
-    def destination_node(self) -> TrafficStateNode:
-        return self._destination_node
+    # @property
+    # def destination_node(self) -> TrafficStateNode:
+    #     return self._destination_node
 
     @property
     def action(self) -> Command:
@@ -492,6 +509,33 @@ class TrafficEdge(graph_explorer.Edge):
         ret_str = (f"[c={self.action[1]}, lc={{"
                    + ", ".join([str(i) for i in self.action[0]]) + "}]")
         return ret_str
+
+
+class TrafficPath(graph_explorer.Path):
+    _edges: list[TrafficEdge]
+
+    def __init__(self, root_node: TrafficStateNode) -> None:
+        super().__init__(root_node)
+
+    def get_strategy(self) -> configuration.Strategy:
+        lc_order, coop_order = [], []
+        for edge in self._edges:
+            maneuver_step = edge.action
+            lc_order.append(maneuver_step[0])
+            coop_order.append(maneuver_step[1])
+        return lc_order, coop_order
+
+    def add_root(self, new_root: TrafficStateNode, edge: TrafficEdge) -> None:
+        """
+        :param new_root: New root node
+        :param edge: Edge connecting the new root to the current root
+        """
+        if new_root.take_action(edge.action)[1] != self.root_node:
+            raise ValueError("The provided edge does not connected the new and "
+                             "old roots.")
+        self._root_node = new_root
+        self._edges.insert(0, edge)
+        self._cost += edge.cost
 
 
 def simulate_new(state: QuantizedState, action: Command, n_platoon: int,
@@ -567,14 +611,11 @@ def simulate_new(state: QuantizedState, action: Command, n_platoon: int,
         # TODO: could organize this better
         if cost_type == "time":
             cost = vehicle_group.get_current_time()
-        elif cost_type == "accel_cost":
+        elif cost_type == "accel":
             cost = vehicle_group.compute_acceleration_cost()
         else:
-            raise ValueError("Only 'time' and 'accel_cost' are accepted"
-                             "costs.")
+            raise ValueError("Only 'time' and 'accel' are accepted "
+                             f"costs. Not {cost_type}")
         return new_state, cost
     else:
         return tuple([]), np.inf
-
-
-TrafficPath = list[tuple[TrafficStateNode, TrafficEdge]]

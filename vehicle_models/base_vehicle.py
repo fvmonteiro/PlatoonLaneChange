@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Iterable, Mapping, TypeVar, Type, Union
 import warnings
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -1021,19 +1022,17 @@ class BaseVehicle(ABC):
         self._lc_start_time = self.get_current_time()
         self._set_up_lane_change_control()
 
-    # @classmethod
-    # def _set_model(cls) -> None:
-    #     """
-    #     Must be called in the constructor of every derived class to set the
-    #     variables that define which vehicle model is implemented.
-    #     :return:
-    #     """
-    #     cls._n_states = len(cls._state_names)
-    #     cls._n_inputs = len(cls._input_names)
-    #     cls._state_idx = {cls._state_names[i]: i for i
-    #                       in range(cls._n_states)}
-    #     cls._input_idx = {cls._input_names[i]: i for i
-    #                       in range(cls._n_inputs)}
+    def plot_state(self, state_name: str):
+        plt.plot(self.get_simulated_time(),
+                 self.get_a_state_history(state_name))
+        plt.xlabel('Time')
+        plt.ylabel(state_name)
+        plt.show()
+
+    def plot_input(self, state_name: str):
+        plt.plot(self.get_simulated_time(),
+                 self.get_an_input_history(state_name))
+        plt.show()
 
     @staticmethod
     def _set_model(state_names, input_names

@@ -26,13 +26,13 @@ def train(initial_state: State, max_episodes: int, problem_map: ProblemMap,
         return False
 
     initial_node = Node2D(initial_state, sim_fun)
-    graph_explorer.train_base(initial_node, max_episodes,
-                              is_goal_node, epsilon, verbose_level)
+    graph_explorer.train_base(initial_node, max_episodes, is_goal_node, epsilon,
+                              verbose_level=verbose_level)
 
 
 class Node2D(graph_explorer.Node):
     _possible_actions: list[Action2D]
-    _explored_actions: dict[Action2D, Edge2D]
+    _explored_actions: dict[Action2D, (Edge2D, Node2D)]
     _simulate: Callable[[State, Action2D], tuple[State, float]]
 
     def __init__(
@@ -57,14 +57,14 @@ class Node2D(graph_explorer.Node):
                            cost: float) -> None:
         if self == successor:
             self._possible_actions.remove(action)
-        self._explored_actions[action] = Edge2D(successor, action, cost)
+        self._explored_actions[action] = (Edge2D(action, cost), successor)
 
 
 class Edge2D(graph_explorer.Edge):
     _action: Action2D
 
-    def __init__(self, destination_node: Node2D, action: Action2D, cost: float):
-        super().__init__(destination_node, action, cost)
+    def __init__(self, action: Action2D, cost: float):
+        super().__init__(action, cost)
 
     @property
     def action(self) -> Action2D:
