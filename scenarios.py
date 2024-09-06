@@ -16,8 +16,6 @@ import numpy as np
 import pandas as pd
 
 import analysis
-import controllers.optimal_controller as opt_ctrl
-import controllers.optimal_control_costs as occ
 import configuration
 import helper
 import platoon_functionalities.graph_tools as graph_tools
@@ -67,94 +65,6 @@ def run_fast_lane_change():
     analysis.plot_lane_change(data)
     exec_time = datetime.timedelta(seconds=time.time() - time_start)
     print("run_fast_lane_change time:", str(exec_time).split(".")[0])
-
-
-def run_base_ocp_scenario():
-    trajectory_file_name = 'data/trajectory_data.pickle'  # temp
-    v_ff = 10
-    tf = 10
-
-    scenario = ExampleScenarioExternal()
-    vehicles = [
-        [tsv.ThreeStateVehicleRearWheel()],
-        [tsv.ThreeStateVehicleRearWheel()]
-    ]
-    scenario.create_vehicle_group(vehicles)
-    scenario.set_free_flow_speeds(v_ff)
-    scenario.create_initial_state()
-    scenario.set_desired_final_states(tf)
-    scenario.solve()
-    scenario.run(tf)
-    scenario.save_response_data(trajectory_file_name)
-    data = scenario.response_to_dataframe()
-    analysis.plot_lane_change(data)
-
-
-def run_optimal_platoon_test(
-        n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
-        n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool,
-        are_vehicles_cooperative: bool):
-    trajectory_file_name = 'data/trajectory_data.pickle'  # temp
-    cost_file_name = 'data/cost_data.pickle'
-    v_ref = dict()  # TODO: make param
-    delta_x = dict()  # TODO: make param
-    scenario = LaneChangeScenario(n_platoon,
-    are_vehicles_cooperative)
-    scenario.set_control_type('optimal', is_acceleration_optimal)
-    scenario.create_test_scenario(n_dest_ahead, n_dest_behind, n_orig_ahead,
-                                  n_orig_behind, v_ref, delta_x)
-    # scenario.create_optimal_control_test_scenario(
-    #     n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind)
-    tf = configuration.Configuration.time_horizon + 2
-    # run_save_and_plot(scenario, tf)
-    scenario.run(tf)
-    scenario.save_response_data(trajectory_file_name)
-    data = scenario.response_to_dataframe()
-    analysis.plot_trajectory(data)
-    if scenario.n_platoon < 1:
-        analysis.plot_constrained_lane_change(data, 'p1')  # TODO: ego or p1
-    else:
-        analysis.plot_platoon_lane_change(data)
-    scenario.save_cost_data(cost_file_name)
-    running_cost, terminal_cost = scenario.get_opc_cost_history()
-    analysis.plot_costs_vs_iteration(running_cost, terminal_cost)
-
-
-def run_with_external_controller(
-        n_platoon: int, n_orig_ahead: int, n_orig_behind: int,
-        n_dest_ahead: int, n_dest_behind: int, is_acceleration_optimal: bool,
-        are_vehicles_cooperative: bool, v_ref: Mapping[str, float],
-        delta_x: Mapping[str, float]):
-    trajectory_file_name = 'data/trajectory_data.pickle'  # temp
-    cost_file_name = 'data/cost_data.pickle'
-    # Set-up
-    tf = configuration.Configuration.time_horizon
-    scenario = LaneChangeWithExternalController(
-        n_platoon, are_vehicles_cooperative)
-    scenario.create_initial_state(
-        n_orig_ahead, n_orig_behind, n_dest_ahead, n_dest_behind, v_ref,
-        delta_x, is_acceleration_optimal)
-    scenario.set_desired_final_states(configuration.Configuration.time_horizon)
-    # Solve
-    print("Calling OCP solver")
-    scenario.solve()
-    # run_save_and_plot(scenario, tf)
-    scenario.run(tf)
-    scenario.save_response_data(trajectory_file_name)
-    data = scenario.response_to_dataframe()
-    analysis.plot_trajectory(data)
-    if scenario.n_platoon < 1:
-        analysis.plot_constrained_lane_change(data, 'p1')  # TODO: ego or p1
-    else:
-        analysis.plot_platoon_lane_change(data)
-    scenario.save_cost_data(cost_file_name)
-    running_cost, terminal_cost = scenario.get_opc_cost_history()
-    analysis.plot_costs_vs_iteration(running_cost, terminal_cost)
-
-    # analysis.plot_constrained_lane_change(
-    #     scenario.ocp_simulation_to_dataframe(), 'p1')
-    # analysis.compare_desired_and_actual_final_states(
-    #     scenario.boundary_conditions_to_dataframe(), data)
 
 
 def run_with_varying_max_computation_time(epsilon: float):
@@ -1099,10 +1009,6 @@ class LaneChangeWithClosedLoopControl(LaneChangeScenario):
         #     len(time), self._platoon_lc_strategy)
 
 
-class LaneChangeWithOptimalControl(LaneChangeScenario):
-    pass
-
-
 class AllLaneChangeStrategies(LaneChangeScenario):
     """
     Class to run all possible one-by-one strategies and pick the best
@@ -1179,46 +1085,8 @@ class AllLaneChangeStrategies(LaneChangeScenario):
 
                 # ============ Computing cost ============== #
                 # TODO: a mess for now
-
-                n_states = self.vehicle_group.get_n_states()
-                n_inputs = self.vehicle_group.get_n_inputs()
-                desired_input = np.zeros(n_inputs)  # TODO: hard codded
-
-                all_vehicles = self.vehicle_group.get_all_vehicles_in_order()
-                controlled_veh_ids = set(self.get_lc_vehicle_ids())
-                desired_state = occ.create_desired_state(all_vehicles,
-                                                         final_time)
-                q_matrix = occ.create_state_cost_matrix(
-                    all_vehicles, controlled_veh_ids,
-                    x_cost=0.0, y_cost=0.2, theta_cost=0.0, v_cost=0.1)
-                r_matrix = occ.create_input_cost_matrix(
-                    all_vehicles, controlled_veh_ids,
-                    accel_cost=0.1, phi_cost=0.1)
-                running_cost = occ.quadratic_cost(
-                    n_states, n_inputs, q_matrix, r_matrix,
-                    desired_state, desired_input
-                )
-                q_terminal = occ.create_state_cost_matrix(
-                    all_vehicles, controlled_veh_ids, y_cost=100.,
-                    theta_cost=1.)
-                r_terminal = occ.create_input_cost_matrix(
-                    all_vehicles, controlled_veh_ids, phi_cost=0.)
-                terminal_cost = occ.quadratic_cost(
-                    n_states, n_inputs, q_terminal, r_terminal,
-                    desired_state, desired_input
-                )
-                cost_with_tracker = occ.OCPCostTracker(
-                    np.array([0]), n_states,
-                    running_cost, terminal_cost,
-                    config.solver_max_iter
-                )
-
                 success.append(self.vehicle_group.check_lane_change_success())
-                r_cost, t_cost = cost_with_tracker.compute_simulation_cost(
-                    self.vehicle_group.get_all_states(),
-                    self.vehicle_group.get_all_inputs(),
-                    self.vehicle_group.get_simulated_time())
-                self.costs.append(r_cost + t_cost)
+
                 if self.costs[-1] < best_cost:
                     best_cost = self.costs[-1]
                     self.best_strategy["merging_order"] = merging_order[:]
@@ -1248,102 +1116,6 @@ class AllLaneChangeStrategies(LaneChangeScenario):
               f"Best strategy: cost={best_cost:.2f}, "
               f"merging order={self.best_strategy['merging_order']}, "
               f"coop order={self.best_strategy['coop_order']}")
-
-
-class ExternalOptimalControlScenario(SimulationScenario, ABC):
-    controller: opt_ctrl.VehicleOptimalController
-    ocp_response: ct.TimeResponseData
-
-    def __init__(self):
-        super().__init__()
-        self.tf: float = 0.0
-
-    def get_opc_results_summary(self):
-        return (self.controller.get_running_cost_history(),
-                self.controller.get_terminal_cost_history())
-
-    def get_opc_cost_history(self):
-        return (self.controller.get_running_cost_history(),
-                self.controller.get_terminal_cost_history())
-
-    def set_desired_final_states(self, tf: float):
-        """ Sets the final time and desired final states """
-        self.tf = tf
-        self.vehicle_group.prepare_to_start_simulation(1)
-        self.set_desired_lane_changes()
-
-    def solve(self):
-        time_start = time.time()
-        self.vehicle_group.update_surrounding_vehicles()
-        self.controller = opt_ctrl.VehicleOptimalController()
-        self.controller.set_time_horizon(self.tf)
-        self.controller.set_controlled_vehicles_ids(
-            [self.vehicle_group.get_vehicle_id_by_name(veh_name) for veh_name
-             in self.lc_vehicle_names])
-        self.controller.find_trajectory(self.vehicle_group.vehicles)
-        solve_time = datetime.timedelta(seconds=time.time() - time_start)
-        print("solve time:", str(solve_time).split(".")[0])
-        # return self.controller.ocp_result
-
-
-    def run_ocp_solution(self) -> None:
-        """
-        Calls the control libraries function for running the dynamic system
-        given the optimal control problem solution
-        :return: Nothing. Results are stored internally
-        """
-        self.ocp_response = self.controller.get_ocp_response()
-
-    def run(self, final_time: float):
-        """
-        Given the optimal control problem solution, runs the open loop system.
-        Difference to method "run" is that we directly (re)simulate the dynamics
-        in this case. For debugging purposes
-        """
-        # It is good to run our simulator with the ocp solution and to confirm
-        # it yields the same response as the control library simulation
-        self.run_ocp_solution()
-        result = self.controller.ocp_result
-
-        time = self.create_simulation_time_steps(final_time)
-        veh_ids = self.vehicle_group.sorted_vehicle_ids
-        self.vehicle_group.prepare_to_start_simulation(len(time))
-        for i in range(len(time) - 1):
-            current_inputs = self.controller.get_input(time[i], veh_ids)
-            self.vehicle_group.simulate_one_time_step(time[i + 1],
-                                                      current_inputs)
-
-    @abstractmethod
-    def set_desired_lane_changes(self):
-        pass
-
-
-class LaneChangeWithExternalController(ExternalOptimalControlScenario):
-    """
-    Used to test how to code safety constraints
-    """
-
-    def __init__(self, n_platoon: int,
-                 are_vehicles_cooperative: bool = False):
-        super().__init__()
-        self._n_platoon = n_platoon
-        self._are_vehicles_cooperative = are_vehicles_cooperative
-
-    def create_initial_state(
-            self, n_orig_ahead: int, n_orig_behind: int,
-            n_dest_ahead: int, n_dest_behind: int,
-            v_ref: Mapping[str, float], delta_x: Mapping[str, float],
-            is_acceleration_optimal: bool = True
-    ):
-        self.set_control_type("open_loop", is_acceleration_optimal)
-        self.set_test_initial_state(n_dest_ahead, n_dest_behind, n_orig_ahead,
-                                    n_orig_behind, v_ref, delta_x)
-        # self.create_base_lane_change_initial_state(self._has_lo, self._has_fo,
-        #                                            self._has_ld, self._has_fd)
-
-    def set_desired_lane_changes(self):
-        self.vehicle_group.set_vehicles_lane_change_direction(
-            1, self.lc_vehicle_names)
 
 
 # ================================ OLD TESTS ================================= #
@@ -1437,26 +1209,3 @@ class FastLaneChange(SimulationScenario):
                 phi = 0
             inputs[ego.id] = np.array([phi])
             self.vehicle_group.simulate_one_time_step(time[i + 1], inputs)
-
-
-class ExampleScenarioExternal(ExternalOptimalControlScenario):
-    """
-    Two-lane scenario where all vehicles want to perform a lane change starting
-    at t=0 and ending at tf.
-    The scenario is used for testing the different dynamical models and
-    variations in parameters
-    """
-
-    def create_initial_state(self):
-        self.place_equally_spaced_vehicles()
-        print(self.vehicle_group.get_full_initial_state_vector())
-
-    def set_desired_lane_changes(self):
-        """
-        In this scenario, all vehicles try to perform a lane change
-
-        :return:
-        """
-        for veh in self.vehicle_group.get_all_vehicles():
-            lane = veh.get_current_lane()
-            veh.set_lane_change_direction((-1) ** lane)

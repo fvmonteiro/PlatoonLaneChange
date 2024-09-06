@@ -9,7 +9,6 @@ import numpy as np
 
 import controllers.lateral_controller as lat_ctrl
 import controllers.longitudinal_controller as long_ctrl
-import controllers.optimal_controller as opt_ctrl
 import vehicle_models.four_state_vehicles as fsv
 
 # TODO: reevaluate naming choices (specially wrt VehicleOptimalController class)
@@ -22,7 +21,6 @@ class VehicleController(ABC):
         VIRTUAL_LEADER = 2
         OPTIMAL = 3
 
-    _opt_controller: opt_ctrl.VehicleOptimalController
     _lk_controller: lat_ctrl.LaneKeepingController
     _lc_controller: lat_ctrl.LaneChangingController
 
@@ -41,14 +39,6 @@ class VehicleController(ABC):
                 ego_vehicle, ego_vehicle.brake_comfort_max))
 
         self._external_input_idx = ego_vehicle.get_external_input_idx()
-
-    def get_opt_controller(self) -> opt_ctrl.VehicleOptimalController:
-        return self._opt_controller
-
-    def set_opt_controller(
-            self, new_opt_controller: opt_ctrl.VehicleOptimalController
-    ) -> None:
-        self._opt_controller = new_opt_controller
 
     def update_real_leader_time_headway(self, new_h):
         self._real_leader_long_controller.set_time_headway(new_h)
@@ -161,51 +151,6 @@ class ExternalControl(VehicleController):
         longitudinal control
         """
         return -1
-
-
-class OptimalControl(VehicleController):
-
-    def __init__(self, ego_vehicle: fsv.FourStateVehicle,
-                 can_change_lanes: bool,
-                 has_open_loop_acceleration: bool):
-        super().__init__(ego_vehicle, can_change_lanes,
-                         has_open_loop_acceleration)
-        self._opt_controller = opt_ctrl.VehicleOptimalController()
-        self._lk_controller = lat_ctrl.LaneKeepingController(ego_vehicle)
-
-    def _get_open_loop_acceleration(
-            self, external_controls: np.ndarray,
-            vehicles: Mapping[int, fsv.FourStateVehicle]
-    ) -> float:
-        t = self._ego_vehicle.get_current_time()
-        if self._opt_controller.is_active(t):
-            return self._opt_controller.get_input(
-                t, self._ego_vehicle.id)[self._external_input_idx['a']]
-        else:
-            return self._compute_closed_loop_acceleration(vehicles)
-
-    def _determine_steering_wheel_angle(
-            self, external_controls: np.ndarray,
-            vehicles: Mapping[int, fsv.FourStateVehicle]
-    ) -> float:
-        t = self._ego_vehicle.get_current_time()
-        if self._opt_controller.is_active(t):
-            return self._opt_controller.get_input(
-                t, self._ego_vehicle.id)[self._external_input_idx['phi']]
-        else:
-            return self._lk_controller.compute_steering_wheel_angle()
-
-    def _get_target_leader_id(self, vehicles: Mapping[int, fsv.FourStateVehicle]
-                              ) -> int:
-        if self._opt_controller.is_active(
-                self._ego_vehicle.get_current_time()):
-            # During the lane change, there is no target leader for the
-            # long controller since the optimal controller takes over
-            return -1
-        else:
-            # At all other times, we only look at the origin lane leader
-            return self._ego_vehicle.get_origin_lane_leader_id()
-
 
 class ClosedLoopControl(VehicleController):
 

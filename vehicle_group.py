@@ -6,7 +6,6 @@ from typing import Any, TypeVar, Union
 import numpy as np
 import pandas as pd
 
-import controllers.optimal_controller as opt_ctrl
 import helper
 import platoon_functionalities.platoon_lane_change_strategies as lc_strategies
 from platoon_functionalities import vehicle_platoon

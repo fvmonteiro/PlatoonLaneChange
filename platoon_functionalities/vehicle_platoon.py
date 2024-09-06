@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-# import bisect
+from collections.abc import Mapping
 import numpy as np
 
 import configuration
@@ -225,28 +224,6 @@ class Platoon:
 
     def contains_vehicle(self, veh_id: int):
         return veh_id in self._id_to_position_map
-
-
-class OptimalPlatoon(Platoon):
-
-    def __init__(self, first_vehicle: fsv.OptimalControlVehicle,
-                 lane_change_strategy: lc_strategies.StrategyMap):
-        super().__init__()
-
-        # Vehicles and their ids sorted by position (first is front-most)
-        self.vehicles: list[fsv.OptimalControlVehicle] = []
-        self.add_vehicle(first_vehicle)
-        self.set_strategy(lane_change_strategy)
-
-    def get_platoon_leader(self) -> fsv.OptimalControlVehicle:
-        return self.vehicles[0]
-
-    def get_optimal_controller(self):  # -> opt_ctrl.VehicleOptimalController:
-        return self.get_platoon_leader().get_opt_controller()
-
-    def add_vehicle(self, new_vehicle: fsv.OptimalControlVehicle) -> None:
-        super().add_vehicle(new_vehicle)
-        new_vehicle.set_centralized_controller(self.get_optimal_controller())
     
 
 class ClosedLoopPlatoon(Platoon):

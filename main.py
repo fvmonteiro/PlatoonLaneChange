@@ -16,39 +16,6 @@ from vissim_handler import vissim_interface, vissim_vehicle
 from vissim_handler import file_handling
 
 
-def run_optimal_control_scenario():
-    configuration.Configuration.set_solver_parameters(
-        max_iter=100, discretization_step=0.2,
-        ftol=1.0e-3, estimate_gradient=True
-    )
-    configuration.Configuration.set_optimal_controller_parameters(
-        max_iter=3, time_horizon=configuration.Configuration.sim_time - 2,
-        has_terminal_lateral_constraints=False,
-        has_lateral_safety_constraint=False,
-        initial_input_guess='mode',
-        jumpstart_next_solver_call=True, has_initial_mode_guess=True
-    )
-    scenarios.run_base_ocp_scenario()
-
-
-def load_and_plot_latest_scenario():
-    trajectory_file_name = 'data/trajectory_data.pickle'  # temp
-    cost_file_name = 'data/cost_data.pickle'
-    trajectory_data = analysis.load_latest_simulated_scenario(
-        trajectory_file_name)
-    analysis.plot_trajectory(trajectory_data)
-    analysis.plot_constrained_lane_change(trajectory_data, 'p1')
-    analysis.plot_platoon_lane_change(trajectory_data)
-
-    try:
-        cost_data = analysis.load_latest_simulated_scenario(cost_file_name)
-        analysis.plot_costs_vs_iteration(cost_data[0], cost_data[1],
-                                         plot_separately=False)
-    except EOFError:
-        # no cost data
-        pass
-
-
 def create_graph(n_platoon: int, has_fd: bool, vel_orig_lane: Sequence[float],
                  vel_ff_platoon: float, v_dest_lane: Sequence[float],
                  max_dist: float, mode: str = "as"):
@@ -58,46 +25,6 @@ def create_graph(n_platoon: int, has_fd: bool, vel_orig_lane: Sequence[float],
     graph_creator.save_vehicle_state_graph_to_file()
     graph_creator.save_quantization_parameters_to_file()
     graph_creator.save_minimum_cost_strategies_to_json()
-
-
-def run_q_learning_unit_tests():
-    import unittest
-    loader = unittest.TestLoader()
-    suite = loader.discover('platoon_functionalities',
-                            pattern='q_learning_test.py')
-    runner = unittest.TextTestRunner()
-    runner.run(suite)
-
-
-def q_learning_tests():
-    from platoon_functionalities import q_learning
-    grid_size = (5, 5)
-    # obstacles = {(i, i) for i in range(1, min(grid_size) - 1)}
-    # obstacles.add((9, 8))
-    obstacles = {(1, i) for i in range(1, grid_size[1])}
-    obstacles.update({(3, i) for i in range(grid_size[1] - 1)})
-    goal_nodes = [(grid_size[0] - 1, 0),
-                  (0, grid_size[1] - 1)]
-    q_learning_agent = q_learning.QLearningAgent(
-        grid_size, goal_nodes, obstacles, alpha=1.)
-    q_learning_agent.train((2, 2), 1000)
-
-
-def test_map_2d_example():
-    from platoon_functionalities import map_2d_example
-    grid_size = (11, 11)
-    # obstacles = {(i, i) for i in range(1, min(grid_size) - 1)}
-    # obstacles.add((9, 8))
-    start_state = (grid_size[0] // 2, grid_size[1] // 2)
-    obstacles = {(start_state[0]-1, i) for i in range(1, grid_size[1])}
-    obstacles.update({(start_state[0]+1, i) for i in range(grid_size[1] - 1)})
-    goal_states = [(grid_size[0] - 1, 0),
-                   (0, grid_size[1] - 1)]
-    my_map = map_2d_example.ProblemMap(grid_size, obstacles, start_state,
-                                       goal_states)
-    print(my_map.to_string())
-    map_2d_example.train(start_state, 100, my_map, epsilon=0.8,
-                         verbose_level=1)
 
 
 def run_traffic_graph_explorer(platoon_sizes: list[int], simulator: str,

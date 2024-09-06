@@ -436,63 +436,6 @@ def load_latest_simulated_scenario(pickle_file_name: str):
     return data
 
 
-def plot_costs_vs_iteration(running_costs, terminal_costs,
-                            plot_separately: bool = False):
-    """
-
-    :param running_costs: 2D list with costs vs iterations
-    :param terminal_costs: 2D list with costs vs iterations. Could be an empty
-     list.
-    :param plot_separately: If True, plots running and terminal costs on
-     separate y axes and sharing the x-axis. Otherwise, plots their sum
-    :return:
-    """
-    sns.set_style("whitegrid")
-
-    n = len(running_costs)
-    has_terminal_cost = len(terminal_costs) > 0
-
-    blue = "tab:blue"
-    orange = "tab:orange"
-    fig, axs_2d = plt.subplots(n, 1, squeeze=False)
-    axs = [ax[0] for ax in axs_2d]
-    for i in range(n):
-        if plot_separately:
-            axs[i].plot(running_costs[i], label="running costs", color=blue)
-            _, y_high = axs[i].get_ylim()
-            axs[i].set_ylim([0, min(running_costs[i][0] + 0.5, y_high)])
-            axs[i].set_ylabel("running costs", color=blue)
-            axs[i].tick_params(axis="y", labelcolor=blue)
-            if has_terminal_cost:
-                ax_secondary = axs[i].twinx()
-                ax_secondary.plot(terminal_costs[i], label="terminal costs",
-                                  color=orange)
-                ax_secondary.set_ylabel("terminal costs", color=orange)
-                ax_secondary.tick_params(axis="y", labelcolor=orange)
-                ax_secondary.set_yscale("log")
-            # axs[i].legend()
-        else:
-            cost = running_costs[i]
-            cost += (terminal_costs[i] if has_terminal_cost else 0)
-            axs[i].plot(cost)
-            axs[i].set_ylabel("cost")
-            y_low, y_high = axs[i].get_ylim()
-            # axs[i].set_ylim([1, 1.0e4])
-            if y_high - y_low >= 1.0e3:
-                axs[i].set_yscale("log")
-            # ax_diff = axs[i].twinx()
-            # ax_diff.plot(np.diff(cost), color=orange)
-            # ax_diff.set_ylabel("delta cost", color=orange)
-            # ax_diff.tick_params(axis="y", labelcolor=orange)
-            # y_low, y_high = ax_diff.get_ylim()
-            # if y_high - y_low >= 1.0e3:
-            #     ax_diff.set_yscale("symlog")
-
-    axs[-1].set_xlabel("iteration")
-    fig.tight_layout()
-    plt.show()
-
-
 def plot_cost_vs_ordering(cost: Iterable[float],
                           completion_times: Iterable[float],
                           named_orderings: dict[str, int]):
@@ -675,22 +618,6 @@ def plot_lane_change(data: pd.DataFrame):
     plot_scenario_results(x_axes, y_axes, data)
 
 
-def plot_constrained_lane_change(data: pd.DataFrame,
-                                 lc_veh_id_or_name: Union[int, str]):
-    pp.compute_all_relative_values(data)
-
-    sns.set_style("whitegrid")
-    x_axes = ["t", "t", "t", "t"]
-    y_axes = ["y", "v", "phi", "a"]
-
-    fig, ax = plt.subplots(len(y_axes) + 1)
-    fig.set_size_inches(12, 8)
-    plot_single_vehicle_lane_change_gap_errors(data, lc_veh_id_or_name, ax[0])
-    plot_scenario_results(x_axes, y_axes, data, ax[1:])
-    fig.tight_layout()
-    fig.show()
-
-
 def plot_platoon_lane_change(data: pd.DataFrame):
     pp.compute_all_relative_values(data)
 
@@ -852,26 +779,6 @@ def plot_scenario_results(x_axes: list[str], y_axes: list[str],
     if axs is None:
         fig.tight_layout()
         fig.show()
-
-
-def check_constraint_satisfaction(data: pd.DataFrame, lc_id: int):
-    data["safe_gap"] = pp.compute_default_safe_gap(data["v"])
-    data["gap_error"] = data["gap_to_orig_lane_leader"] - data["safe_gap"]
-    data["constraint"] = np.minimum(data["gap_error"], 0) * data["phi"]
-    plot_scenario_results(["t", "t", "t"], ["constraint", "phi", "gap_error"],
-                          data[data["id"] == lc_id])
-
-
-def compare_desired_and_actual_final_states(desired_data, simulated_data):
-    fig, ax = plt.subplots(2, 1)
-    plot_initial_and_final_states(desired_data, ax[0])
-    ax[0].set_title("Desired")
-    ax[0].set_aspect("equal", adjustable="box")
-    plot_initial_and_final_states(simulated_data, ax[1])
-    ax[1].set_title("Simulated")
-    ax[1].set_aspect("equal", adjustable="box")
-    fig.tight_layout()
-    fig.show()
 
 
 def get_relevant_vehicle_ids(data: pd.DataFrame) -> np.ndarray:

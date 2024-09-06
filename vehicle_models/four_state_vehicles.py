@@ -8,7 +8,6 @@ import numpy as np
 
 import configuration
 import controllers.longitudinal_controller as long_ctrl
-import controllers.optimal_controller as opt_ctrl
 import controllers.vehicle_controller as veh_ctrl
 import operating_modes.concrete_vehicle_modes as modes
 import vehicle_models.base_vehicle as base
@@ -298,125 +297,6 @@ class OpenLoopVehicle(FourStateVehicle):
 
     def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]):
         return True
-
-
-class OptimalControlVehicle(FourStateVehicle):
-    """ States: [x, y, theta, v], inputs: [a, phi], centered at the C.G.
-    Accel and phi can be computed by optimal control when there is lane change
-    intention. Otherwise, constant time headway policy for accel and
-    a CBF computed lane keeping phi. """
-
-    _controller_type = veh_ctrl.OptimalControl
-    _platoon: vehicle_platoon.OptimalPlatoon
-
-    def __init__(self, can_change_lanes: bool = True,
-                 has_open_loop_acceleration: bool = True,
-                 is_connected: bool = False):
-        super().__init__(can_change_lanes, has_open_loop_acceleration,
-                         is_connected)
-
-        self._platoon_type = vehicle_platoon.OptimalPlatoon
-        self.set_mode(modes.OCPLaneKeepingMode())
-        self.get_opt_controller().set_controlled_vehicles_ids(self.id)
-
-    def get_opt_controller(self) -> opt_ctrl.VehicleOptimalController:
-        return self._controller.get_opt_controller()
-
-    def get_platoon(self) -> Union[None, vehicle_platoon.OptimalPlatoon]:
-        try:
-            return self._platoon
-        except AttributeError:
-            return None
-
-    def set_centralized_controller(
-            self, centralized_controller: opt_ctrl.VehicleOptimalController):
-        centralized_controller.add_controlled_vehicle_id(self.id)
-        self._controller.set_opt_controller(centralized_controller)
-
-    def make_open_loop_copy(self, initial_state: np.ndarray = None
-                            ) -> OpenLoopVehicle:
-        new_vehicle = OpenLoopVehicle(
-            self._can_change_lanes, self._has_open_loop_acceleration,
-            self._is_connected)
-        self.copy_attributes(new_vehicle, initial_state)
-        new_vehicle._platoon = self.get_platoon()
-        new_vehicle._desired_future_follower_id = (
-            self._desired_future_follower_id)
-        return new_vehicle
-
-    def get_intermediate_results(self):
-        return self.get_opt_controller().get_simulation_per_iteration()
-
-    def update_mode(self, vehicles: Mapping[int, base.BaseVehicle]):
-        if self.has_lane_change_intention():
-            self._mode.handle_lane_changing_intention(vehicles)
-        else:
-            self._mode.handle_lane_keeping_intention(vehicles)
-
-    def can_start_lane_change(self, vehicles: Mapping[int, base.BaseVehicle]
-                              ) -> bool:
-        if self.get_opt_controller().has_solution():
-            return True
-
-        if self.is_in_a_platoon():
-            dest_lane_veh_ids = [veh.id for veh in vehicles.values()
-                                 if veh.get_current_lane() == self._target_lane]
-            self.get_opt_controller().\
-                set_platoon_formation_constraint_parameters(
-                self.get_platoon().get_vehicle_ids(), dest_lane_veh_ids
-            )
-        if self._is_verbose:
-            t = self.get_current_time()
-            print("t={:.2f}, veh:{}. Calling optimal controller".format(
-                t, self._id))
-        self.get_opt_controller().find_trajectory(vehicles)
-        return self.get_opt_controller().has_solution()
-
-    # Outdated. We're not considering the persistent scenario.
-    def can_start_lane_change_with_checks(
-            self, vehicles: Mapping[int, base.BaseVehicle]) -> bool:
-        if self.get_opt_controller().has_solution():
-            return True
-
-        # The OPC solver should be run again every time the vehicle starts
-        # following a new leader or when the dest lane foll starts cooperating
-        if self.has_requested_cooperation():
-            cooperating_vehicle = vehicles[
-                self.get_desired_future_follower_id()]
-            has_coop_just_started = (
-                    cooperating_vehicle.get_aided_vehicle_id() == self._id
-                    # and cooperating_vehicle.has_changed_leader()
-            )
-        else:
-            has_coop_just_started = False
-        has_vehicle_configuration_changed = (
-                # self.has_changed_leader() or
-                has_coop_just_started
-        )
-        # If the OPC solver didn't find a solution at first, we do not want to
-        # run it again too soon.
-        t = self.get_current_time()
-        solver_wait_time = 20.0  # [s] time between attempts to solve an ocp
-        is_cool_down_period_done = (
-                t - self.get_opt_controller().get_activation_time()
-                >= solver_wait_time
-        )
-
-        if has_vehicle_configuration_changed or is_cool_down_period_done:
-            return self.can_start_lane_change(vehicles)
-
-    def is_lane_changing(self) -> bool:
-        if self.has_started_lane_change():
-            delta_t = self.get_current_time() - self._lc_start_time
-            return delta_t <= self.get_opt_controller().get_time_horizon()
-        return False
-
-    def _create_platoon(
-            self, platoon_lane_change_strategy: lc_strategies.StrategyMap
-            ) -> vehicle_platoon.OptimalPlatoon:
-        return vehicle_platoon.OptimalPlatoon(
-            self, platoon_lane_change_strategy)
-
 
 class ClosedLoopVehicle(FourStateVehicle):
     """ Vehicle that computes all of its inputs by feedback laws.
