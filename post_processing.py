@@ -9,24 +9,28 @@ import pandas as pd
 from scipy.interpolate import interp1d
 
 import configuration as config
+import helper
 from platoon_functionalities import traffic_state_graph
 
 
 def process_graph_exploration_results(
         n_platoon: Iterable[int], cost_type: Iterable[str],
-        epsilon: Iterable[float]):
+        epsilon: Iterable[float], simulator: str):
     data = []
     for cost in cost_type:
         for n in n_platoon:
             for eps in epsilon:
                 data.append(process_single_graph_exploration_result(
-                    n, cost, eps))
+                    n, cost, eps, simulator))
     return pd.concat(data)
 
 
 def process_single_graph_exploration_result(
-        n_platoon: int, cost_type: str, epsilon: float):
+        n_platoon: int, cost_type: str, epsilon: float, simulator: str):
     data = traffic_state_graph.read_from_json(n_platoon, cost_type, epsilon)
+    data = filter_simulator_queries(data, n_platoon, simulator)
+    if len(data) == 0:
+        raise RuntimeError(f"No data to process for {simulator}")
     # first_times, end_times = [], []  # TODO: de we want these stats?
     max_time = -np.inf
     for d in data:
@@ -35,7 +39,13 @@ def process_single_graph_exploration_result(
         # min_time = min(min_time, d["time"][0])
         # Force first time to zero
         d["time"] = np.array(d["time"]) - d["time"][0]
+
+        if d["time"][-1] < 0:  # TODO: figure out
+            print("problem")
+            # continue
+
         max_time = max(max_time, d["time"][-1])
+
         # Normalize costs
         min_cost = np.min(d["cost"])
         max_cost = np.max(d["cost"])
@@ -48,6 +58,8 @@ def process_single_graph_exploration_result(
     # Interpolate y values to common x values using zero-order hold
     all_y_interp = []
     for d in data:
+        # if d["time"][-1] < 0:  # TODO: figure out
+        #     continue
         f = interp1d(d["time"], d["norm_cost"], kind='previous',
                      fill_value="extrapolate",
                      bounds_error=False)
@@ -63,6 +75,34 @@ def process_single_graph_exploration_result(
     df_long["n_platoon"] = n_platoon
     df_long["epsilon"] = epsilon
     return df_long
+
+
+def filter_simulator_queries(
+        data: list[dict[str, list]], n_platoon: int, simulator: str):
+    if simulator not in {"all", "python", "vissim"}:
+        raise ValueError(f"Simulator {simulator} not know. Choose from: "
+                         f"'vissim', 'python', or 'all'")
+    if simulator is None or simulator == "all":
+        return data
+
+    df, _ = helper.load_queries_from_simulations(n_platoon, simulator)
+    queries = set()
+    for index, row in df.iterrows():
+        initial_state = tuple([int(x) for x in row["qx"].split(",")])
+        if isinstance(row["first_movers_set"], str):
+            first_movers_set = frozenset(
+                int(x) for x in row["first_movers_set"].split(","))
+        elif np.isscalar(row["first_movers_set"]):
+            first_movers_set = frozenset([row["first_movers_set"]])
+        else:
+            first_movers_set = frozenset(int(x) for x
+                                         in row["first_movers_set"])
+        queries.add((initial_state, first_movers_set))
+    filtered_data = [
+        d for d in data
+        if (tuple(d["root"]), frozenset(d["first_mover_set"])) in queries
+    ]
+    return filtered_data
 
 
 def compute_acceleration_costs(

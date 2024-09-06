@@ -152,7 +152,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             super().find_cooperation_requests(vehicles)
         else:
             aided_vehicle_id = self.get_platoon().get_aided_vehicle_id(
-                self.get_id())
+                self.id)
             self._aided_vehicle_id[self._iter_counter] = aided_vehicle_id
 
     def find_desired_destination_lane_leader(self):
@@ -162,7 +162,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
             veh_id = self.get_suitable_destination_lane_leader_id()
         else:
             veh_id = self.get_platoon().get_vehicle_desired_dest_lane_leader_id(
-                self.get_id())
+                self.id)
         self._desired_destination_lane_leader_id[self._iter_counter] = veh_id
 
     def _update_origin_lane_time_headway(self, new_leader: base.BaseVehicle):
@@ -184,7 +184,7 @@ class FourStateVehicle(base.BaseVehicle, ABC):
         pass
 
     def is_platoon_leader(self) -> bool:
-        return self.get_id() == self._platoon.get_platoon_leader_id()
+        return self.id == self._platoon.get_platoon_leader_id()
 
     def reset_platoon(self):
         self._platoon = None
@@ -317,7 +317,7 @@ class OptimalControlVehicle(FourStateVehicle):
 
         self._platoon_type = vehicle_platoon.OptimalPlatoon
         self.set_mode(modes.OCPLaneKeepingMode())
-        self.get_opt_controller().set_controlled_vehicles_ids(self.get_id())
+        self.get_opt_controller().set_controlled_vehicles_ids(self.id)
 
     def get_opt_controller(self) -> opt_ctrl.VehicleOptimalController:
         return self._controller.get_opt_controller()
@@ -330,7 +330,7 @@ class OptimalControlVehicle(FourStateVehicle):
 
     def set_centralized_controller(
             self, centralized_controller: opt_ctrl.VehicleOptimalController):
-        centralized_controller.add_controlled_vehicle_id(self.get_id())
+        centralized_controller.add_controlled_vehicle_id(self.id)
         self._controller.set_opt_controller(centralized_controller)
 
     def make_open_loop_copy(self, initial_state: np.ndarray = None
@@ -359,7 +359,7 @@ class OptimalControlVehicle(FourStateVehicle):
             return True
 
         if self.is_in_a_platoon():
-            dest_lane_veh_ids = [veh.get_id() for veh in vehicles.values()
+            dest_lane_veh_ids = [veh.id for veh in vehicles.values()
                                  if veh.get_current_lane() == self._target_lane]
             self.get_opt_controller().\
                 set_platoon_formation_constraint_parameters(
@@ -465,7 +465,7 @@ class ClosedLoopVehicle(FourStateVehicle):
             #     self._platoon.set_maneuver_initial_state_for_all_vehicles(
             #         vehicles)
             is_my_turn = self._platoon.can_start_lane_change(
-                self.get_id(), vehicles)
+                self.id, vehicles)
         else:
             is_my_turn = True
 
@@ -512,7 +512,7 @@ class FourStateVehicleInterface(base.BaseVehicleInterface, ABC):
 
     def __init__(self, vehicle: FourStateVehicle):
         super().__init__(vehicle)
-        self._can_change_lanes = vehicle.get_can_change_lanes()
+        self._can_change_lanes = vehicle.can_change_lanes
         self._has_open_loop_acceleration = (
             vehicle.get_has_open_loop_acceleration())
         self._input_names = []

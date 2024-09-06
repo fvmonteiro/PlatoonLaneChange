@@ -831,7 +831,7 @@ class GraphCreator:
         if include_ld:
             ld = fsv.ShortSimulationVehicle(False)
             ld.set_name("ld")
-            leader_platoon._dest_lane_leader_id = ld.get_id()
+            leader_platoon._dest_lane_leader_id = ld.id
         else:
             ld = []
         if self._has_fd:
@@ -1534,7 +1534,7 @@ def _simulate_till_lane_change(
 
     if force_lc_start:
         vehicle_group.set_ids_must_change_lanes(
-            [veh.get_id() for veh in next_vehs_to_move])
+            [veh.id for veh in next_vehs_to_move])
 
     i = 0
     success = False

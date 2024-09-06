@@ -4,6 +4,7 @@ import os
 import shutil
 from typing import Union
 
+import configuration
 from vissim_handler.vissim_vehicle import VehicleType, PlatoonLaneChangeStrategy
 import vissim_handler.scenario_handling as scenario_handling
 
@@ -416,7 +417,12 @@ def create_file_path(
             scenario_info.vehicles_per_lane))
     if scenario_info.platoon_size is not None:
         folder_list.append(str(scenario_info.platoon_size) + "_vehicle_platoon")
+    if scenario_info.computation_time is not None:
+        floored_time = int(scenario_info.computation_time)
+        if floored_time >= configuration.MAX_COMPUTATION_TIME:
+            floored_time = "max"
+        folder_list.append(f"{floored_time}_comp_time")
     if scenario_info.special_case is not None:
         folder_list.append(scenario_info.special_case)
 
-    return os.path.join(*folder_list)
+    return str(os.path.join(*folder_list))

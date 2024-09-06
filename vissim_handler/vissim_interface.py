@@ -7,13 +7,72 @@ import time
 from typing import Callable, Union
 import warnings
 
+import numpy as np
 import pywintypes
 import win32com.client as com
 
 import configuration
+import post_processing
 from vissim_handler.file_handling import FileHandler, delete_files_in_folder
 import vissim_handler.scenario_handling as scenario_handling
 from vissim_handler.vissim_vehicle import VehicleType, PlatoonLaneChangeStrategy
+
+
+def run_platoon_simulations_with_varying_computation_time(
+        platoon_size: int):
+    scenario_name = "platoon_discretionary_lane_change"
+    epsilon = 0.4  # TODO: for now, VISSIM only loads this fixed epsilon value
+    comp_time_interval = 20
+    strategies = [PlatoonLaneChangeStrategy.graph_min_time,
+                  PlatoonLaneChangeStrategy.graph_min_accel]
+    special_case = None
+    other_vehicles = [{VehicleType.HDV: 100}]
+    # vehicles_per_lane = [1000]
+    vehicles_per_lane = (
+        scenario_handling.all_vissim_simulation_configurations[
+            "vehicles_per_lane"]
+    )
+    # orig_and_dest_lane_speeds = [("70", "50")]
+    orig_and_dest_lane_speeds = (
+        scenario_handling.all_vissim_simulation_configurations[
+            "orig_and_dest_lane_speeds"])
+    scenarios = []
+    for strat in strategies:
+        try:
+            data = post_processing.process_single_graph_exploration_result(
+                platoon_size, strat.get_cost_name(), epsilon,
+                simulator="vissim")
+        except RuntimeError as e:
+            warnings.warn(e.args[0])
+            continue
+        max_time = int(np.ceil(data["time"].max()))
+        if max_time < 60:
+            computation_times = [0,  max_time//2, max_time]
+        else:
+            computation_times = [i for i in range(0, 60 + comp_time_interval,
+                                                  comp_time_interval)]
+            if max_time - computation_times[-1] < 5:
+                computation_times[-1] = max_time
+            else:
+                computation_times.append(max_time)
+        warnings.warn(f"Computation times set to {computation_times}. "
+                      f"Double check values")
+        scenarios.extend(scenario_handling.create_multiple_scenarios(
+            other_vehicles, vehicles_per_lane,
+            lane_change_strategies=[strat],
+            orig_and_dest_lane_speeds=orig_and_dest_lane_speeds,
+            computation_times=computation_times,
+            platoon_size=[platoon_size], special_cases=special_case
+        ))
+
+    vi = VissimInterface()
+    time.sleep(1)  # simulation loading sometimes fails without some wait
+    vi.load_simulation(scenario_name)
+    start_time = time.time()
+    vi.run_multiple_platoon_lane_change_scenarios(scenarios)
+    run_time = datetime.timedelta(seconds=time.time() - start_time)
+    print(f"Vissim simulations time:", str(run_time).split(".")[0])
+    vi.close_vissim()
 
 
 def run_platoon_simulations(is_warm_up: bool = False,
@@ -49,7 +108,7 @@ def run_platoon_simulations(is_warm_up: bool = False,
         platoon_size=platoon_size, special_cases=special_case)
 
     vi = VissimInterface()
-    time.sleep(1)  # trying to give the computer some "breathing time"
+    time.sleep(1)  # simulation loading sometimes fails without some wait
     vi.load_simulation(scenario_name)
     start_time = time.time()
     vi.run_multiple_platoon_lane_change_scenarios(scenarios)
@@ -66,14 +125,14 @@ def run_a_platoon_simulation(
         strategy: PlatoonLaneChangeStrategy
         = PlatoonLaneChangeStrategy.graph_min_accel,
         orig_and_dest_lane_speeds: tuple[str, str] = ("70", "50"),
-        platoon_size: int = 2,
+        platoon_size: int = 2, max_computation_time: float = 1.e10,
         random_seed: int = 7):
     scenario_name = "platoon_discretionary_lane_change"
     other_vehicles = {VehicleType.HDV: 100}
     scenario = scenario_handling.ScenarioInfo(
         other_vehicles, vehicles_per_lane, strategy,
         orig_and_dest_lane_speeds, platoon_size,
-        special_case="warmup")
+        max_computation_time, special_case="warmup")
     vi = VissimInterface()
     vi.load_simulation(scenario_name)
     vi.set_random_seed(random_seed)
@@ -93,6 +152,7 @@ class _ScenarioParameters:
 class _UDANumber(Enum):
     use_linear_lane_change_gap = 11
     platoon_lane_change_strategy = 13
+    max_computation_time = 14
     verbose_simulation = 98
     logged_vehicle = 99
 
@@ -372,7 +432,7 @@ class VissimInterface:
          short time period, and results are saved to a test folder.
         """
         # Set-up simulation parameters
-        self.set_verbose_simulation(True)  # for faster error tracking
+        self.set_verbose_simulation(False)  # for faster error tracking
         if not is_debugging:
             # self.set_verbose_simulation(False)
             self.set_logged_vehicle_id(0)
@@ -455,10 +515,8 @@ class VissimInterface:
             orig_lane_composition_number, scenario.orig_and_dest_lane_speeds[0])
         self.set_vehicle_composition_desired_speed(
             dest_lane_composition_number, scenario.orig_and_dest_lane_speeds[1])
-        # speed_map = {"orig_lane": scenario.orig_and_dest_lane_speeds[0],
-        #              "dest_lane": scenario.orig_and_dest_lane_speeds[1]}
-        # self.set_reduced_speed_area_limit(speed_map)
         self.set_uniform_vehicle_input_for_all_lanes(scenario.vehicles_per_lane)
+        self.set_max_computation_time(scenario.computation_time)
 
     def get_parameters_for_platoon_special_case_scenario(
             self, scenario: scenario_handling.ScenarioInfo
@@ -801,6 +859,12 @@ class VissimInterface:
     def set_logged_vehicle_id(self, veh_id: int) -> None:
         self.set_uda_default_value(_UDANumber.logged_vehicle,
                                    veh_id)
+
+    def set_max_computation_time(self, computation_time: float) -> None:
+        if computation_time is None:
+            computation_time = configuration.MAX_COMPUTATION_TIME
+        self.set_uda_default_value(_UDANumber.max_computation_time,
+                                   computation_time)
 
     def set_uda_default_value(self, uda_number: _UDANumber,
                               uda_value: Union[bool, int, float]) -> None:

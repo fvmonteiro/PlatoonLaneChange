@@ -31,7 +31,7 @@ class SystemMode:
         for veh_id, vehicle in vehicles.items():
             surrounding_veh_ids = vehicle.get_relevant_surrounding_vehicle_ids()
             self.mode[veh_id] = surrounding_veh_ids
-            veh_name = vehicle.get_name()
+            veh_name = vehicle.name
             self.id_to_name_map[veh_id] = veh_name
             self.name_to_id[veh_name] = veh_id
 

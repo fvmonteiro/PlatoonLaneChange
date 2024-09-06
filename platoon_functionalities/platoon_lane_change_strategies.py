@@ -324,7 +324,7 @@ class TemplateStrategy(LaneChangeStrategy):
                 last_dest_lane_vehicle_idx = (
                     self._get_rearmost_lane_changing_vehicle_position())
                 dest_lane_leader_id = self._platoon.vehicles[
-                    last_dest_lane_vehicle_idx].get_id()
+                    last_dest_lane_vehicle_idx].id
         else:
             # Get the vehicle ahead the vehicle which helps generate the gap
             dest_lane_leader_id = self._platoon.vehicles[
@@ -340,7 +340,7 @@ class TemplateStrategy(LaneChangeStrategy):
                 or ego_position != self._cooperating_order[self._idx]):
             return -1
         rear_most_pos = self._get_rearmost_lane_changing_vehicle_position()
-        return self._platoon.vehicles[rear_most_pos].get_id()
+        return self._platoon.vehicles[rear_most_pos].id
 
     def _get_rearmost_lane_changing_vehicle_position(self):
         """
@@ -580,7 +580,7 @@ class GraphLaneChangeApproach(TemplateStrategy):
     #                          "platoon": platoon_leader.get_free_flow_speed()}
     #                 self.save_state_info_to_csv(missing_node, v_ref)
     #         else:
-    #             self._set_empty_maneuver_initial_state(veh.get_id())
+    #             self._set_empty_maneuver_initial_state(veh.id)
     #
     #     if error_flag:
     #         raise nx.NodeNotFound
@@ -890,7 +890,7 @@ class LeaderFirstStrategyHardCoded(HardCodedStrategy):
         if ego_position == 0:
             ego_veh = self._platoon.vehicles[ego_position]
             return ego_veh.get_destination_lane_leader_id()
-        return self._platoon.vehicles[ego_position - 1].get_id()
+        return self._platoon.vehicles[ego_position - 1].id
 
     def _get_incoming_vehicle_id(self, ego_position: int) -> int:
         if ego_position == 0:
@@ -929,7 +929,7 @@ class LastFirstStrategyHardCoded(HardCodedStrategy):
         # In theory, we only need to cooperate with the preceding vehicle
         # if it has not yet completed the lane change. But it will make
         # no difference returning the id here independent of that
-        return self._platoon.vehicles[ego_position - 1].get_id()
+        return self._platoon.vehicles[ego_position - 1].id
 
 
 class LeaderFirstReverseStrategyHardCoded(HardCodedStrategy):
@@ -942,7 +942,7 @@ class LeaderFirstReverseStrategyHardCoded(HardCodedStrategy):
         # Check if we have overtaken the former preceding vehicle
         ego_veh = self._platoon.vehicles[ego_position]
         return (ego_veh.get_destination_lane_follower_id()
-                == self._platoon.vehicles[ego_position - 1].get_id())
+                == self._platoon.vehicles[ego_position - 1].id)
 
     def _get_desired_dest_lane_leader_id(self, ego_position: int) -> int:
         if ego_position == 0:
@@ -965,5 +965,5 @@ class LeaderFirstReverseStrategyHardCoded(HardCodedStrategy):
         # the (former) follower has completed the lane change
         follower = self._platoon.vehicles[ego_position + 1]
         if follower.has_lane_change_intention():
-            return follower.get_id()
+            return follower.id
         return -1

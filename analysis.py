@@ -30,6 +30,8 @@ def compare_bfs_and_dfs(n_platoon: int, cost_type: str):
 
     # simulator_name = "vissim"
 
+    warnings.warn("Function is outdated.")
+
     results = traffic_state_graph.load_best_results(n_platoon, cost_type, 1.0)
     strategy_map = graph_tools.LaneChangeStrategyManager.load_strategy_map(
         n_platoon, cost_type)
@@ -46,10 +48,10 @@ def compare_bfs_and_dfs(n_platoon: int, cost_type: str):
                     initial_node = traffic_state_graph.TrafficStateNode(
                         initial_state)
                     bfs_commands = helper.tuple_of_lists_to_list(bfs_solution)
-                    bfs_cost = initial_node.traverse_action_sequence(
+                    bfs_cost, _ = initial_node.traverse_action_sequence(
                         bfs_commands)
                     dfs_commands = helper.tuple_of_lists_to_list(dfs_solution)
-                    dfs_cost = initial_node.traverse_action_sequence(
+                    dfs_cost, _ = initial_node.traverse_action_sequence(
                         dfs_commands)
                     print(f"BFS cost: {bfs_cost}")
                     print(f"DFS cost: {dfs_cost}")
@@ -66,25 +68,45 @@ def compare_bfs_and_dfs(n_platoon: int, cost_type: str):
 
 def plot_several_cost_vs_computation_time(
         n_platoon: Iterable[int], cost_type: Iterable[str],
-        epsilon: Iterable[float]):
+        epsilon: Iterable[float], simulator: str = "all",
+        save_fig: bool = False):
     data = post_processing.process_graph_exploration_results(
-        n_platoon, cost_type, epsilon)
+        n_platoon, cost_type, epsilon, simulator)
+    data['$\epsilon$'] = data['epsilon'].astype(str)
+
     sns.set(style="whitegrid")
-    data['epsilon_str'] = data['epsilon'].astype(str)
+    font_size = 18
+    plt.rc("font", size=font_size)  # not working
+    plt.rc('legend', fontsize=font_size)  # legend fontsize
+    plt.rcParams['legend.title_fontsize'] = font_size
+    # plt.rcParams.update({'font.size': 22})
+    cost_pretty_name = {"time": "Maneuver Time", "accel": "Control Effort"}
     for cost in cost_type:
         for n in n_platoon:
             data_to_plot = data[(data["cost_type"] == cost)
                                 & (data["n_platoon"] == n)]
-            plt.figure(figsize=(10, 6))
-            ax = sns.lineplot(x='time', y='norm_cost', data=data_to_plot,
-                              hue='epsilon_str', errorbar=None,
-                              estimator=np.mean)
-            ax.set_xlabel('computation time')
-            ax.set_ylabel(f'normalized {cost}')
-            ax.set_title(f'platoon size: {n}')
+            fig, ax = plt.subplots(1, 1)
+            # plt.figure(figsize=(10, 6))
+            sns.lineplot(x='time', y='norm_cost', data=data_to_plot,
+                         hue='$\epsilon$', errorbar=None,
+                         estimator=np.mean, ax=ax, linewidth=2.5
+                        )
+            ax.set_xlabel('Computation Time [s]')
+            ax.set_ylabel(f'Normalized {cost_pretty_name[cost]}')
 
+            # Because plt.rc("font", size=font_size) is not working
+            for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] +
+                         ax.get_xticklabels() + ax.get_yticklabels()):
+                item.set_fontsize(font_size)
+
+            # ax.set_title(f'platoon size: {n}')
+            fig.tight_layout()
+            fig.set_dpi(400)
             # Show the plot
-            plt.show()
+            fig.show()
+            if save_fig:
+                ResultAnalyzer.save_fig_at_shared_folder(
+                    fig, "estimated_" + cost + "_vs_computation_time")
 
 
 def plot_estimated_cost_vs_computation_time(
@@ -364,10 +386,10 @@ class ResultAnalyzer:
         ].sort_values(by=self._simulation_identifiers)
         return graph_results, other_results
 
-    def plot_cost_vs_max_computation_time(self):
+    def plot_cost_vs_max_computation_time(self, n_platoon: int):
         for strategy in self.results["strategy_orig"].unique():
             data = self.results.loc[
-                (self.results["n_platoon"] == 5)
+                (self.results["n_platoon"] == n_platoon)
                 & (self.results["strategy_orig"] == strategy)]
             cost_type = strategy.split("_")[1]
             if cost_type == "time":

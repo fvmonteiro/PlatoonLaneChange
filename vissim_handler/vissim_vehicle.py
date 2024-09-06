@@ -54,3 +54,10 @@ class PlatoonLaneChangeStrategy(Enum):
             PlatoonLaneChangeStrategy.leader_first_and_reverse: "LdFR"
         }
         return _strategy_to_print_name[self]
+
+    def get_cost_name(self):
+        if self == PlatoonLaneChangeStrategy.graph_min_time:
+            return "time"
+        elif self == PlatoonLaneChangeStrategy.graph_min_accel:
+            return "accel"
+        return ""

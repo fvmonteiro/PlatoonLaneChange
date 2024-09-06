@@ -28,6 +28,7 @@ FREE_FLOW_SPEED = 110  # km/h
 DELTA_X = 9  # quantization interval [m]
 DELTA_V = 2  # quantization interval [m]
 DELTA_Y = LANE_WIDTH  # quantization interval [m]
+MAX_COMPUTATION_TIME = 1.e10  # when exploring the graph
 
 UNIT_MAP = {'t': 's', 'x': 'm', 'y': 'm', 'theta': 'rad', 'v': 'm/s',
             'a': 'm/s^2', 'phi': 'rad', 'gap': 'm'}

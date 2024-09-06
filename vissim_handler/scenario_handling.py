@@ -25,6 +25,7 @@ class ScenarioInfo:
         vissim_vehicle.PlatoonLaneChangeStrategy = None
     orig_and_dest_lane_speeds: tuple[Union[str, int], Union[str, int]] = None
     platoon_size: int = None
+    computation_time: float = None
     special_case: str = None
 
     def __str__(self):
@@ -32,8 +33,7 @@ class ScenarioInfo:
         veh_percent_list = [str(p) + "% " + vt.name.lower()
                             for vt, p in self.vehicle_percentages.items()]
         str_list.append("Vehicles: " + ", ".join(veh_percent_list))
-        str_list.append("Input: " + str(self.vehicles_per_lane)
-                        + " vehs/lane/hour")
+        str_list.append(f"Input: {self.vehicles_per_lane} vehs/lane/hour")
         if self.platoon_lane_change_strategy is not None:
             str_list.append("Platoon LC strat.: "
                             + self.platoon_lane_change_strategy.name.lower())
@@ -43,9 +43,12 @@ class ScenarioInfo:
                             + ". Dest lane speed: "
                             + str(self.orig_and_dest_lane_speeds[1]))
         if self.platoon_size is not None:
-            str_list.append("n_platoon=" + str(self.platoon_size))
+            str_list.append(f"n_platoon={self.platoon_size}")
+        if self.computation_time is not None:
+            str_list.append(f"max computation time: "
+                            f"{self.computation_time}")
         if self.special_case is not None:
-            str_list.append("Special case: " + self.special_case)
+            str_list.append(f"Special case: {self.special_case}")
         return "\n".join(str_list)
 
 
@@ -90,6 +93,7 @@ def create_multiple_scenarios(
         orig_and_dest_lane_speeds: Iterable[tuple[Union[str, int],
                                             Union[str, int]]] = None,
         platoon_size: Iterable[int] = None,
+        computation_times: Iterable[float] = None,
         special_cases: Iterable[str] = None) -> list[ScenarioInfo]:
     if lane_change_strategies is None:
         lane_change_strategies = [None]
@@ -97,14 +101,16 @@ def create_multiple_scenarios(
         orig_and_dest_lane_speeds = [None]
     if platoon_size is None:
         platoon_size = [None]
+    if computation_times is None:
+        computation_times = [None]
     if special_cases is None:
         special_cases = [None]
     scenarios = []
-    for vp, vi, st, speeds, sizes, case in itertools.product(
+    for vp, vi, st, speeds, sizes, ct, case in itertools.product(
             vehicle_percentages, vehicle_inputs,
             lane_change_strategies, orig_and_dest_lane_speeds, platoon_size,
-            special_cases):
-        scenarios.append(ScenarioInfo(vp, vi, st, speeds, sizes, case))
+            computation_times, special_cases):
+        scenarios.append(ScenarioInfo(vp, vi, st, speeds, sizes, ct, case))
     return scenarios
 
 

@@ -353,7 +353,7 @@ def create_desired_state(vehicles: list[base.BaseVehicle], tf: float):
     # Note: xf and vf are irrelevant with the accel feedback model
     desired_state = []
     for veh in vehicles:
-        vf = veh.get_free_flow_speed()
+        vf = veh.free_flow_speed
         xf = veh.get_x() + veh.get_vel() * tf
         yf = veh.get_target_y()
         thetaf = 0.0
@@ -380,7 +380,7 @@ def create_state_cost_matrix(
     # and only accel or only phi controlled vehicles
     veh_costs = []
     for veh in vehicles:
-        if veh.get_id() in controlled_veh_ids:
+        if veh.id in controlled_veh_ids:
             veh_costs.extend(veh.create_state_vector(
                 x_cost, y_cost, theta_cost, v_cost))
         else:
@@ -403,7 +403,7 @@ def create_input_cost_matrix(vehicles: list[base.BaseVehicle],
     """
     veh_costs = []
     for veh in vehicles:
-        if veh.get_id() in controlled_veh_ids:
+        if veh.id in controlled_veh_ids:
             veh_costs.append(accel_cost)
             veh_costs.append(phi_cost)
         else:

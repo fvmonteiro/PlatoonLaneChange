@@ -166,7 +166,7 @@ def run_with_varying_max_computation_time(epsilon: float):
         epsilon=epsilon)
 
     save_results = True
-    strategies = [#lc_strategy.StrategyMap.graph_min_accel,
+    strategies = [lc_strategy.StrategyMap.graph_min_accel,
                   lc_strategy.StrategyMap.graph_min_time]
     n_platoon = np.max(all_platoon_simulation_configurations["platoon_size"])
     orig_and_dest_lane_speeds = (
@@ -182,7 +182,8 @@ def run_with_varying_max_computation_time(epsilon: float):
     )
     for strat in strategies:
         data = post_processing.process_single_graph_exploration_result(
-            n_platoon, strat.get_implementation().get_cost_name(), epsilon)
+            n_platoon, strat.get_implementation().get_cost_name(), epsilon,
+            simulator="python")
         all_max_times = np.linspace(0, data["time"].max(), 4)
         for max_time in all_max_times:
             configuration.Configuration.set_graph_exploration_parameters(
@@ -637,8 +638,8 @@ class SimulationScenario(ABC):
         pass
 
     def get_lc_vehicle_ids(self):
-        return [veh.get_id() for veh in self.vehicle_group.get_all_vehicles()
-                if veh.get_name() in self.lc_vehicle_names]
+        return [veh.id for veh in self.vehicle_group.get_all_vehicles()
+                if veh.name in self.lc_vehicle_names]
 
     def set_control_type(self, control_type: str,
                          is_acceleration_optimal: bool = None):
@@ -862,7 +863,7 @@ class SimulationScenario(ABC):
         :return:
         """
         if gap is None:
-            gap = self.vehicle_group.vehicles[0].get_free_flow_speed() + 1
+            gap = self.vehicle_group.vehicles[0].free_flow_speed + 1
         x0, y0, theta0, v0 = [], [], [], []
         for lane in range(len(self.n_per_lane)):
             lane_center = lane * configuration.LANE_WIDTH
@@ -1434,7 +1435,7 @@ class FastLaneChange(SimulationScenario):
                 phi = -ego.phi_max
             else:
                 phi = 0
-            inputs[ego.get_id()] = np.array([phi])
+            inputs[ego.id] = np.array([phi])
             self.vehicle_group.simulate_one_time_step(time[i + 1], inputs)
 
 

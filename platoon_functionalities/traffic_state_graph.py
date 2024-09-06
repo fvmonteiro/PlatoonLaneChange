@@ -9,6 +9,8 @@ import json
 import numpy as np
 import os
 import pickle
+# import psutil
+from pympler import asizeof, tracker
 import time
 from typing import Callable
 
@@ -30,8 +32,21 @@ def solve_queries_from_simulations(
         verbose_level: int = 0
 ) -> None:
     """
-
+    :param simulator_name: python or vissim
+    :param mode: "w" (write): ignores any existing file (so saving this object
+     will overwrite existing graphs); "ao": appends to an existing graph
+     (previously saved to a file) and overwrites previous results if
+     there are repeated initial nodes; "as": appends to an existing graph
+     and skips any repeated initial nodes.
+    :param n_platoon: platoon size
+    :param cost_type: accel or time
+    :param scenario_number: scenario number (for debugging purposes)
+    :param epsilon: graph exploration parameter
+    :param verbose_level: verbosity level
     """
+    if mode not in ["w", "ao", "as"]:
+        raise ValueError(f"mode is {mode} but must be either 'w' or 'ao' "
+                         f"or 'as'")
     start_time = time.time()
 
     sim_time = 20.0 * n_platoon
@@ -46,13 +61,23 @@ def solve_queries_from_simulations(
 
     TrafficStateNode.set_cost_type(cost_type)
 
-    n_queries = len(df.index)
-    results = dict()
-    print(f"{n_queries} queries to solve.")
-    for index, row in df.iterrows():
-        print(f"#{index}")
+    # Get existing results
+    if mode != "w":
+        results = load_full_strategy_maps(n_platoon, cost_type, epsilon)
+    else:
+        # ignores existing solutions
+        results = dict()
 
-        # TODO: verify if query has already been solved or explored
+    n_queries = len(df.index)
+    n_new_queries = 0
+    graph = dict()  # TODO: save graph as union of all visited nodes?
+    print(f"{n_queries} queries to solve.")
+    # tr = tracker.SummaryTracker()
+    for index, row in df.iterrows():
+        print(f"#{index}", end=" ")
+
+        # if index == 56:
+        #     continue
 
         initial_state = tuple([int(x) for x in row["qx"].split(",")])
         if isinstance(row["first_movers_set"], str):
@@ -61,7 +86,19 @@ def solve_queries_from_simulations(
         elif np.isscalar(row["first_movers_set"]):
             first_movers_set = frozenset([row["first_movers_set"]])
         else:
-            first_movers_set = frozenset(int(x) for x in row["first_movers_set"])
+            first_movers_set = frozenset(
+                int(x) for x in row["first_movers_set"])
+
+        if (initial_state in results
+                and first_movers_set in results[initial_state]):
+            if mode == "as":
+                print("already solved - skipping")
+                continue
+            else:
+                print("already solved - overwriting")
+        else:
+            print("new query - solving")
+            n_new_queries += 1
 
         # This dict is reset for every query because we want to simulate the
         # effects of solving each query from scratch
@@ -69,22 +106,34 @@ def solve_queries_from_simulations(
         query_results = train(
             initial_state, 1000, first_movers_set, epsilon,
             verbose_level, visited_nodes)
+        print(f"Total visited nodes: {len(visited_nodes)}")
+        # update_graph(graph, visited_nodes)
+        # print(f"Nodes in graph: {len(graph)}")
+        # print(psutil.virtual_memory())
+        # memoryUse = python_process.memory_info()[
+        #                 0] / 2. ** 30  # memory use in GB...I think
+        # print('memory use:', memoryUse)
+        # print(f"Graph size {asizeof.asizeof(graph)}")
+
         if len(query_results) == 0:
             warnings.warn(
                 f"Query x0={initial_state}, first movers={first_movers_set} "
                 f"failed at the first step.")
-        # Reduce results size: by storing the initial node, we'll have access
-        # to the entire graph. No need to store all the paths
-        query_results["initial_node"] = query_results["best_path"][-1].root_node
         del query_results["best_path"]
         if initial_state not in results:
             results[initial_state] = dict()
         results[initial_state][first_movers_set] = query_results
+        print(f"Results size {asizeof.asizeof(results)//1000}")
+        # tr.print_diff()
 
-    pickle_results(n_platoon, results, cost_type, epsilon)
-    save_results_to_json(n_platoon, results, cost_type, epsilon)
-    print(f"{n_queries} new queries solved.")
     graph_time = datetime.timedelta(seconds=time.time() - start_time)
+    pickle_graph(n_platoon, graph, cost_type, epsilon)
+    save_results_to_json(n_platoon, results, cost_type, epsilon)
+
+    print(f"Total queries: {n_queries}\nNew queries: {n_new_queries}.\n")
+    if n_new_queries != n_queries:
+        print(("Skipped" if mode == "as" else "Overwritten")
+              + f" queries: {n_queries - n_new_queries}")
     print(f"Graph n={n_platoon} expansion time:",
           str(graph_time).split(".")[0])
 
@@ -93,17 +142,20 @@ def train(
         initial_state: QuantizedState, max_episodes: int,
         first_movers_set: frozenset[int] = None, epsilon: float = 0.5,
         verbose_level: int = 0,
-        visited_nodes: dict[graph_explorer.State, TrafficStateNode] = None
-        ) -> dict[str, list]:
-
+        visited_nodes: dict[QuantizedState, TrafficStateNode] = None
+) -> dict[str, list]:
     def is_goal_node(node: TrafficStateNode) -> bool:
         return node.is_terminal()
 
+    if visited_nodes is None:
+        visited_nodes = dict()
+
     initial_node = TrafficStateNode(initial_state)
+    visited_nodes[initial_node.state] = initial_node
     if first_movers_set is not None:
         first_command = (first_movers_set, -1)
         _, next_node = initial_node.take_action(first_command, visited_nodes)
-        initial_node.find_best_edge()
+        initial_node.find_best_edge(visited_nodes)
         current_node = next_node
     else:
         current_node = initial_node
@@ -122,13 +174,13 @@ def train(
         for i in range(len(results["cost"])):
             results["cost"][i] += initial_node.best_edge.cost
             if results["best_path"][i].root_node != initial_node:
-                results["best_path"][i].add_root(initial_node,
-                                                 initial_node.best_edge)
+                results["best_path"][i].add_root(
+                    initial_node, initial_node.best_edge, visited_nodes)
             else:
                 warnings.warn("Repeated path in results dict")
     if verbose_level > 0:
-        print("Query solution:\n", initial_node.get_best_path().to_string(),
-              sep="")
+        print("Query solution:\n", initial_node.get_best_path(
+            visited_nodes).to_string(visited_nodes), sep="")
     # strategies = [p.get_strategy() for p in results["best_path"]]
     strategies = get_strategies_from_paths(results["best_path"])
     results["lc_order"] = []
@@ -150,11 +202,21 @@ def get_strategies_from_paths(paths: list[TrafficPath]
     return strategies
 
 
+def update_graph(graph: dict[QuantizedState, TrafficStateNode],
+                 visited_nodes: dict[QuantizedState, TrafficStateNode]):
+    for state, node in visited_nodes.items():
+        if state in graph:
+            new_node = TrafficStateNode.merge_nodes(
+                graph[state], visited_nodes[state], graph, visited_nodes)
+            graph[state] = new_node
+        else:
+            graph[state] = node
+
+
 def load_best_results(
         n_platoon: int, cost_type: str, epsilon: float
 ) -> dict[QuantizedState, dict[frozenset[int], dict[str, list]]]:
-    results = load_pickled_results(n_platoon, cost_type, epsilon)
-    # Desired: {root: first_mover_set: {cost: , lc_order: , coop_order:}
+    results = load_full_strategy_maps(n_platoon, cost_type, epsilon)
     best_results = dict()
     for initial_state, outer_dict in results.items():
         if initial_state not in best_results:
@@ -162,52 +224,80 @@ def load_best_results(
         for first_mover_set, query_result in outer_dict.items():
             best_results[initial_state][first_mover_set] = dict()
             for key, value in query_result.items():
-                if key == 'initial_node':
-                    continue
                 best_results[initial_state][first_mover_set][key] = value[-1]
     return best_results
 
 
-def load_pickled_results(
+def load_pickled_graph(
         n_platoon: int, cost_type: str, epsilon: float
-) -> dict[QuantizedState, dict[frozenset[int], dict[str, list]]]:
+) -> dict[QuantizedState, TrafficStateNode]:
     folder_name = _get_result_folder_name(epsilon)
-    file_name = _create_file_name(n_platoon, cost_type, "pickle")
+    file_name = _create_file_name("graph", n_platoon, cost_type, "pickle")
     file_path = os.path.join(folder_name, file_name)
     with open(file_path, 'rb') as file:
         results = pickle.load(file)
     return results
 
 
+# TODO: almost the same as load_saved_strategies from  LaneChangeStrategyManager
 def read_from_json(n_platoon: int, cost_type: str, epsilon: float
                    ) -> list[dict[str, list]]:
     folder_name = _get_result_folder_name(epsilon)
     os.makedirs(folder_name, exist_ok=True)
-    file_name = _create_file_name(n_platoon, cost_type, "json")
+    file_name = _create_file_name("strategies", n_platoon, cost_type, "json")
     file_path = os.path.join(folder_name, file_name)
     with open(file_path, "r") as file:
         results = json.load(file)
+    # return results
     return results
 
 
-def pickle_results(
+def load_full_strategy_maps(
+        n_platoon: int, cost_type: str, epsilon: float
+) -> dict[QuantizedState, dict[frozenset[int], dict[str, list]]]:
+    """
+    Gets the strategy maps with solutions that vary with computation time
+    """
+    try:
+        strategy_list = read_from_json(n_platoon, cost_type, epsilon)
+    except FileNotFoundError:
+        return dict()
+
+    strategy_map = dict()
+    for sl in strategy_list:
+        key1 = tuple(sl["root"])
+        if key1 not in strategy_map:
+            strategy_map[key1] = dict()
+        key2 = frozenset(sl["first_mover_set"])
+        if key2 not in strategy_map[key1]:
+            strategy_map[key1][key2] = {"lc_order": [], "coop_order": [],
+                                        "cost": [], "time": []}
+        for i in range(len(sl["lc_order"])):
+            strategy_map[key1][key2]["lc_order"].append(
+                [frozenset(lo) for lo in sl["lc_order"][i]])
+            strategy_map[key1][key2]["coop_order"].append(sl["coop_order"][i])
+            strategy_map[key1][key2]["cost"].append(sl["cost"][i])
+            strategy_map[key1][key2]["time"].append(sl["time"][i])
+    return strategy_map
+
+
+def pickle_graph(
         n_platoon: int,
-        data: dict[QuantizedState, dict[frozenset[int], dict[str, list]]],
+        graph: dict[QuantizedState, TrafficStateNode],
         cost_type: str, epsilon: float):
     folder_name = _get_result_folder_name(epsilon)
-    file_name = _create_file_name(n_platoon, cost_type, "pickle")
+    file_name = _create_file_name("graph", n_platoon, cost_type, "pickle")
     os.makedirs(folder_name, exist_ok=True)
     full_path = os.path.join(folder_name, file_name)
     with open(full_path, 'wb') as handle:
-        pickle.dump(data, handle,
+        pickle.dump(graph, handle,
                     protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def save_results_to_json(
         n_platoon: int,
         data: dict[QuantizedState, dict[frozenset[int], dict[str, list]]],
-        cost_type: str, epsilon: float,
-        mode: str = "as") -> None:
+        cost_type: str, epsilon: float) -> None:
     """
     Saves the minimum cost maneuver for every initial condition and
     every first mover set, to a json file.
@@ -218,30 +308,16 @@ def save_results_to_json(
      "lc_order": list[frozenset[int]], "coop_order": list[int],
      "time": list[float]}
     :param cost_type: "accel" or "time". If left empty, computes both
-    :param mode: "w": completely overwrites any existing file;
-     "ao": appends to an existing strategy map (previously saved to a file)
-     and overwrites previous results if there are repeated initial states;
-     "as": appends to an existing graph and skips any repeated initial
-     states. [Not implemented]
+    :param epsilon:
     :return:
     """
 
-    # TODO: multiple costs
-    # if cost_name is None:
-    #     for c in ["time", "accel"]:
-    #         save_minimum_cost_strategies_to_json(c)
-    #     return
     folder_name = _get_result_folder_name(epsilon)
     os.makedirs(folder_name, exist_ok=True)
 
-    # TODO: add to existing solution
-    # overwrite = mode == "w" or mode[1] == "o"
-    # existing_list = LaneChangeStrategyManager.strategy_map_to_dict_list(
-    #     self._strategy_maps[cost_name], cost_name)
     strategy_list = _to_json_format(data)
-    # strategy_list += existing_list
     json_data = json.dumps(strategy_list, indent=2)
-    file_name = _create_file_name(n_platoon, cost_type, "json")
+    file_name = _create_file_name("strategies", n_platoon, cost_type, "json")
     file_path = os.path.join(folder_name, file_name)
     with open(file_path, "w") as file:
         file.write(json_data)
@@ -276,15 +352,16 @@ def _get_result_folder_name(epsilon: float) -> str:
                         "strategy_maps", f"epsilon_{epsilon_percent}")
 
 
-def _create_file_name(n_platoon: int, cost_type: str, file_type: str):
-    return "_".join(["min", cost_type, "strategies_for", str(n_platoon),
+def _create_file_name(identifier: str, n_platoon: int, cost_type: str,
+                      file_type: str):
+    return "_".join(["min", cost_type, f"{identifier}_for", str(n_platoon),
                      f"vehicles.{file_type}"])
 
 
 class TrafficStateNode(graph_explorer.Node):
     _possible_actions: list[Command]
-    _explored_actions: dict[Command, (TrafficEdge, TrafficStateNode)]
-    _best_edge: TrafficEdge  # TODO: check where best action is used
+    _explored_actions: dict[Command, TrafficEdge]
+    _best_edge: TrafficEdge
     _simulate: Callable[[QuantizedState, Command], tuple[QuantizedState, float]]
     _cost_type = "time"
 
@@ -311,13 +388,31 @@ class TrafficStateNode(graph_explorer.Node):
         print(f"Cost set to: {cost_type}")
         TrafficStateNode._cost_type = cost_type
 
+    @staticmethod
+    def merge_nodes(node1: TrafficStateNode, node2: TrafficStateNode,
+                    origin_node1: dict[QuantizedState, TrafficStateNode],
+                    origin_node2: dict[QuantizedState, TrafficStateNode]
+                    ) -> TrafficStateNode:
+        if node1.state != node2.state:
+            raise ValueError(f"Nodes must have same state to be merged")
+        new_node = copy.deepcopy(node1)
+        if new_node.is_terminal():
+            return new_node
+        new_node._explored_actions |= node2._explored_actions
+        if node1.best_edge.action != node2.best_edge.action:
+            best_cost1 = (origin_node1[
+                              node1.best_edge.destination_state].best_cost_to_go
+                          )
+            best_cost2 = (origin_node2[
+                              node2.best_edge.destination_state].best_cost_to_go
+                          )
+            if best_cost1 > best_cost2:
+                new_node._best_edge = node2.best_edge
+        return new_node
+
     @property
     def best_edge(self) -> TrafficEdge:
         return self._best_edge
-
-    def add_edge_from_node(self, successor: TrafficStateNode, action: Command,
-                           cost: float) -> None:
-        self._explored_actions[action] = (TrafficEdge(action, cost), successor)
 
     def generate_possible_actions(self) -> None:
         initial_state = self._continuous_state
@@ -353,27 +448,16 @@ class TrafficStateNode(graph_explorer.Node):
                         self._possible_actions.append(
                             (frozenset(next_positions_to_move),
                              next_pos_to_coop)
-                             )
+                        )
 
-    def add_edge_from_state(self, successor_state: graph_explorer.State,
-                            action: Command, cost: float) -> None:
-        if np.isinf(cost):  # unsuccessful maneuver step
-            next_node = self
-        else:
-            next_pos_to_move, next_pos_to_coop = action
-            next_tracker = copy.deepcopy(self._tracker)
-            next_tracker.move_vehicles(next_pos_to_move,
-                                       next_pos_to_coop)
-            next_node = TrafficStateNode(successor_state, next_tracker)
-        self.add_edge_from_node(next_node, action, cost)
-        # self._explored_actions[action] = Edge(next_node, action, cost)
-
-    def get_best_path(self) -> TrafficPath:
+    def get_best_path(
+            self, visited_nodes: dict[QuantizedState, TrafficStateNode]
+    ) -> TrafficPath:
         path = TrafficPath(self)
         current_node = self
         while current_node._best_cost_to_go != 0:
             try:
-                edge, next_node = current_node.exploit()
+                edge, next_node = current_node.exploit(visited_nodes)
                 path.add_edge(edge)
             except AttributeError:
                 print(f"There's no path from node {self.state} to a "
@@ -411,6 +495,18 @@ class TrafficStateNode(graph_explorer.Node):
                     ret_str += "|  |"
             ret_str += "\n"
         return ret_str[:-1]
+
+    def _create_successor_node(self, successor_state: QuantizedState,
+                               cost: float,
+                               action: Command) -> TrafficStateNode:
+        if np.isinf(cost):  # unsuccessful maneuver step
+            return self
+        else:
+            next_pos_to_move, next_pos_to_coop = action
+            next_tracker = copy.deepcopy(self._tracker)
+            next_tracker.move_vehicles(next_pos_to_move,
+                                       next_pos_to_coop)
+            return TrafficStateNode(successor_state, next_tracker)
 
     def _determine_next_maneuver_steps_no_coop(
             self, vehicle_group: vg.VehicleGroup,
@@ -477,7 +573,7 @@ class TrafficStateNode(graph_explorer.Node):
         if include_ld:
             ld = fsv.ShortSimulationVehicle(False)
             ld.set_name("ld")
-            leader_platoon._dest_lane_leader_id = ld.get_id()
+            leader_platoon._dest_lane_leader_id = ld.id
         else:
             ld = []
         all_vehicles = helper.order_values(lo, platoon_vehicles, ld)
@@ -490,16 +586,17 @@ class TrafficStateNode(graph_explorer.Node):
 
 
 class TrafficEdge(graph_explorer.Edge):
-    # _destination_node: TrafficStateNode
+    _destination_state: QuantizedState
     _action: Command
     _cost = float
 
-    def __init__(self, action: Command, cost: float):
-        super().__init__(action, cost)
+    def __init__(self, destination_state: QuantizedState,
+                 action: Command, cost: float):
+        super().__init__(destination_state, action, cost)
 
-    # @property
-    # def destination_node(self) -> TrafficStateNode:
-    #     return self._destination_node
+    @property
+    def destination_state(self) -> QuantizedState:
+        return self._destination_state
 
     @property
     def action(self) -> Command:
@@ -525,12 +622,15 @@ class TrafficPath(graph_explorer.Path):
             coop_order.append(maneuver_step[1])
         return lc_order, coop_order
 
-    def add_root(self, new_root: TrafficStateNode, edge: TrafficEdge) -> None:
+    def add_root(self, new_root: TrafficStateNode, edge: TrafficEdge,
+                 visited_nodes: dict[QuantizedState, TrafficStateNode]
+                 ) -> None:
         """
         :param new_root: New root node
         :param edge: Edge connecting the new root to the current root
+        :param visited_nodes: All visited nodes
         """
-        if new_root.take_action(edge.action)[1] != self.root_node:
+        if visited_nodes[edge.destination_state] != self.root_node:
             raise ValueError("The provided edge does not connected the new and "
                              "old roots.")
         self._root_node = new_root
@@ -593,7 +693,7 @@ def simulate_new(state: QuantizedState, action: Command, n_platoon: int,
     # transform a safe situation into a non-safe one.
     if vehicle_group.count_completed_lane_changes() == 0:
         vehicle_group.set_ids_must_change_lanes(
-            [veh.get_id() for veh in next_vehs_to_move])
+            [veh.id for veh in next_vehs_to_move])
 
     i = 0
     success = False

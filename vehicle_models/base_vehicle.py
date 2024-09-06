@@ -112,15 +112,6 @@ class BaseVehicle(ABC):
     def get_idx_of_state(cls, name: str) -> int:
         return cls._state_idx[name]
 
-    def get_id(self) -> int:
-        return self._id
-
-    def get_name(self) -> str:
-        return self._name
-
-    def get_is_connected(self) -> bool:
-        return self._is_connected
-
     @classmethod
     def get_n_states(cls) -> int:
         return len(cls._state_names)
@@ -137,13 +128,27 @@ class BaseVehicle(ABC):
     def get_input_names(cls) -> list[str]:
         return cls._input_names
 
-    def get_can_change_lanes(self) -> bool:
+    @property
+    def id(self) -> int:
+        return self._id
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def is_connected(self) -> bool:
+        return self._is_connected
+
+    @property
+    def can_change_lanes(self) -> bool:
         return self._can_change_lanes
 
     def get_ocp_interface(self) -> BaseVehicleInterface:
         return self._ocp_interface_type(self)
 
-    def get_free_flow_speed(self) -> float:
+    @property
+    def free_flow_speed(self) -> float:
         return self._free_flow_speed
 
     def get_initial_state(self) -> np.ndarray:
@@ -643,7 +648,7 @@ class BaseVehicle(ABC):
         # return False
         return (other_vehicle.has_lane_change_intention()
                 and other_vehicle.get_target_lane() == self.get_current_lane()
-                and (other_vehicle.get_id()
+                and (other_vehicle.id
                      != self._aided_vehicle_id[self._iter_counter-1])
                 and np.abs(other_vehicle.get_an_input_by_name('phi') > 1e-3))
 
@@ -722,8 +727,8 @@ class BaseVehicle(ABC):
     def _update_virtual_leader_time_headway(self, new_leader: BaseVehicle):
         pass
 
-    def _get_time_headway(self, other_vehicle):
-        if self._is_connected and other_vehicle.get_is_connected():
+    def _get_time_headway(self, other_vehicle: BaseVehicle):
+        if self._is_connected and other_vehicle.is_connected:
             return config.SAFE_CONNECTED_TIME_HEADWAY
         else:
             return config.SAFE_TIME_HEADWAY
@@ -1190,13 +1195,13 @@ class BaseVehicleInterface(ABC):
         return self.select_input_from_vector(optimal_inputs, 'phi')
 
     def get_id(self) -> int:
-        return self.base_vehicle.get_id()
+        return self.base_vehicle.id
 
     def get_name(self) -> str:
-        return self.base_vehicle.get_name()
+        return self.base_vehicle.name
 
     def get_free_flow_speed(self) -> float:
-        return self.base_vehicle.get_free_flow_speed()
+        return self.base_vehicle.free_flow_speed
 
     def get_phi_max(self) -> float:
         return self.base_vehicle.phi_max

@@ -587,7 +587,7 @@ class VehicleOptimalController:
             data = vehicle_groups[chosen_strategy].to_dataframe()
             if len(self._controlled_veh_ids) <= 1:
                 analysis.plot_constrained_lane_change(
-                    data, vehicles[self._center_veh_id].get_id())
+                    data, vehicles[self._center_veh_id].id)
             else:
                 analysis.plot_platoon_lane_change(data)
             analysis.plot_trajectory(data)
@@ -631,7 +631,7 @@ class VehicleOptimalController:
             data = vehicle_group.to_dataframe()
             if len(self._platoon_vehicle_pairs) < 1:
                 analysis.plot_constrained_lane_change(
-                    data, vehicles[self._center_veh_id].get_id())
+                    data, vehicles[self._center_veh_id].id)
             else:
                 analysis.plot_platoon_lane_change(data)
         return vehicle_group
@@ -662,7 +662,7 @@ class VehicleOptimalController:
             data = vehicle_group.to_dataframe()
             if len(self._platoon_vehicle_pairs) < 1:
                 analysis.plot_constrained_lane_change(
-                    data, vehicles[self._center_veh_id].get_id())
+                    data, vehicles[self._center_veh_id].id)
             else:
                 analysis.plot_platoon_lane_change(data)
         return vehicle_group

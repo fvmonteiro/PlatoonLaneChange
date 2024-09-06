@@ -7,7 +7,6 @@ from typing import Callable
 from platoon_functionalities import graph_explorer
 
 import configuration
-from platoon_functionalities.graph_explorer import Node, ActionBase
 
 State = configuration.QuantizedState
 Action2D = tuple[int, int]
@@ -44,27 +43,33 @@ class Node2D(graph_explorer.Node):
     def generate_possible_actions(self):
         self._possible_actions = [(1, 0), (0, 1), (-1, 0), (0, -1)]
 
-    def add_edge_from_state(self, successor_state: State, action: Action2D,
-                            cost: float) -> None:
+    def _create_successor_node(self, successor_state: State, cost: float,
+                               action: Action2D) -> Node2D:
         if successor_state == self.state:
-            next_node = self
+            return self
         else:
-            next_node = Node2D(successor_state, self._simulate)
-        self.add_edge_from_node(next_node, action, cost)
-        # self._explored_actions[action] = Edge2D(next_node, action, cost)
+            return Node2D(successor_state, self._simulate)
 
-    def add_edge_from_node(self, successor: Node2D, action: Action2D,
-                           cost: float) -> None:
-        if self == successor:
-            self._possible_actions.remove(action)
-        self._explored_actions[action] = (Edge2D(action, cost), successor)
+    # def add_edge_from_state(self, successor_state: State, action: Action2D,
+    #                         cost: float) -> None:
+    #     if successor_state == self.state:
+    #         next_node = self
+    #     else:
+    #         next_node = Node2D(successor_state, self._simulate)
+    #     self.add_edge_from_node(next_node, action, cost)
+
+    # def add_edge_from_node(self, successor: Node2D, action: Action2D,
+    #                        cost: float) -> None:
+    #     if self == successor:
+    #         self._possible_actions.remove(action)
+    #     self._explored_actions[action] = (Edge2D(action, cost), successor)
 
 
 class Edge2D(graph_explorer.Edge):
     _action: Action2D
 
-    def __init__(self, action: Action2D, cost: float):
-        super().__init__(action, cost)
+    def __init__(self, destination_state: State, action: Action2D, cost: float):
+        super().__init__(destination_state, action, cost)
 
     @property
     def action(self) -> Action2D:

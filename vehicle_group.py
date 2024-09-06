@@ -75,7 +75,7 @@ class VehicleGroup:
     def get_free_flow_speeds(self) -> np.ndarray:
         v_ff = np.zeros(self.get_n_vehicles())
         for veh_id in self.sorted_vehicle_ids:
-            v_ff[veh_id] = self.vehicles[veh_id].get_free_flow_speed()
+            v_ff[veh_id] = self.vehicles[veh_id].free_flow_speed
         return v_ff
 
     def yield_vehicles_in_order(self) -> Iterable[base.BaseVehicle]:
@@ -91,7 +91,7 @@ class VehicleGroup:
     def get_initial_state_by_vehicle(self) -> dict[str, np.ndarray]:
         initial_state = dict()
         for veh in self.vehicles.values():
-            initial_state[veh.get_name()] = veh.get_initial_state()
+            initial_state[veh.name] = veh.get_initial_state()
         return initial_state
 
     def get_state(self) -> np.ndarray:
@@ -103,7 +103,7 @@ class VehicleGroup:
     def get_state_by_vehicle(self) -> dict[str, np.ndarray]:
         initial_state = dict()
         for veh in self.vehicles.values():
-            initial_state[veh.get_name()] = veh.get_states()
+            initial_state[veh.name] = veh.get_states()
         return initial_state
 
     def get_current_time(self) -> float:
@@ -253,7 +253,7 @@ class VehicleGroup:
 
     def set_free_flow_speeds_by_name(self, values: Mapping[str, float]) -> None:
         for vehicle in self.vehicles.values():
-            vehicle.set_free_flow_speed(values[vehicle.get_name()])
+            vehicle.set_free_flow_speed(values[vehicle.name])
 
     def set_vehicles_initial_states(
             self, x0: Sequence[float], y0: Sequence[float],
@@ -277,7 +277,7 @@ class VehicleGroup:
             ids_or_names: Sequence[Union[int, str]] = None) -> None:
         if ids_or_names is None or len(ids_or_names) == 0:
             ids_or_names = [veh_id for veh_id, veh in self.vehicles.items()
-                            if veh.get_name()[0] == 'p']
+                            if veh.name[0] == 'p']
         if np.isscalar(lc_direction):
             lc_direction = [lc_direction] * len(ids_or_names)
         for i in range(len(ids_or_names)):
@@ -321,7 +321,7 @@ class VehicleGroup:
         """
         d = {}
         for veh_id in self.sorted_vehicle_ids:
-            d[self.vehicles[veh_id].get_name()] = values[veh_id]
+            d[self.vehicles[veh_id].name] = values[veh_id]
         return d
 
     def prepare_to_start_simulation(
@@ -360,11 +360,11 @@ class VehicleGroup:
             self.add_vehicle(veh)
 
     def add_vehicle(self, new_vehicle: base.BaseVehicle) -> None:
-        veh_id = new_vehicle.get_id()
+        veh_id = new_vehicle.id
         self.sorted_vehicle_ids.append(veh_id)
         self.vehicles[veh_id] = new_vehicle
-        self.name_to_id[new_vehicle.get_name()] = veh_id
-        if new_vehicle.get_can_change_lanes():
+        self.name_to_id[new_vehicle.name] = veh_id
+        if new_vehicle.can_change_lanes:
             self.lane_changing_vehicle_ids.append(veh_id)
 
     def populate_with_open_loop_copies(
@@ -506,7 +506,7 @@ class VehicleGroup:
             veh.update_virtual_leader(self.vehicles)
             if veh.has_lane_change_intention():
                 veh.check_surrounding_gaps_safety(self.vehicles)
-                if veh.get_id() in self._ids_must_change_lanes:
+                if veh.id in self._ids_must_change_lanes:
                     veh._is_lane_change_gap_suitable = True
 
         # Then, we check the new system mode
@@ -587,9 +587,9 @@ class VehicleGroup:
             ego_vehicle.update_surrounding_vehicles(self.vehicles)
             if detect_collision and ego_vehicle.detect_collision():
                 # TODO: raise error, warning?
-                veh1 = ego_vehicle.get_name()
+                veh1 = ego_vehicle.name
                 veh2 = self.vehicles[ego_vehicle.get_origin_lane_leader_id()
-                                     ].get_name()
+                                     ].name
                 print(f' ==== COLLISION DETECTED ====\n'
                       f't={self.get_current_time():.2f} between vehicles '
                       f'{veh1} and {veh2}')
@@ -604,7 +604,7 @@ class VehicleGroup:
             if vehicle.has_lane_change_intention():
                 if self._is_verbose:
                     print(
-                        f'Vehicle {vehicle.get_name()} did not finish the lane '
+                        f'Vehicle {vehicle.name} did not finish the lane '
                         f'change.\n(target lane: {vehicle.get_target_lane()}, '
                         f'current lane: {vehicle.get_current_lane()}.)')
                 return False
@@ -716,7 +716,7 @@ class ShortSimulationVehicleGroup(VehicleGroup):
         if has_ld:
             ld = fsv.ShortSimulationVehicle(False)
             ld.set_name("ld")
-            leader_platoon._dest_lane_leader_id = ld.get_id()
+            leader_platoon._dest_lane_leader_id = ld.id
         else:
             ld = []
         if has_fd:
@@ -770,7 +770,7 @@ class ShortSimulationVehicleGroup(VehicleGroup):
         dest_lane = self.get_vehicle_by_name("ld").get_current_lane()
         count = 0
         for veh in self.vehicles.values():
-            if veh.get_name()[0] == "p" and veh.get_current_lane() == dest_lane:
+            if veh.name[0] == "p" and veh.get_current_lane() == dest_lane:
                 count += 1
         return count
 

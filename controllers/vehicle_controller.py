@@ -180,7 +180,7 @@ class OptimalControl(VehicleController):
         t = self._ego_vehicle.get_current_time()
         if self._opt_controller.is_active(t):
             return self._opt_controller.get_input(
-                t, self._ego_vehicle.get_id())[self._external_input_idx['a']]
+                t, self._ego_vehicle.id)[self._external_input_idx['a']]
         else:
             return self._compute_closed_loop_acceleration(vehicles)
 
@@ -191,7 +191,7 @@ class OptimalControl(VehicleController):
         t = self._ego_vehicle.get_current_time()
         if self._opt_controller.is_active(t):
             return self._opt_controller.get_input(
-                t, self._ego_vehicle.get_id())[self._external_input_idx['phi']]
+                t, self._ego_vehicle.id)[self._external_input_idx['phi']]
         else:
             return self._lk_controller.compute_steering_wheel_angle()
 

@@ -56,7 +56,7 @@ class Platoon:
         return self.get_vehicle_by_position(0)
 
     def get_platoon_leader_id(self) -> int:
-        return self.get_platoon_leader().get_id()
+        return self.get_platoon_leader().id
 
     def get_last_platoon_vehicle(self) -> fsv.FourStateVehicle:
         """
@@ -68,7 +68,7 @@ class Platoon:
         return self.get_vehicle_by_position(-1)
 
     def get_vehicle_ids(self) -> list[int]:
-        return [veh.get_id() for veh in self.vehicles]
+        return [veh.id for veh in self.vehicles]
 
     def get_centered_vehicles_states(self) -> dict[str, np.ndarray]:
         """
@@ -85,20 +85,20 @@ class Platoon:
             veh_states = veh.get_states().copy()
             veh_states[x_idx] -= leader_x
             veh_states[y_idx] -= leader_y
-            states[veh.get_name()] = veh_states
+            states[veh.name] = veh_states
         return states
 
     def get_preceding_vehicle_id(self, veh_id: int) -> int:
         preceding_position = self._id_to_position_map[veh_id] - 1
         if preceding_position >= 0:
-            return self.vehicles[preceding_position].get_id()
+            return self.vehicles[preceding_position].id
         else:
             return -1
 
     def get_following_vehicle_id(self, veh_id: int) -> int:
         following_position = self._id_to_position_map[veh_id] + 1
         if following_position < len(self.vehicles):
-            return self.vehicles[following_position].get_id()
+            return self.vehicles[following_position].id
         else:
             return -1
 
@@ -129,7 +129,7 @@ class Platoon:
         # for veh in self.vehicles:
         #     if veh.has_lane_change_intention():
         #         desired_ld_id = self.get_vehicle_desired_dest_lane_leader_id(
-        #                 veh.get_id())
+        #                 veh.id)
         #         if desired_ld_id > -1:
         #             return desired_ld_id
         # print('Note: no platoon vehicle has a desired dest lane leader')
@@ -198,7 +198,7 @@ class Platoon:
         """
         if (len(self.vehicles) == 0
                 or new_vehicle.get_x() < self.vehicles[-1].get_x()):
-            self._id_to_position_map[new_vehicle.get_id()] = len(self.vehicles)
+            self._id_to_position_map[new_vehicle.id] = len(self.vehicles)
             self.vehicles.append(new_vehicle)
         else:
             # bisect.insort(self.vehicles, new_vehicle, key=lambda v: v.get_x())
@@ -208,7 +208,7 @@ class Platoon:
             self.vehicles = (self.vehicles[:idx] + [new_vehicle]
                              + self.vehicles[idx:])
             for i, veh in enumerate(self.vehicles):
-                self._id_to_position_map[veh.get_id()] = i
+                self._id_to_position_map[veh.id] = i
 
     def append_vehicle(self, new_vehicle: fsv.FourStateVehicle) -> None:
         """
@@ -217,7 +217,7 @@ class Platoon:
         :param new_vehicle:
         :return:
         """
-        self._id_to_position_map[new_vehicle.get_id()] = len(self.vehicles)
+        self._id_to_position_map[new_vehicle.id] = len(self.vehicles)
         self.vehicles.append(new_vehicle)
 
     def has_lane_change_started(self) -> bool:
